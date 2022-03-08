@@ -31,6 +31,8 @@ pub enum NodeType {
     Call { base: Box<ASTNode>, args: Vec<ASTNode> },
     FuncDef { func_name: String, arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
     Lambda { arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
+    Array { elements: Vec<ASTNode> },
+    Index { base: Box<ASTNode>, index: Box<ASTNode> }
 }
 
 macro_rules! expected_err {
@@ -414,6 +416,22 @@ pub fn parse_unit(
             check_tok!(RBracket else "}");
             ret!( NodeType::Block { code: Box::new(statements), not_safe: false } => start.0, span!(-1).1 );
         }
+        Token::LSqBracket => {
+
+            pos += 1;
+            let mut elements = vec![];
+            while_tok!(!= RSqBracket: {
+                parse!(parse_expr => let elem);
+                elements.push( elem );
+                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                    expected_err!("] or ,", tok!(0), span!(0), info )
+                }
+                skip_tok!(Comma);
+            });
+            ret!( NodeType::Array {
+                elements,
+            } => start.0, span!(-1).1 )
+        }
         Token::If => {
             pos += 1;
             parse!(parse_expr => let cond);
@@ -506,7 +524,7 @@ fn parse_value(
     parse!(parse_unit => let mut value);
     let start = value.span;
 
-    while matches!(tok!(0), Token::LParen) {
+    while matches!(tok!(0), Token::LParen | Token::LSqBracket) {
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
@@ -522,6 +540,18 @@ fn parse_value(
                 value = ASTNode {
                     node: NodeType::Call {
                         args,
+                        base: Box::new(value),
+                    },
+                    span: ( start.0, span!(-1).1 )
+                }
+            },
+            Token::LSqBracket => {
+                pos += 1;
+                parse!(parse_expr => let index);
+                check_tok!(RSqBracket else "]");
+                value = ASTNode {
+                    node: NodeType::Index {
+                        index: Box::new(index),
                         base: Box::new(value),
                     },
                     span: ( start.0, span!(-1).1 )

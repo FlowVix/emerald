@@ -131,6 +131,21 @@ impl Memory {
             None => panic!("bad value fuck you"),
         }
     }
+    pub fn propagate_mut(
+        &mut self,
+        id: MemoryPos,
+    ) {
+        let mutable = self.get(id).mutable;
+        match self.get(id).value.clone() {
+            Value::Array(arr) => {
+                for i in arr {
+                    self.remut(i, mutable);
+                    self.propagate_mut(i);
+                }
+            }
+            _ => (),
+        }
+    }
     // pub fn protect(&mut self, value: Value) -> MemoryPos {
     //     let pos = self.insert( value );
     //     self.protected
@@ -190,6 +205,9 @@ macro_rules! interpreter_util {
 macro_rules! area {
     ($source:expr, $area:expr) => {
         CodeArea {source: $source, range: $area}
+    };
+    ($source:expr, $start:expr, $end:expr) => {
+        CodeArea {source: $source, range: ($start, $end)}
     };
 }
 
@@ -369,6 +387,7 @@ pub fn execute(
                 Some(*mutable),
                 Some(area!(info.source.clone(), start_node.span))
             );
+            memory.propagate_mut(value_id);
             scopes.set_var(scope_id, var_name.to_string(), value_id);
             Ok(initial_id)
         }
@@ -484,6 +503,51 @@ pub fn execute(
                 area!(info.source.clone(), start_node.span)
             ) )
         }
+        NodeType::Array { elements } => {
+            let mut ids = vec![];
+            for i in elements {
+                ids.push( execute!(i => scope_id) );
+            }
+            Ok( memory.insert(
+                Value::Array(ids),
+                false,
+                area!(info.source.clone(), start_node.span)
+            ) )
+        }
+        NodeType::Index { base, index } => {
+            let base_id = execute!(base => scope_id);
+            match &memory.get(base_id).value.clone() {
+                Value::Array(arr) => {
+                    let index_id = execute!(index => scope_id);
+                    match &memory.get(index_id).value.clone() {
+                        Value::Number(n) => {
+                            let mut id = *n as isize;
+                            id = if id < 0 { arr.len() as isize + id } else {id};
+                            match arr.get(id as usize) {
+                                Some(i) => Ok(*i),
+                                None => return Err( RuntimeError::IndexOutOfBounds {
+                                    index: id,
+                                    length: arr.len(),
+                                    area: area!(info.source.clone(), start_node.span),
+                                } ),
+                            }
+                        }
+                        other => return Err( RuntimeError::TypeMismatch {
+                            expected: "number".to_string(),
+                            found: format!("{}", other.type_str()),
+                            area: area!(info.source.clone(), index.span),
+                            defs: vec![(other.type_str(), memory.get(index_id).def_area.clone())],
+                        } )
+                    }
+                }
+                other => return Err( RuntimeError::TypeMismatch {
+                    expected: "array".to_string(),
+                    found: format!("{}", other.type_str()),
+                    area: area!(info.source.clone(), base.span),
+                    defs: vec![(other.type_str(), memory.get(base_id).def_area.clone())],
+                } )
+            }
+        }
         NodeType::Call { base, args } => {
             let base_id = execute!(base => scope_id);
             
@@ -494,7 +558,7 @@ pub fn execute(
                             let mut out_str = String::new();
                             for i in args {
                                 let arg_id = execute!(i => scope_id);
-                                out_str += &memory.get(arg_id).value.to_str();
+                                out_str += &memory.get(arg_id).value.to_str(memory, &vec![]);
                             }
                             println!("{}", out_str);
                             Ok (memory.insert(

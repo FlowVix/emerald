@@ -144,7 +144,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     if print_return {
                         match &memory.get(pos).value {
                             Value::Null => (),
-                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str())))
+                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&memory, &vec![]))))
                         }
                     }
                     // for i in &memory.register {

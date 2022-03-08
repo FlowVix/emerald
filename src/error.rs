@@ -44,6 +44,11 @@ pub enum RuntimeError {
         takes: usize,
         header_area: CodeArea,
         call_area: CodeArea,
+    },
+    IndexOutOfBounds {
+        index: isize,
+        length: usize,
+        area: CodeArea,
     }
 }
 
@@ -242,6 +247,18 @@ impl ToReport for RuntimeError {
                 labels: vec![
                     (header_area.clone(), format!("Function defined to take {} arguments here", takes.fg(a))),
                     (call_area.clone(), format!("{} arguments were provided here", provided.fg(b)))
+                ],
+                note: None,
+            },
+            RuntimeError::IndexOutOfBounds {
+                index,
+                length,
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("Index {} is out of bounds", index),
+                labels: vec![
+                    (area.clone(), format!("Index provided is {} but length is {}", index.fg(a), length.fg(b)))
                 ],
                 note: None,
             },

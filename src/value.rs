@@ -1,4 +1,4 @@
-use crate::{parser::ASTNode, interpreter::ScopePos, CodeArea};
+use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory}, CodeArea};
 
 
 
@@ -9,7 +9,8 @@ pub enum Value {
     String(String),
     Null,
     Builtin(String),
-    Function { arg_names: Vec<String>, code: Box<ASTNode>, parent_scope: ScopePos, arg_areas: Vec<CodeArea>, header_area: CodeArea }
+    Function { arg_names: Vec<String>, code: Box<ASTNode>, parent_scope: ScopePos, arg_areas: Vec<CodeArea>, header_area: CodeArea },
+    Array(Vec<MemoryPos>),
 }
 
 impl Value {
@@ -22,10 +23,11 @@ impl Value {
             Value::Null => "null".to_string(),
             Value::Builtin(_) => "builtin".to_string(),
             Value::Function{..} => "function".to_string(),
+            Value::Array(_) => "array".to_string(),
         }
     }
 
-    pub fn to_str(&self) -> String {
+    pub fn to_str(&self, memory: &Memory, visited: &Vec<MemoryPos>) -> String {
         match self {
             Value::Number(n) => n.to_string(),
             Value::Boolean(b) => b.to_string(),
@@ -33,6 +35,12 @@ impl Value {
             Value::Null => "null".to_string(),
             Value::Builtin(name) => format!("<builtin: {}>", name),
             Value::Function {arg_names, ..} => format!("({}) => ...", arg_names.join(", ")),
+            Value::Array(arr) => {
+                let mut out_str = "[".to_string() + &arr.into_iter().map(
+                    |i| memory.get(*i).value.to_str(memory, visited)
+                ).collect::<Vec<String>>().join(", ") + "]";
+                out_str
+            },
         }
     }
 
