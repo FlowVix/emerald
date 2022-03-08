@@ -34,6 +34,10 @@ pub enum Token {
     #[token("!=")]
     NotEq,
 
+    
+    #[token("=>")]
+    FatArrow,
+
     // #[token("&&")]
     // And,
     // #[token("||")]
@@ -147,7 +151,7 @@ pub enum Token {
     Ident(String),
 
     #[error]
-    #[regex(r"[ \t\f\n]+", logos::skip)]
+    #[regex(r"[ \t\f\n\r]+", logos::skip)]
     Error,
 
     Eof,
@@ -168,6 +172,7 @@ impl Token {
             Token::Null => "null",
             Token::Eq => "==",
             Token::NotEq => "!=",
+            Token::FatArrow => "=>",
             // Token::And => "&&",
             // Token::Or => "||",
             // Token::Not => "!",
@@ -194,7 +199,7 @@ impl Token {
             Token::RBracket => "}",
             // Token::LSqBracket => "[",
             // Token::RSqBracket => "]",
-            // Token::Pipe => "|",
+            // Token::Pipe => 
             Token::Comma => ",",
             // Token::Colon => ":",
             Token::If => "if",
@@ -213,7 +218,7 @@ impl Token {
             Token::Eol => ";",
             // Token::TypeName(_) => "type name",
             Token::Ident(_) => "identifier",
-            Token::Error => " wtf ",
+            Token::Error => "what the fuck is that",
             Token::Eof => "end of file",
             // Token::Dot => ".",
             // Token::DoubleColon => "::",

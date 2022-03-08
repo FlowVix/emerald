@@ -15,6 +15,11 @@ pub enum SyntaxError {
         arg_name: String,
         first_used: CodeArea,
         used_again: CodeArea,
+    },
+    UnmatchedChar {
+        not_found: String,
+        for_char: String,
+        area: CodeArea,
     }
 }
 
@@ -158,6 +163,18 @@ impl ToReport for SyntaxError {
                 labels: vec![
                     (first_used.clone(), format!("Argument name first used here")),
                     (used_again.clone(), format!("Used again here")),
+                ],
+                note: None,
+            },
+            SyntaxError::UnmatchedChar {
+                for_char,
+                not_found,
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("No matching '{}' found for this '{}'", not_found, for_char),
+                labels: vec![
+                    (area.clone(), format!("'{}' used here", for_char.fg(a)))
                 ],
                 note: None,
             },

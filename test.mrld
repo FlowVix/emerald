@@ -1,0 +1,23 @@
+
+func decorate(f) {
+    let inner = () => {
+        print("start");
+        f();
+        print("end");
+    };
+    inner;
+};
+
+
+let shart = () => {
+    print("i" + " fucking", " sharted");
+};
+
+
+shart();
+
+let shart = decorate(shart);
+
+print("\n\n\n\n");
+
+shart();

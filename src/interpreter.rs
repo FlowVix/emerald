@@ -471,6 +471,19 @@ pub fn execute(
                 None,
             ) )
         }
+        NodeType::Lambda { arg_names, code, arg_areas, header_area } => {
+            Ok( memory.insert(
+                Value::Function {
+                    arg_names: arg_names.clone(),
+                    code: code.clone(),
+                    parent_scope: scope_id,
+                    header_area: header_area.clone(),
+                    arg_areas: arg_areas.clone()
+                },
+                false,
+                area!(info.source.clone(), start_node.span)
+            ) )
+        }
         NodeType::Call { base, args } => {
             let base_id = execute!(base => scope_id);
             
@@ -505,7 +518,7 @@ pub fn execute(
                         )
                     }
 
-                    let derived = scopes.derive(scope_id);
+                    let derived = scopes.derive(*parent_scope);
                     for ((arg, name), area) in args.iter().zip(arg_names).zip(arg_areas) {
                         let arg_id = execute!(arg => scope_id);
                         let arg_id = memory.clone_id(arg_id, Some(false), Some(area.clone()));

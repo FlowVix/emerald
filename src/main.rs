@@ -7,7 +7,7 @@ mod interpreter;
 
 mod error;
 
-use std::{io::{self, Write}, collections::HashMap};
+use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
 use ansi_term;
 use ariadne::{Source, Cache};
@@ -23,15 +23,9 @@ use crate::parser::parse;
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum EmeraldSource {
     String(String),
+    File(PathBuf),
 }
 
-impl EmeraldSource {
-    pub fn name(&self) -> String {
-        match self {
-            EmeraldSource::String(_) => "eval".to_string(),
-        }
-    }
-}
 
 
 #[derive(Debug, Clone)]
@@ -69,6 +63,7 @@ impl ariadne::Cache<EmeraldSource> for EmeraldCache {
                 std::collections::hash_map::Entry::Vacant(e) => e.insert(
                     Source::from(match id {
                         EmeraldSource::String(s) => s.clone(),
+                        EmeraldSource::File(path) => fs::read_to_string(path).map_err(|e| Box::new(e) as _)?,
                     })
                 ),
             }
@@ -78,6 +73,7 @@ impl ariadne::Cache<EmeraldSource> for EmeraldCache {
     fn display<'a>(&self, id: &'a EmeraldSource) -> Option<Box<dyn std::fmt::Display + 'a>> {
         match id {
             EmeraldSource::String(_) => Some(Box::new("eval")),
+            EmeraldSource::File(f) => Some(Box::new(f.display())),
         }
     }
 }
@@ -91,7 +87,7 @@ impl Default for EmeraldCache {
 
 
 
-fn run(code: String) -> bool {
+fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     let mut tokens_iter = lexer::Token
         ::lexer(&code);
     let mut tokens = vec![];
@@ -109,12 +105,11 @@ fn run(code: String) -> bool {
     }
     tokens.push((
         lexer::Token::Eof,
-        (code.len(), code.len() + 1)
+        (code.len()-1, code.len())
     ));
 
     // println!("{:?}", tokens);
 
-    let source = EmeraldSource::String(code.clone());
     let mut cache = EmeraldCache::default();
     cache.fetch(&source);
 
@@ -124,14 +119,17 @@ fn run(code: String) -> bool {
             let mut memory = Memory::new();
             let mut scopes = ScopeList::new();
             
-            scopes.set_var(0, "print".to_string(), memory.insert(
-                Value::Builtin("print".to_string()),
-                false,
-                CodeArea {
-                    source: source.clone(),
-                    range: (0, 0)
-                },
-            ));
+            for i in vec!["print"] {
+                scopes.set_var(0, i.to_string(), memory.insert(
+                    Value::Builtin(i.to_string()),
+                    false,
+                    CodeArea {
+                        source: source.clone(),
+                        range: (0, 0)
+                    },
+                ));
+            }
+
 
             let result = execute(
                 &node,
@@ -143,9 +141,11 @@ fn run(code: String) -> bool {
 
             match result {
                 Ok(pos) => {
-                    match &memory.get(pos).value {
-                        Value::Null => (),
-                        other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str())))
+                    if print_return {
+                        match &memory.get(pos).value {
+                            Value::Null => (),
+                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str())))
+                        }
                     }
                     // for i in &memory.register {
                     //     println!("{}: {:?}", i.0, i.1)
@@ -184,34 +184,43 @@ fn run(code: String) -> bool {
 fn main() {
     print!("\x1B[2J\x1B[1;1H");
 
-    println!("{}", ansi_term::Color::RGB(30, 247, 88).bold().paint("
+
+    if false {
+        let mut buf = PathBuf::new();
+        buf.push("test.mrld");
+        let code = fs::read_to_string(buf.clone()).unwrap();
+        run(code, EmeraldSource::File(buf), false);
+    } else {
+        println!("{}", ansi_term::Color::RGB(30, 247, 88).bold().paint("
+        
+        ╭────────────────────────────────────╮
+        │       Emerald v0.0.1 Console       │
+        ╰────────────────────────────────────╯
     
-    ╭────────────────────────────────────╮
-    │       Emerald v0.0.1 Console       │
-    ╰────────────────────────────────────╯
-
-"));
-
-    let mut repl_code = String::new();
-
-
-    loop {
-        print!("{}", ansi_term::Color::RGB(100, 100, 100).bold().paint("\n>>> "));
-        io::stdout().flush().unwrap();
-
-        let mut input_str = String::new();
-        io::stdin()
-            .read_line(&mut input_str)
-            .expect("Failed to read line");
+    "));
+    
+        let mut repl_code = String::new();
         
-        let input_str = input_str.replace("\r", "");
-        let mut input_str = input_str.chars();
-        input_str.next_back();
-        if run(repl_code.clone() + input_str.as_str()) {
-            repl_code += input_str.as_str();
-            repl_code += "\n";
+    
+        loop {
+            print!("{}", ansi_term::Color::RGB(100, 100, 100).bold().paint("\n>>> "));
+            io::stdout().flush().unwrap();
+    
+            let mut input_str = String::new();
+            io::stdin()
+                .read_line(&mut input_str)
+                .expect("Failed to read line");
+            
+            let input_str = input_str.replace("\r", "");
+            let mut input_str = input_str.chars();
+            input_str.next_back();
+            if run(repl_code.clone() + input_str.as_str(), EmeraldSource::String(repl_code.clone() + input_str.as_str()), true) {
+                repl_code += input_str.as_str();
+                repl_code += "\n";
+            }
+    
+            
         }
-
-        
     }
+
 }

@@ -30,6 +30,7 @@ pub enum NodeType {
     Loop { code: Box<ASTNode> },
     Call { base: Box<ASTNode>, args: Vec<ASTNode> },
     FuncDef { func_name: String, arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
+    Lambda { arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
 }
 
 macro_rules! expected_err {
@@ -46,7 +47,7 @@ macro_rules! parse_util {
     ($tokens:expr, $pos:expr, $info:expr) => {
         #[allow(unused_macros)]
         macro_rules! tok {
-            ($index:literal) => {
+            ($index:expr) => {
                 &$tokens[{
                     let le_index = (($pos as i32) + $index);
                     if le_index < 0 {0} else {le_index}
@@ -55,7 +56,7 @@ macro_rules! parse_util {
         }
         #[allow(unused_macros)]
         macro_rules! span {
-            ($index:literal) => {
+            ($index:expr) => {
                 $tokens[{
                     let le_index = (($pos as i32) + $index);
                     if le_index < 0 {0} else {le_index}
@@ -145,6 +146,18 @@ macro_rules! parse_util {
             (!= $token:ident: $code:block) => {
                 match tok!(0) {
                     Token::$token => (),
+                    _ => $code,
+                }
+            };
+            (== $token:ident: $code:block else $else_code:block) => {
+                match tok!(0) {
+                    Token::$token => $code,
+                    _ => $else_code,
+                }
+            };
+            (!= $token:ident: $code:block else $else_code:block) => {
+                match tok!(0) {
+                    Token::$token => $else_code,
                     _ => $code,
                 }
             };
@@ -299,9 +312,70 @@ pub fn parse_unit(
         },
         Token::LParen => {
             pos += 1;
-            parse!(parse_expr => let value);
-            check_tok!(RParen else ")");
-            ret!( value.node => start.0, span!(-1).1 );
+
+            let mut i = 0;
+            let mut depth = 1;
+            let prev_pos = pos;
+
+            loop {
+                match tok!(i) {
+                    Token::LParen => depth += 1,
+                    Token::RParen => { depth -= 1; if depth == 0 {i += 1; break;} },
+                    Token::Eof => return Err( SyntaxError::UnmatchedChar {
+                        for_char: "(".to_string(),
+                        not_found: ")".to_string(),
+                        area: CodeArea {
+                            source: info.source.clone(),
+                            range: start,
+                        }
+                    } ),
+                    _ => (),
+                }
+                i += 1;
+            }
+
+            match tok!(i) {
+                Token::FatArrow => {
+                    let header_start = span!(-1).0;
+
+                    let mut arg_names = vec![];
+                    let mut arg_areas = vec![];
+                    while_tok!(!= RParen: {
+                        check_tok!(Ident(arg_name) else "argument name");
+                        arg_areas.push(CodeArea {
+                            source: info.source.clone(),
+                            range: span!(-1),
+                        });
+                        if let Some(id) = arg_names.clone().into_iter().position(|e| e == arg_name) {
+                            return Err( SyntaxError::DuplicateArg {
+                                arg_name,
+                                first_used: arg_areas[id].clone(),
+                                used_again: arg_areas.last().unwrap().clone(),
+                            } )
+                        }
+                        arg_names.push(arg_name);
+                        if !matches!(tok!(0), Token::RParen | Token::Comma) {
+                            expected_err!(") or ,", tok!(0), span!(0), info )
+                        }
+                        skip_tok!(Comma);
+                    });
+                    let header_end = span!(-1).1;
+                    let header_area = CodeArea {
+                        source: info.source.clone(),
+                        range: (header_start, header_end),
+                    };
+                    pos += 1;
+                    parse!(parse_expr => let code);
+                    ret!( NodeType::Lambda { arg_names, arg_areas, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
+                },
+                _ => {
+                    parse!(parse_expr => let value);
+                    check_tok!(RParen else ")");
+                    ret!( value.node => start.0, span!(-1).1 );
+                }
+            }
+
+
         }
         Token::Let => {
             pos += 1;
@@ -318,6 +392,20 @@ pub fn parse_unit(
         }
         Token::Ident(name) => {
             pos += 1;
+
+            match tok!(0) {
+                Token::FatArrow => {
+                    pos += 1;
+                    let arg_area = CodeArea {
+                        source: info.source.clone(),
+                        range: start,
+                    };
+                    parse!(parse_expr => let code);
+                    ret!( NodeType::Lambda { arg_names: vec![name.to_string()], arg_areas: vec![arg_area.clone()], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
+                }
+                _ => (),
+            }
+
             ret!( NodeType::Var { var_name: name.clone() } => start );
         }
         Token::LBracket => {
