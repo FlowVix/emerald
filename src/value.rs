@@ -71,6 +71,7 @@ pub mod value_ops {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1 + n2)),
             (Value::String(s1), Value::String(s2)) => Ok(Value::String(s1.to_string() + s2)),
+            (Value::Array(a1), Value::Array(a2)) => Ok(Value::Array(a1.iter().chain(a2).map(|f| *f).collect())),
             
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {

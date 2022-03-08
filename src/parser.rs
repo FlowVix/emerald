@@ -410,6 +410,15 @@ pub fn parse_unit(
 
             ret!( NodeType::Var { var_name: name.clone() } => start );
         }
+        Token::FatArrow => {
+            pos += 1;
+            let header_area = CodeArea {
+                source: info.source.clone(),
+                range: start,
+            };
+            parse!(parse_expr => let code);
+            ret!( NodeType::Lambda { arg_names: vec![], arg_areas: vec![], header_area, code: Box::new(code) } => start.0, span!(-1).1 );
+        }
         Token::LBracket => {
             pos += 1;
             parse!(parse_statements => let statements);
