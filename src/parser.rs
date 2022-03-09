@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{CodeArea, lexer::Token, value::Value, error::{SyntaxError, RuntimeError}, EmeraldSource, parser};
 
 
@@ -21,7 +23,7 @@ pub enum NodeType {
     Value { value: Value },
     Op { left: Box<ASTNode>, op: Token, right: Box<ASTNode> },
     Unary { op: Token, node: Box<ASTNode> },
-    Declaration { var_name: String, mutable: bool, value: Box<ASTNode> },
+    Declaration { var_name: String, value: Box<ASTNode> },
     Var { var_name: String },
     StatementList { statements: Vec<ASTNode> },
     Block { code: Box<ASTNode>, not_safe: bool },
@@ -32,7 +34,9 @@ pub enum NodeType {
     FuncDef { func_name: String, arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
     Lambda { arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
     Array { elements: Vec<ASTNode> },
-    Index { base: Box<ASTNode>, index: Box<ASTNode> }
+    Index { base: Box<ASTNode>, index: Box<ASTNode> },
+    Dictionary { map: HashMap<String, ASTNode> },
+    Member { base: Box<ASTNode>, member: String },
 }
 
 macro_rules! expected_err {
@@ -113,6 +117,14 @@ macro_rules! parse_util {
         macro_rules! skip_tok {
             ($token:ident) => {
                 if matches!(tok!(0), Token::$token) {
+                    $pos += 1;
+                }
+            };
+        }
+        #[allow(unused_macros)]
+        macro_rules! skip_toks {
+            ($token:ident) => {
+                while matches!(tok!(0), Token::$token) {
                     $pos += 1;
                 }
             };
@@ -381,16 +393,16 @@ pub fn parse_unit(
         }
         Token::Let => {
             pos += 1;
-            let mut mutable = false;
-            if_tok!(== Mut: {
-                mutable = true;
-                pos += 1;
-            });
+            // let mut mutable = false;
+            // if_tok!(== Mut: {
+            //     mutable = true;
+            //     pos += 1;
+            // });
             check_tok!(Ident(var_name) else "variable name");
             check_tok!(Assign else "=");
             parse!(parse_expr => let value);
             // println!("{} {}", var_name, mutable);
-            ret!( NodeType::Declaration { var_name, mutable, value: Box::new(value) } => start.0, span!(-1).1 );
+            ret!( NodeType::Declaration { var_name, value: Box::new(value) } => start.0, span!(-1).1 );
         }
         Token::Ident(name) => {
             pos += 1;
@@ -421,13 +433,37 @@ pub fn parse_unit(
         }
         Token::LBracket => {
             pos += 1;
-            parse!(parse_statements => let statements);
-            check_tok!(RBracket else "}");
-            ret!( NodeType::Block { code: Box::new(statements), not_safe: false } => start.0, span!(-1).1 );
+
+            if matches!(tok!(0), Token::RBracket) {
+                pos += 1;
+                ret!( NodeType::Dictionary {map: HashMap::new()} => start );
+            }
+
+            if matches!(tok!(0), Token::Ident(_)) && matches!(tok!(1), Token::Colon) {
+                let mut map = HashMap::new();
+                while_tok!(!= RBracket: {
+                    check_tok!(Ident(key) else "key name");
+                    check_tok!(Colon else ":");
+
+                    parse!(parse_expr => let value);
+
+                    map.insert(key, value);
+                    if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                        expected_err!("} or ,", tok!(0), span!(0), info )
+                    }
+                    skip_tok!(Comma);
+                });
+                ret!( NodeType::Dictionary {map} => start );
+            } else {
+                parse!(parse_statements => let statements);
+                check_tok!(RBracket else "}");
+                ret!( NodeType::Block { code: Box::new(statements), not_safe: false } => start.0, span!(-1).1 );
+            }
+
         }
         Token::LSqBracket => {
-
             pos += 1;
+
             let mut elements = vec![];
             while_tok!(!= RSqBracket: {
                 parse!(parse_expr => let elem);
@@ -533,7 +569,7 @@ fn parse_value(
     parse!(parse_unit => let mut value);
     let start = value.span;
 
-    while matches!(tok!(0), Token::LParen | Token::LSqBracket) {
+    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot) {
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
@@ -561,6 +597,17 @@ fn parse_value(
                 value = ASTNode {
                     node: NodeType::Index {
                         index: Box::new(index),
+                        base: Box::new(value),
+                    },
+                    span: ( start.0, span!(-1).1 )
+                }
+            },
+            Token::Dot => {
+                pos += 1;
+                check_tok!(Ident(member_name) else "member name");
+                value = ASTNode {
+                    node: NodeType::Member {
+                        member: member_name,
                         base: Box::new(value),
                     },
                     span: ( start.0, span!(-1).1 )
@@ -637,9 +684,10 @@ fn parse_statement(
     parse_util!(tokens, pos, info);
 
     parse!(parse_expr => let value);
-    // if !matches!(tok!(-1), Token::RBracket) {
+    if !matches!(tok!(-1), Token::RBracket) {
         check_tok!(Eol else ';');
-    // }
+    }
+    skip_toks!(Eol);
 
     Ok((value, pos))
 

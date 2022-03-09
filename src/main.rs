@@ -107,7 +107,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     }
     tokens.push((
         lexer::Token::Eof,
-        (code.len()-1, code.len())
+        (code.len(), code.len())
     ));
 
     // println!("{:?}", tokens);
@@ -124,7 +124,6 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             for i in builtin_names() {
                 scopes.set_var(0, i.clone(), memory.insert(
                     Value::Builtin(i),
-                    false,
                     CodeArea {
                         source: source.clone(),
                         range: (0, 0)
@@ -146,7 +145,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     if print_return {
                         match &memory.get(pos).value {
                             Value::Null => (),
-                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&memory, &vec![]))))
+                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&memory, &mut vec![]))))
                         }
                     }
                     // println!("{}", memory.register.len());
@@ -188,7 +187,7 @@ fn main() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
 
-    if false {
+    if true {
         let mut buf = PathBuf::new();
         buf.push("test.mrld");
         let code = fs::read_to_string(buf.clone()).unwrap();

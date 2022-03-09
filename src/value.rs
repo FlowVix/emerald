@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory}, CodeArea};
 
 
@@ -22,6 +24,7 @@ pub enum Value {
     Builtin(String),
     Function(Function),
     Array(Vec<MemoryPos>),
+    Dictionary(HashMap<String, MemoryPos>),
 }
 
 impl Value {
@@ -35,10 +38,11 @@ impl Value {
             Value::Builtin(_) => "builtin".to_string(),
             Value::Function{..} => "function".to_string(),
             Value::Array(_) => "array".to_string(),
+            Value::Dictionary(_) => "dict".to_string(),
         }
     }
 
-    pub fn to_str(&self, memory: &Memory, visited: &Vec<MemoryPos>) -> String {
+    pub fn to_str<'a>(&'a self, memory: &'a Memory, visited: &mut Vec<&'a Value>) -> String {
         match self {
             Value::Number(n) => n.to_string(),
             Value::Boolean(b) => b.to_string(),
@@ -47,9 +51,25 @@ impl Value {
             Value::Builtin(name) => format!("<builtin: {}>", name),
             Value::Function( Function {arg_names, ..} )=> format!("({}) => ...", arg_names.join(", ")),
             Value::Array(arr) => {
-                let mut out_str = "[".to_string() + &arr.into_iter().map(
+                if visited.contains(&self) {
+                    return "[...]".to_string()
+                }
+                visited.push( self );
+                let out_str = "[".to_string() + &arr.into_iter().map(
                     |i| memory.get(*i).value.to_str(memory, visited)
                 ).collect::<Vec<String>>().join(", ") + "]";
+                visited.pop();
+                out_str
+            },
+            Value::Dictionary(map) => {
+                if visited.contains(&self) {
+                    return "{...}".to_string()
+                }
+                visited.push( self );
+                let out_str = "{".to_string() + &map.into_iter().map(
+                    |(k, v)| format!("{}: {}", k, memory.get(*v).value.to_str(memory, visited))
+                ).collect::<Vec<String>>().join(", ") + "}";
+                visited.pop();
                 out_str
             },
         }
@@ -85,10 +105,10 @@ pub mod value_ops {
             (Value::Array(a1), Value::Array(a2)) => {
                 let mut new_vec = vec![];
                 for i in a1 {
-                    new_vec.push( memory.clone_id(*i, Some(false), Some(area.clone())) );
+                    new_vec.push( memory.clone_id(*i, Some(area.clone())) );
                 }
                 for i in a2 {
-                    new_vec.push( memory.clone_id(*i, Some(false), Some(area.clone())) );
+                    new_vec.push( memory.clone_id(*i, Some(area.clone())) );
                 }
                 Ok(Value::Array(new_vec))
             },

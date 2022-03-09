@@ -101,12 +101,12 @@ pub enum Token {
     // Pipe,
     #[token(",")]
     Comma,
-    // #[token(".")]
-    // Dot,
+    #[token(".")]
+    Dot,
     // #[token("::")]
     // DoubleColon,
-    // #[token(":")]
-    // Colon,
+    #[token(":")]
+    Colon,
 
     #[token("if")]
     If,
@@ -124,8 +124,8 @@ pub enum Token {
     
     #[token("let")]
     Let,
-    #[token("mut")]
-    Mut,
+    // #[token("mut")]
+    // Mut,
     #[token("func")]
     Func,
 
@@ -201,11 +201,11 @@ impl Token {
             Token::RSqBracket => "]",
             // Token::Pipe => 
             Token::Comma => ",",
-            // Token::Colon => ":",
+            Token::Colon => ":",
             Token::If => "if",
             Token::Else => "else",
             Token::Let => "let",
-            Token::Mut => "mut",
+            // Token::Mut => "mut",
             Token::Func => "func",
             Token::While => "while",
             Token::Loop => "loop",
@@ -220,7 +220,7 @@ impl Token {
             Token::Ident(_) => "identifier",
             Token::Error => "what the fuck is that",
             Token::Eof => "end of file",
-            // Token::Dot => ".",
+            Token::Dot => ".",
             // Token::DoubleColon => "::",
         }
     }

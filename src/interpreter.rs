@@ -22,7 +22,6 @@ pub type ScopePos = usize;
 #[derive(Debug, Clone)]
 pub struct StoredValue {
     pub value: Value,
-    pub mutable: bool,
     pub def_area: CodeArea,
 }
 
@@ -69,13 +68,11 @@ impl Memory {
     pub fn insert(
         &mut self,
         value: Value,
-        mutable: bool,
         def_area: CodeArea,
     ) -> MemoryPos {
         self.counter += 1;
         self.register.insert( self.counter, StoredValue {
             value,
-            mutable,
             def_area,
         } );
         self.counter
@@ -84,16 +81,14 @@ impl Memory {
         &mut self,
         id: MemoryPos,
         value: Value,
-        mutable: Option<bool>,
         def_area: Option<CodeArea>,
     ) {
-        let (v_m, v_a) = {
+        let v_a = {
             let val = self.get(id);
-            (val.mutable, val.def_area.clone())
+            val.def_area.clone()
         };
         self.register.insert( id, StoredValue {
             value,
-            mutable: if let Some(m) = mutable {m} else {v_m},
             def_area: if let Some(m) = def_area {m} else {v_a},
         } );
     }
@@ -107,25 +102,16 @@ impl Memory {
     pub fn clone_id(
         &mut self,
         id: MemoryPos,
-        mutable: Option<bool>,
         def_area: Option<CodeArea>,
     ) -> MemoryPos {
-        let (v_v, v_m, v_a) = {
+        let (v_v, v_a) = {
             let val = self.get(id);
-            (val.value.clone(), val.mutable, val.def_area.clone())
+            (val.value.clone(), val.def_area.clone())
         };
         self.insert(
             v_v,
-            if let Some(m) = mutable {m} else {v_m},
             if let Some(a) = def_area {a} else {v_a},
         )
-    }
-    pub fn remut(
-        &mut self,
-        id: MemoryPos,
-        mutable: bool,
-    ) {
-        self.register.get_mut(&id).unwrap().mutable = mutable;
     }
     pub fn get(&self, id: MemoryPos) -> &StoredValue {
         return match self.register.get(&id) {
@@ -133,21 +119,7 @@ impl Memory {
             None => panic!("bad value fuck you"),
         }
     }
-    pub fn propagate_mut(
-        &mut self,
-        id: MemoryPos,
-    ) {
-        let mutable = self.get(id).mutable;
-        match self.get(id).value.clone() {
-            Value::Array(arr) => {
-                for i in arr {
-                    self.remut(i, mutable);
-                    self.propagate_mut(i);
-                }
-            }
-            _ => (),
-        }
-    }
+
     pub fn propagate_def(
         &mut self,
         id: MemoryPos,
@@ -217,7 +189,6 @@ macro_rules! interpreter_util {
                     let id = execute($node, $scope_id, $memory, $scopes, $info)?;
                     $memory.clone_id(
                         id,
-                        Some(false),
                         None,
                     )
                 }
@@ -231,34 +202,18 @@ macro_rules! interpreter_util {
             }
         }
         macro_rules! clone {
-            ($id:expr => @ , @ ) => {
+            ($id:expr => @ ) => {
                 $memory.clone_id(
                     $id,
-                    None,
                     None,
                 )
             };
-            ($id:expr => $mutable:expr , @ ) => {
+            ($id:expr => $area:expr ) => {
                 $memory.clone_id(
                     $id,
-                    Some($mutable),
-                    None,
-                )
-            };
-            ($id:expr => @ , $area:expr ) => {
-                $memory.clone_id(
-                    $id,
-                    None,
                     Some($area),
                 )
             };
-            ($id:expr => $mutable:expr , $area:expr ) => {
-                $memory.clone_id(
-                    $id,
-                    Some($mutable),
-                    Some($area),
-                )
-            }
         }
     };
 }
@@ -287,7 +242,6 @@ pub fn execute(
     match &node.node {
         NodeType::Value { value } => Ok(memory.insert(
             value.clone(),
-            false,
             CodeArea {source: info.source.clone(), range: node.span},
         )),
         NodeType::Op { left, op, right } => {
@@ -300,7 +254,6 @@ pub fn execute(
                             let result = value_ops::plus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -308,7 +261,6 @@ pub fn execute(
                             let result = value_ops::minus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -316,7 +268,6 @@ pub fn execute(
                             let result = value_ops::mult(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -324,7 +275,6 @@ pub fn execute(
                             let result = value_ops::div(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -332,7 +282,6 @@ pub fn execute(
                             let result = value_ops::modulo(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -340,7 +289,6 @@ pub fn execute(
                             let result = value_ops::pow(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -348,7 +296,6 @@ pub fn execute(
                             let result = value_ops::eq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -356,7 +303,6 @@ pub fn execute(
                             let result = value_ops::neq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -364,7 +310,6 @@ pub fn execute(
                             let result = value_ops::greater(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -372,7 +317,6 @@ pub fn execute(
                             let result = value_ops::greater_eq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -380,7 +324,6 @@ pub fn execute(
                             let result = value_ops::lesser(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -388,7 +331,6 @@ pub fn execute(
                             let result = value_ops::lesser_eq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -397,12 +339,12 @@ pub fn execute(
                 }
                 Token::Assign | Token::PlusEq | Token::MinusEq | Token::MultEq | Token::DivEq | Token::ModEq | Token::PowEq => {
                     let left = execute_raw!(left => scope_id);
-                    if !memory.get(left).mutable {
-                        return Err(RuntimeError::ModifyImmutable {
-                            def_area: memory.get(left).def_area.clone(),
-                            modify_area: area!(info.source.clone(), start_node.span),
-                        })
-                    }
+                    // if !memory.get(left).mutable {
+                    //     return Err(RuntimeError::ModifyImmutable {
+                    //         def_area: memory.get(left).def_area.clone(),
+                    //         modify_area: area!(info.source.clone(), start_node.span),
+                    //     })
+                    // }
 
                     let mut right = execute!(right => scope_id);
                     match op {
@@ -410,7 +352,6 @@ pub fn execute(
                             let result = value_ops::plus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
@@ -418,7 +359,6 @@ pub fn execute(
                             let result = value_ops::minus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
@@ -426,7 +366,6 @@ pub fn execute(
                             let result = value_ops::mult(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
@@ -434,7 +373,6 @@ pub fn execute(
                             let result = value_ops::div(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
@@ -442,7 +380,6 @@ pub fn execute(
                             let result = value_ops::modulo(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
@@ -450,7 +387,6 @@ pub fn execute(
                             let result = value_ops::pow(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
                                 result,
-                                false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
@@ -459,7 +395,6 @@ pub fn execute(
                     memory.set(
                         left,
                         memory.get(right).value.clone(),
-                        None,
                         Some(area!(info.source.clone(), start_node.span))
                     );
                     Ok(right)
@@ -474,7 +409,6 @@ pub fn execute(
                     let result = value_ops::identity(&memory.get(value).clone(), area!(info.source.clone(), node.span), memory)?;
                     Ok(memory.insert(
                         result,
-                        false,
                         area!(info.source.clone(), node.span),
                     ))
                 },
@@ -482,21 +416,19 @@ pub fn execute(
                     let result = value_ops::negate(&memory.get(value).clone(), area!(info.source.clone(), node.span), memory)?;
                     Ok(memory.insert(
                         result,
-                        false,
                         area!(info.source.clone(), node.span),
                     ))
                 },
                 _ => unreachable!()
             }
         },
-        NodeType::Declaration { var_name, mutable, value } => {
+        NodeType::Declaration { var_name, value } => {
             let initial_id = execute!(value => scope_id);
-            let value_id = clone!(initial_id => *mutable , area!(info.source.clone(), start_node.span));
+            // let value_id = clone!(initial_id => area!(info.source.clone(), start_node.span));
+            memory.redef(initial_id, area!(info.source.clone(), start_node.span));
+            // memory.propagate_def(value_id);
 
-            memory.propagate_mut(value_id);
-            memory.propagate_def(value_id);
-
-            scopes.set_var(scope_id, var_name.to_string(), value_id);
+            scopes.set_var(scope_id, var_name.to_string(), initial_id);
             Ok(initial_id)
         }
         NodeType::Var { var_name } => {
@@ -521,7 +453,6 @@ pub fn execute(
         NodeType::StatementList { statements } => {
             let mut ret_id = memory.insert(
                 Value::Null,
-                false,
                 area!(info.source.clone(), start_node.span)
             );
             for i in statements {
@@ -539,7 +470,6 @@ pub fn execute(
             let cond_value = execute!(cond => scope_id);
             let mut ret_id = memory.insert(
                 Value::Null,
-                false,
                 area!(info.source.clone(), start_node.span)
             );
             if value_ops::to_bool(memory.get(cond_value), area!(info.source.clone(), cond.span))? {
@@ -553,7 +483,6 @@ pub fn execute(
         NodeType::While { cond, code } => {
             let mut ret_id = memory.insert(
                 Value::Null,
-                false,
                 area!(info.source.clone(), start_node.span)
             );
             loop {
@@ -570,7 +499,6 @@ pub fn execute(
         NodeType::Loop { code } => {
             let mut ret_id = memory.insert(
                 Value::Null,
-                false,
                 area!(info.source.clone(), start_node.span)
             );
             loop {
@@ -588,11 +516,10 @@ pub fn execute(
                     header_area: header_area.clone(),
                     arg_areas: arg_areas.clone()
                 } ),
-                false,
                 area!(info.source.clone(), start_node.span)
             );
             scopes.set_var(scope_id, func_name.to_string(), value_id);
-            Ok( clone!(value_id => @ , @) )
+            Ok( clone!(value_id => @) )
         }
         NodeType::Lambda { arg_names, code, arg_areas, header_area } => {
             Ok( memory.insert(
@@ -603,7 +530,6 @@ pub fn execute(
                     header_area: header_area.clone(),
                     arg_areas: arg_areas.clone()
                 } ),
-                false,
                 area!(info.source.clone(), start_node.span)
             ) )
         }
@@ -614,7 +540,16 @@ pub fn execute(
             }
             Ok( memory.insert(
                 Value::Array(ids),
-                false,
+                area!(info.source.clone(), start_node.span)
+            ) )
+        }
+        NodeType::Dictionary { map } => {
+            let mut id_map = HashMap::new();
+            for (k, v) in map {
+                id_map.insert( k.clone(), execute!(v => scope_id) );
+            }
+            Ok( memory.insert(
+                Value::Dictionary(id_map),
                 area!(info.source.clone(), start_node.span)
             ) )
         }
@@ -643,9 +578,49 @@ pub fn execute(
                             defs: vec![(other.type_str(), memory.get(index_id).def_area.clone())],
                         } )
                     }
+                },
+                Value::Dictionary(map) => {
+                    let index_id = execute!(index => scope_id);
+                    match &memory.get(index_id).value.clone() {
+                        Value::String(s) => {
+                            match map.get(s) {
+                                Some(i) => Ok(*i),
+                                None => return Err( RuntimeError::NonexistentKey {
+                                    key: s.clone(),
+                                    area: area!(info.source.clone(), start_node.span),
+                                } ),
+                            }
+                        }
+                        other => return Err( RuntimeError::TypeMismatch {
+                            expected: "string".to_string(),
+                            found: format!("{}", other.type_str()),
+                            area: area!(info.source.clone(), index.span),
+                            defs: vec![(other.type_str(), memory.get(index_id).def_area.clone())],
+                        } )
+                    }
                 }
                 other => return Err( RuntimeError::TypeMismatch {
-                    expected: "array".to_string(),
+                    expected: "array or dict".to_string(),
+                    found: format!("{}", other.type_str()),
+                    area: area!(info.source.clone(), base.span),
+                    defs: vec![(other.type_str(), memory.get(base_id).def_area.clone())],
+                } )
+            }
+        }
+        NodeType::Member { base, member } => {
+            let base_id = execute!(base => scope_id);
+            match &memory.get(base_id).value.clone() {
+                Value::Dictionary(map) => {
+                    match map.get(member) {
+                        Some(i) => Ok(*i),
+                        None => return Err( RuntimeError::NonexistentKey {
+                            key: member.clone(),
+                            area: area!(info.source.clone(), start_node.span),
+                        } ),
+                    }
+                }
+                other => return Err( RuntimeError::TypeMismatch {
+                    expected: "dict".to_string(),
                     found: format!("{}", other.type_str()),
                     area: area!(info.source.clone(), base.span),
                     defs: vec![(other.type_str(), memory.get(base_id).def_area.clone())],
@@ -666,41 +641,6 @@ pub fn execute(
                     info
                 ),
                 
-             
-                        // "sleep" => {
-                        //     if args.len() != 1 {
-                        //         return Err(
-                        //             RuntimeError::IncorrectArgumentCount {
-                        //                 provided: args.len(),
-                        //                 takes: 1,
-                        //                 header_area: CodeArea {
-                        //                     source: info.source.clone(),
-                        //                     range: (0, 0)
-                        //                 },
-                        //                 call_area: area!(info.source.clone(), start_node.span)
-                        //             }
-                        //         )
-                        //     }
-                        //     let exec_id = execute!(&args[0] => scope_id);
-                        //     match &memory.get(exec_id).value.clone() {
-                        //         Value::Number(n) => {
-                        //             thread::sleep(time::Duration::from_millis((n * 1000.0) as u64));
-                        //             Ok (memory.insert(
-                        //                 Value::Null,
-                        //                 false,
-                        //                 area!(info.source.clone(), start_node.span)
-                        //             ) )
-                        //         }
-                        //         other => return Err( RuntimeError::TypeMismatch {
-                        //             expected: "number".to_string(),
-                        //             found: format!("{}", other.type_str()),
-                        //             area: area!(info.source.clone(), args[0].span),
-                        //             defs: vec![(other.type_str(), memory.get(exec_id).def_area.clone())],
-                        //         } )
-                        //     }
-                        // }
-                
-                
                 Value::Function( Function { arg_names, code, parent_scope, header_area, arg_areas } ) => {
                     if arg_names.len() != args.len() {
                         return Err(
@@ -716,11 +656,12 @@ pub fn execute(
                     let derived = scopes.derive(*parent_scope);
                     for ((arg, name), area) in args.iter().zip(arg_names).zip(arg_areas) {
                         let arg_id = execute!(arg => scope_id);
-                        let arg_id = clone!(arg_id => false, area.clone());
+                        // let arg_id = clone!(arg_id => area.clone());
                         scopes.set_var(derived, name.clone(), arg_id);
                     }
                     let ret_id = execute!(code => derived);
-                    Ok( clone!(ret_id => false, area!(info.source.clone(), start_node.span)) )
+                    memory.redef(ret_id, area!(info.source.clone(), start_node.span));
+                    Ok( ret_id )
                 }
                 other => return Err( RuntimeError::TypeMismatch {
                     expected: "function or builtin".to_string(),

@@ -1,28 +1,9 @@
 
-let max = 50;
 
-let pyt = (mut a,  b) => sqrt(a^2 + b^2);
+let i = 0;
 
-
-let mut i = 1;
-while i <= max {
-    let mut j = 1;
-    while j <= max {
-        let mut k = 1;
-        while k <= max {
-            
-            if pyt(i, j) == k print(i, " ", j, " ", k);
-
-            k += 1;
-        };
-        j += 1;
-    };
+while i < 10 {
     i += 1;
 };
 
-
-
-
-
-
-
+[2];

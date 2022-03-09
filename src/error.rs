@@ -49,6 +49,10 @@ pub enum RuntimeError {
         index: isize,
         length: usize,
         area: CodeArea,
+    },
+    NonexistentKey {
+        key: String,
+        area: CodeArea,
     }
 }
 
@@ -259,6 +263,17 @@ impl ToReport for RuntimeError {
                 message: format!("Index {} is out of bounds", index),
                 labels: vec![
                     (area.clone(), format!("Index provided is {} but length is {}", index.fg(a), length.fg(b)))
+                ],
+                note: None,
+            },
+            RuntimeError::NonexistentKey {
+                key,
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("Key '{}' does not exist", key),
+                labels: vec![
+                    (area.clone(), format!("Key '{}' was used here", key.fg(a)))
                 ],
                 note: None,
             },

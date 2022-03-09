@@ -154,7 +154,6 @@ macro_rules! builtins {
                             let __to_insert = $code;
                             Ok ($memory.insert(
                                 __to_insert,
-                                false,
                                 area!($info.source.clone(), $call_node.span)
                             ) )
                         )?
@@ -170,7 +169,6 @@ macro_rules! builtins {
                                     }
                                     Ok ($memory.insert(
                                         $code,
-                                        false,
                                         area!($info.source.clone(), $call_node.span)
                                     ) )
                                 }
@@ -192,14 +190,10 @@ builtins!{
     [Print]: print(@Any => poopie) {
         let mut out_str = String::new();
         for i in poopie {
-            out_str += &i.to_str(memory, &vec![]);
+            out_str += &i.to_str(memory, &mut vec![]);
         }
         println!("{}", out_str);
         Value::Null
-    }
-
-    [Length]: len(arr: Array) {
-        Value::Number(arr.len() as f64)
     }
 
     [Input]: input(prompt: String) {
@@ -216,6 +210,11 @@ builtins!{
         )
     }
 
+    [Length]: len(arr: Array) {
+        Value::Number(arr.len() as f64)
+    }
+
+
     [Sleep]: sleep(time: Number) {
         thread::sleep(time::Duration::from_millis((time * 1000.0) as u64));
         Value::Null
@@ -228,31 +227,6 @@ builtins!{
     [Sqrt]: sqrt(n: Number) { Value::Number(n.sqrt()) }
 
 
-    // [PlusOp]: _plus_(a, b) {
-    //     let area = CodeArea {source: info.source.clone(), range: call_node.span};
-    //     match (a, b) {
-    //         (Value::Number(n1), Value::Number(n2)) => Value::Number(n1 + n2),
-    //         (Value::String(s1), Value::String(s2)) => Value::String(s1.to_string() + &s2),
-    //         (Value::Array(a1), Value::Array(a2)) => {
-    //             let mut new_vec = vec![];
-    //             for i in a1 {
-    //                 new_vec.push( memory.clone_id(i, Some(false), Some(area.clone())) );
-    //             }
-    //             for i in a2 {
-    //                 new_vec.push( memory.clone_id(i, Some(false), Some(area.clone())) );
-    //             }
-    //             Value::Array(new_vec)
-    //         },
-    //         (value1, value2) => {
-    //             return Err( RuntimeError::TypeMismatch {
-    //                 expected: "number and number or string and string".to_string(),
-    //                 found: format!("{} and {}", value1.type_str(), value2.type_str()),
-    //                 area,
-    //                 defs: vec![(value1.type_str(), __areas[0].clone()), (value2.type_str(), __areas[1].clone())],
-    //             } )
-    //         }
-    //     }
-    // }
 
 
 
