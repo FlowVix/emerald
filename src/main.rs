@@ -6,11 +6,13 @@ mod value;
 mod interpreter;
 
 mod error;
+mod builtins;
 
 use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
 use ansi_term;
 use ariadne::{Source, Cache};
+use builtins::builtin_names;
 use error::ToReport;
 use interpreter::{execute, Memory, ScopeList, RunInfo};
 use logos::Logos;
@@ -111,7 +113,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     // println!("{:?}", tokens);
 
     let mut cache = EmeraldCache::default();
-    cache.fetch(&source);
+    cache.fetch(&source).unwrap();
 
     let ast = parse(&tokens, &source);
     match ast {
@@ -119,9 +121,9 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             let mut memory = Memory::new();
             let mut scopes = ScopeList::new();
             
-            for i in vec!["print"] {
-                scopes.set_var(0, i.to_string(), memory.insert(
-                    Value::Builtin(i.to_string()),
+            for i in builtin_names() {
+                scopes.set_var(0, i.clone(), memory.insert(
+                    Value::Builtin(i),
                     false,
                     CodeArea {
                         source: source.clone(),
@@ -147,6 +149,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                             other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&memory, &vec![]))))
                         }
                     }
+                    // println!("{}", memory.register.len());
                     // for i in &memory.register {
                     //     println!("{}: {:?}", i.0, i.1)
                     // }
@@ -183,7 +186,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
 
 fn main() {
     print!("\x1B[2J\x1B[1;1H");
-
+    io::stdout().flush().unwrap();
 
     if false {
         let mut buf = PathBuf::new();

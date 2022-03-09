@@ -3,13 +3,24 @@ use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory}, CodeAre
 
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Function {
+    pub arg_names: Vec<String>,
+    pub code: Box<ASTNode>,
+    pub parent_scope: ScopePos,
+    pub arg_areas: Vec<CodeArea>,
+    pub header_area: CodeArea,
+}
+
+
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
     Boolean(bool),
     String(String),
     Null,
     Builtin(String),
-    Function { arg_names: Vec<String>, code: Box<ASTNode>, parent_scope: ScopePos, arg_areas: Vec<CodeArea>, header_area: CodeArea },
+    Function(Function),
     Array(Vec<MemoryPos>),
 }
 
@@ -34,7 +45,7 @@ impl Value {
             Value::String(s) => s.clone(),
             Value::Null => "null".to_string(),
             Value::Builtin(name) => format!("<builtin: {}>", name),
-            Value::Function {arg_names, ..} => format!("({}) => ...", arg_names.join(", ")),
+            Value::Function( Function {arg_names, ..} )=> format!("({}) => ...", arg_names.join(", ")),
             Value::Array(arr) => {
                 let mut out_str = "[".to_string() + &arr.into_iter().map(
                     |i| memory.get(*i).value.to_str(memory, visited)
@@ -49,7 +60,7 @@ impl Value {
 
 pub mod value_ops {
 
-    use crate::{interpreter::StoredValue, CodeArea, value::Value, error::RuntimeError};
+    use crate::{interpreter::{StoredValue, Memory}, CodeArea, value::Value, error::RuntimeError};
 
     pub fn to_bool(a: &StoredValue, area: CodeArea) -> Result<bool, RuntimeError> {
         match &a.value {
@@ -67,11 +78,20 @@ pub mod value_ops {
         }
     }
 
-    pub fn plus(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn plus(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1 + n2)),
             (Value::String(s1), Value::String(s2)) => Ok(Value::String(s1.to_string() + s2)),
-            (Value::Array(a1), Value::Array(a2)) => Ok(Value::Array(a1.iter().chain(a2).map(|f| *f).collect())),
+            (Value::Array(a1), Value::Array(a2)) => {
+                let mut new_vec = vec![];
+                for i in a1 {
+                    new_vec.push( memory.clone_id(*i, Some(false), Some(area.clone())) );
+                }
+                for i in a2 {
+                    new_vec.push( memory.clone_id(*i, Some(false), Some(area.clone())) );
+                }
+                Ok(Value::Array(new_vec))
+            },
             
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
@@ -83,7 +103,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn minus(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn minus(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1 - n2)),
             
@@ -97,7 +117,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn mult(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn mult(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1 * n2)),
             (Value::String(s), Value::Number(n)) => Ok(Value::String(s.repeat(
@@ -114,7 +134,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn div(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn div(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1 / n2)),
             
@@ -128,7 +148,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn modulo(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn modulo(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1 % n2)),
             
@@ -142,7 +162,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn pow(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn pow(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1.powf(*n2))),
             
@@ -157,7 +177,7 @@ pub mod value_ops {
         }
     }
 
-    pub fn identity(a: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn identity(a: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match &a.value {
             Value::Number(n1) => Ok(Value::Number(*n1)),
             
@@ -171,7 +191,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn negate(a: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn negate(a: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match &a.value {
             Value::Number(n1) => Ok(Value::Number(-n1)),
             
@@ -186,7 +206,7 @@ pub mod value_ops {
         }
     }
 
-    pub fn eq(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn eq(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 == n2)),
             (Value::String(s1), Value::String(s2)) => Ok(Value::Boolean(s1 == s2)),
@@ -195,7 +215,7 @@ pub mod value_ops {
             (_, _) => Ok(Value::Boolean(false)),
         }
     }
-    pub fn neq(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn neq(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 != n2)),
             (Value::String(s1), Value::String(s2)) => Ok(Value::Boolean(s1 != s2)),
@@ -204,7 +224,7 @@ pub mod value_ops {
             (_, _) => Ok(Value::Boolean(true)),
         }
     }
-    pub fn greater(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn greater(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 > n2)),
 
@@ -218,7 +238,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn lesser(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn lesser(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 < n2)),
 
@@ -232,7 +252,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn greater_eq(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn greater_eq(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 >= n2)),
 
@@ -246,7 +266,7 @@ pub mod value_ops {
             }
         }
     }
-    pub fn lesser_eq(a: &StoredValue, b: &StoredValue, area: CodeArea) -> Result<Value, RuntimeError> {
+    pub fn lesser_eq(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 <= n2)),
 

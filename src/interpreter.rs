@@ -1,7 +1,9 @@
+
+
 use std::collections::HashMap;
 
-use crate::{value::{Value, value_ops}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea};
-
+use crate::{value::{Value, value_ops, Function}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea};
+use crate::builtins::{Builtin, run_builtin, name_to_builtin};
 
 
 // enum Exit {
@@ -17,7 +19,7 @@ pub struct RunInfo {
 pub type MemoryPos = usize;
 pub type ScopePos = usize;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StoredValue {
     pub value: Value,
     pub mutable: bool,
@@ -146,6 +148,21 @@ impl Memory {
             _ => (),
         }
     }
+    pub fn propagate_def(
+        &mut self,
+        id: MemoryPos,
+    ) {
+        let def = self.get(id).def_area.clone();
+        match self.get(id).value.clone() {
+            Value::Array(arr) => {
+                for i in arr {
+                    self.redef(i, def.clone());
+                    self.propagate_def(i);
+                }
+            }
+            _ => (),
+        }
+    }
     // pub fn protect(&mut self, value: Value) -> MemoryPos {
     //     let pos = self.insert( value );
     //     self.protected
@@ -196,7 +213,51 @@ macro_rules! interpreter_util {
     ($memory:expr, $scopes:expr, $info:expr) => {
         macro_rules! execute {
             ($node:expr => $scope_id:expr) => {
-                execute($node, $scope_id, $memory, $scopes, $info)?
+                {
+                    let id = execute($node, $scope_id, $memory, $scopes, $info)?;
+                    $memory.clone_id(
+                        id,
+                        Some(false),
+                        None,
+                    )
+                }
+            }
+        }
+        macro_rules! execute_raw {
+            ($node:expr => $scope_id:expr) => {
+                {
+                    execute($node, $scope_id, $memory, $scopes, $info)?
+                }
+            }
+        }
+        macro_rules! clone {
+            ($id:expr => @ , @ ) => {
+                $memory.clone_id(
+                    $id,
+                    None,
+                    None,
+                )
+            };
+            ($id:expr => $mutable:expr , @ ) => {
+                $memory.clone_id(
+                    $id,
+                    Some($mutable),
+                    None,
+                )
+            };
+            ($id:expr => @ , $area:expr ) => {
+                $memory.clone_id(
+                    $id,
+                    None,
+                    Some($area),
+                )
+            };
+            ($id:expr => $mutable:expr , $area:expr ) => {
+                $memory.clone_id(
+                    $id,
+                    Some($mutable),
+                    Some($area),
+                )
             }
         }
     };
@@ -235,71 +296,107 @@ pub fn execute(
                     let left = execute!(left => scope_id);
                     let right = execute!(right => scope_id);
                     match op {
-                        Token::Plus => Ok(memory.insert(
-                            value_ops::plus(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Minus => Ok(memory.insert(
-                            value_ops::minus(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Mult => Ok(memory.insert(
-                            value_ops::mult(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Div => Ok(memory.insert(
-                            value_ops::div(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Mod => Ok(memory.insert(
-                            value_ops::modulo(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Pow => Ok(memory.insert(
-                            value_ops::pow(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Eq => Ok(memory.insert(
-                            value_ops::eq(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::NotEq => Ok(memory.insert(
-                            value_ops::neq(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Greater => Ok(memory.insert(
-                            value_ops::greater(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::GreaterEq => Ok(memory.insert(
-                            value_ops::greater_eq(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::Lesser => Ok(memory.insert(
-                            value_ops::lesser(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
-                        Token::LesserEq => Ok(memory.insert(
-                            value_ops::lesser_eq(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
-                            false,
-                            area!(info.source.clone(), node.span),
-                        )),
+                        Token::Plus => {
+                            let result = value_ops::plus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Minus => {
+                            let result = value_ops::minus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Mult => {
+                            let result = value_ops::mult(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Div => {
+                            let result = value_ops::div(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Mod => {
+                            let result = value_ops::modulo(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Pow => {
+                            let result = value_ops::pow(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Eq => {
+                            let result = value_ops::eq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::NotEq => {
+                            let result = value_ops::neq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Greater => {
+                            let result = value_ops::greater(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::GreaterEq => {
+                            let result = value_ops::greater_eq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Lesser => {
+                            let result = value_ops::lesser(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::LesserEq => {
+                            let result = value_ops::lesser_eq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                false,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
                         _ => unreachable!()
                     }
                 }
                 Token::Assign | Token::PlusEq | Token::MinusEq | Token::MultEq | Token::DivEq | Token::ModEq | Token::PowEq => {
-                    let left = execute!(left => scope_id);
+                    let left = execute_raw!(left => scope_id);
                     if !memory.get(left).mutable {
                         return Err(RuntimeError::ModifyImmutable {
                             def_area: memory.get(left).def_area.clone(),
@@ -310,43 +407,49 @@ pub fn execute(
                     let mut right = execute!(right => scope_id);
                     match op {
                         Token::PlusEq => {
+                            let result = value_ops::plus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
-                                value_ops::plus(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
+                                result,
                                 false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
                         Token::MinusEq => {
+                            let result = value_ops::minus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
-                                value_ops::minus(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
+                                result,
                                 false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
                         Token::MultEq => {
+                            let result = value_ops::mult(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
-                                value_ops::mult(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
+                                result,
                                 false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
                         Token::DivEq => {
+                            let result = value_ops::div(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
-                                value_ops::div(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
+                                result,
                                 false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
                         Token::ModEq => {
+                            let result = value_ops::modulo(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
-                                value_ops::modulo(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
+                                result,
                                 false,
                                 area!(info.source.clone(), node.span),
                             )
                         },
                         Token::PowEq => {
+                            let result = value_ops::pow(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             right = memory.insert(
-                                value_ops::pow(memory.get(left), memory.get(right), area!(info.source.clone(), node.span))?,
+                                result,
                                 false,
                                 area!(info.source.clone(), node.span),
                             )
@@ -367,27 +470,32 @@ pub fn execute(
         NodeType::Unary { op, node } => {
             let value = execute!(node => scope_id);
             match op {
-                Token::Plus => Ok(memory.insert(
-                    value_ops::identity(memory.get(value), area!(info.source.clone(), node.span))?,
-                    false,
-                    area!(info.source.clone(), node.span),
-                )),
-                Token::Minus => Ok(memory.insert(
-                    value_ops::negate(memory.get(value), area!(info.source.clone(), node.span))?,
-                    false,
-                    area!(info.source.clone(), node.span),
-                )),
+                Token::Plus => {
+                    let result = value_ops::identity(&memory.get(value).clone(), area!(info.source.clone(), node.span), memory)?;
+                    Ok(memory.insert(
+                        result,
+                        false,
+                        area!(info.source.clone(), node.span),
+                    ))
+                },
+                Token::Minus => {
+                    let result = value_ops::negate(&memory.get(value).clone(), area!(info.source.clone(), node.span), memory)?;
+                    Ok(memory.insert(
+                        result,
+                        false,
+                        area!(info.source.clone(), node.span),
+                    ))
+                },
                 _ => unreachable!()
             }
         },
         NodeType::Declaration { var_name, mutable, value } => {
             let initial_id = execute!(value => scope_id);
-            let value_id = memory.clone_id(
-                initial_id,
-                Some(*mutable),
-                Some(area!(info.source.clone(), start_node.span))
-            );
+            let value_id = clone!(initial_id => *mutable , area!(info.source.clone(), start_node.span));
+
             memory.propagate_mut(value_id);
+            memory.propagate_def(value_id);
+
             scopes.set_var(scope_id, var_name.to_string(), value_id);
             Ok(initial_id)
         }
@@ -473,32 +581,28 @@ pub fn execute(
         }
         NodeType::FuncDef { func_name, arg_names, code, arg_areas, header_area } => {
             let value_id = memory.insert(
-                Value::Function {
+                Value::Function( Function {
                     arg_names: arg_names.clone(),
                     code: code.clone(),
                     parent_scope: scope_id,
                     header_area: header_area.clone(),
                     arg_areas: arg_areas.clone()
-                },
+                } ),
                 false,
                 area!(info.source.clone(), start_node.span)
             );
             scopes.set_var(scope_id, func_name.to_string(), value_id);
-            Ok( memory.clone_id(
-                value_id,
-                None,
-                None,
-            ) )
+            Ok( clone!(value_id => @ , @) )
         }
         NodeType::Lambda { arg_names, code, arg_areas, header_area } => {
             Ok( memory.insert(
-                Value::Function {
+                Value::Function( Function {
                     arg_names: arg_names.clone(),
                     code: code.clone(),
                     parent_scope: scope_id,
                     header_area: header_area.clone(),
                     arg_areas: arg_areas.clone()
-                },
+                } ),
                 false,
                 area!(info.source.clone(), start_node.span)
             ) )
@@ -552,25 +656,52 @@ pub fn execute(
             let base_id = execute!(base => scope_id);
             
             match &memory.get(base_id).value.clone() {
-                Value::Builtin(name) => {
-                    match &name[..] {
-                        "print" => {
-                            let mut out_str = String::new();
-                            for i in args {
-                                let arg_id = execute!(i => scope_id);
-                                out_str += &memory.get(arg_id).value.to_str(memory, &vec![]);
-                            }
-                            println!("{}", out_str);
-                            Ok (memory.insert(
-                                Value::Null,
-                                false,
-                                area!(info.source.clone(), start_node.span)
-                            ) )
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                Value::Function { arg_names, code, parent_scope, header_area, arg_areas } => {
+                Value::Builtin(name) => run_builtin(
+                    name_to_builtin(name),
+                    start_node,
+                    args,
+                    scope_id,
+                    memory,
+                    scopes,
+                    info
+                ),
+                
+             
+                        // "sleep" => {
+                        //     if args.len() != 1 {
+                        //         return Err(
+                        //             RuntimeError::IncorrectArgumentCount {
+                        //                 provided: args.len(),
+                        //                 takes: 1,
+                        //                 header_area: CodeArea {
+                        //                     source: info.source.clone(),
+                        //                     range: (0, 0)
+                        //                 },
+                        //                 call_area: area!(info.source.clone(), start_node.span)
+                        //             }
+                        //         )
+                        //     }
+                        //     let exec_id = execute!(&args[0] => scope_id);
+                        //     match &memory.get(exec_id).value.clone() {
+                        //         Value::Number(n) => {
+                        //             thread::sleep(time::Duration::from_millis((n * 1000.0) as u64));
+                        //             Ok (memory.insert(
+                        //                 Value::Null,
+                        //                 false,
+                        //                 area!(info.source.clone(), start_node.span)
+                        //             ) )
+                        //         }
+                        //         other => return Err( RuntimeError::TypeMismatch {
+                        //             expected: "number".to_string(),
+                        //             found: format!("{}", other.type_str()),
+                        //             area: area!(info.source.clone(), args[0].span),
+                        //             defs: vec![(other.type_str(), memory.get(exec_id).def_area.clone())],
+                        //         } )
+                        //     }
+                        // }
+                
+                
+                Value::Function( Function { arg_names, code, parent_scope, header_area, arg_areas } ) => {
                     if arg_names.len() != args.len() {
                         return Err(
                             RuntimeError::IncorrectArgumentCount {
@@ -585,11 +716,11 @@ pub fn execute(
                     let derived = scopes.derive(*parent_scope);
                     for ((arg, name), area) in args.iter().zip(arg_names).zip(arg_areas) {
                         let arg_id = execute!(arg => scope_id);
-                        let arg_id = memory.clone_id(arg_id, Some(false), Some(area.clone()));
+                        let arg_id = clone!(arg_id => false, area.clone());
                         scopes.set_var(derived, name.clone(), arg_id);
                     }
                     let ret_id = execute!(code => derived);
-                    Ok( memory.clone_id(ret_id, Some(false), Some(area!(info.source.clone(), start_node.span))) )
+                    Ok( clone!(ret_id => false, area!(info.source.clone(), start_node.span)) )
                 }
                 other => return Err( RuntimeError::TypeMismatch {
                     expected: "function or builtin".to_string(),
