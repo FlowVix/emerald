@@ -129,10 +129,13 @@ pub enum Token {
     #[token("func")]
     Func,
 
-    // #[token("return")]
-    // Return,
-    // #[token("break")]
-    // Break,
+    // #[token("struct")]
+    // Struct,
+
+    #[token("return")]
+    Return,
+    #[token("break")]
+    Break,
 
     // #[token("type")]
     // Type,
@@ -211,8 +214,8 @@ impl Token {
             Token::Loop => "loop",
             // Token::For => "for",
             // Token::In => "in",
-            // Token::Return => "return",
-            // Token::Break => "break",
+            Token::Return => "return",
+            Token::Break => "break",
             // Token::Type => "type",
             // Token::Impl => "impl",
             Token::Eol => ";",

@@ -3,21 +3,23 @@
 use std::collections::HashMap;
 
 use crate::{value::{Value, value_ops, Function}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea};
-use crate::builtins::{Builtin, run_builtin, name_to_builtin};
+use crate::builtins::{run_builtin, name_to_builtin};
 
+#[derive(Debug)]
+pub enum Exit {
+    Return(MemoryPos, (usize, usize)),
+    Break(MemoryPos, (usize, usize)),
+}
 
-// enum Exit {
-//     Return(Value, (usize, usize)),
-//     Break(Value, (usize, usize)),
-// }
-
+#[derive(Debug)]
 pub struct RunInfo {
     pub source: EmeraldSource,
-    // exits: Vec<Exit>,
+    pub exits: Vec<Exit>,
 }
 
 pub type MemoryPos = usize;
 pub type ScopePos = usize;
+pub type TypePos = usize;
 
 #[derive(Debug, Clone)]
 pub struct StoredValue {
@@ -25,11 +27,16 @@ pub struct StoredValue {
     pub def_area: CodeArea,
 }
 
+pub enum CustomType {
+    Struct { fields: HashMap<String, (Value, Option<Value>)> }
+}
+
 pub struct Memory {
     counter: MemoryPos,
     pub register: HashMap<MemoryPos, StoredValue>,
     // protected: Vec<Vec<MemoryPos>>,
-    // custom_types: Vec<String>,
+    custom_type_counter: TypePos,
+    pub custom_types: HashMap<TypePos, CustomType>,
     // impls: HashMap<String, HashMap<String, MemoryPos>>,
 }
 
@@ -53,6 +60,8 @@ impl Memory {
         Self {
             counter: 0,
             register: HashMap::new(),
+            custom_type_counter: 0,
+            custom_types: HashMap::new(),
             // protected: vec![],
             // custom_types: vec![],
             // impls: HashMap::new()
@@ -457,6 +466,9 @@ pub fn execute(
             );
             for i in statements {
                 ret_id = execute!(i => scope_id);
+                if info.exits.len() > 0 {
+                    return Ok( ret_id )
+                }
             }
             Ok(ret_id)
         }
@@ -487,10 +499,24 @@ pub fn execute(
             );
             loop {
                 let cond_value = execute!(cond => scope_id);
-                if value_ops::to_bool(memory.get(cond_value), area!(info.source.clone(), cond.span))? {
-                    ret_id = execute!(code => scope_id)
-                } else {
+                if !(value_ops::to_bool(memory.get(cond_value), area!(info.source.clone(), cond.span))?) {
                     break;
+                }
+                ret_id = execute!(code => scope_id);
+                match info.exits.last() {
+                    Some(
+                        Exit::Break(v, _)
+                    ) => {
+                        ret_id = *v;
+                        info.exits.pop();
+                        return Ok( ret_id )
+                    },
+                    Some(
+                        Exit::Return(_, _)
+                    ) => {
+                        return Ok( ret_id )
+                    },
+                    None => (),
                 }
             }
             memory.redef(ret_id, area!(info.source.clone(), start_node.span));
@@ -502,10 +528,25 @@ pub fn execute(
                 area!(info.source.clone(), start_node.span)
             );
             loop {
-                ret_id = execute!(code => scope_id)
+                ret_id = execute!(code => scope_id);
+                match info.exits.last() {
+                    Some(
+                        Exit::Break(v, _)
+                    ) => {
+                        ret_id = *v;
+                        info.exits.pop();
+                        return Ok( ret_id )
+                    },
+                    Some(
+                        Exit::Return(_, _)
+                    ) => {
+                        return Ok( ret_id )
+                    },
+                    None => (),
+                }
             }
-            memory.redef(ret_id, area!(info.source.clone(), start_node.span));
-            Ok( ret_id )
+            // memory.redef(ret_id, area!(info.source.clone(), start_node.span));
+            // Ok( ret_id )
         }
         NodeType::FuncDef { func_name, arg_names, code, arg_areas, header_area } => {
             let value_id = memory.insert(
@@ -627,6 +668,30 @@ pub fn execute(
                 } )
             }
         }
+        NodeType::Return { node: ret } => {
+            // println!("{:?}", info);
+            let ret_value = match ret {
+                Some(n) => execute!(n => scope_id),
+                None => memory.insert(
+                    Value::Null,
+                    area!(info.source.clone(), start_node.span)
+                ),
+            };
+            info.exits.push( Exit::Return(ret_value, node.span) );
+            Ok( clone!(ret_value => @) )
+        }
+        NodeType::Break { node: ret } => {
+            // println!("{:?}", info);
+            let ret_value = match ret {
+                Some(n) => execute!(n => scope_id),
+                None => memory.insert(
+                    Value::Null,
+                    area!(info.source.clone(), start_node.span)
+                ),
+            };
+            info.exits.push( Exit::Break(ret_value, node.span) );
+            Ok( clone!(ret_value => @) )
+        }
         NodeType::Call { base, args } => {
             let base_id = execute!(base => scope_id);
             
@@ -660,6 +725,26 @@ pub fn execute(
                         scopes.set_var(derived, name.clone(), arg_id);
                     }
                     let ret_id = execute!(code => derived);
+                    match info.exits.last() {
+                        Some(
+                            Exit::Return(v, _)
+                        ) => {
+                            let ret_id = *v;
+                            info.exits.pop();
+                            return Ok( ret_id )
+                        },
+                        Some(
+                            Exit::Break(_, span)
+                        ) => {
+                            return Err(
+                                RuntimeError::BreakUsedOutside {
+                                    break_area: area!(info.source.clone(), *span),
+                                    outer_area: area!(info.source.clone(), code.span),
+                                }
+                            )
+                        },
+                        None => (),
+                    }
                     memory.redef(ret_id, area!(info.source.clone(), start_node.span));
                     Ok( ret_id )
                 }

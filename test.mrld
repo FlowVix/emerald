@@ -1,9 +1,18 @@
 
+func ret_out(value) {
+    return return value;
+}
 
-let i = 0;
 
-while i < 10 {
-    i += 1;
-};
 
-[2];
+func thing() {
+    print("a");
+    print("b");
+    ret_out(69);
+    print("c");
+}
+
+
+print(thing());
+
+

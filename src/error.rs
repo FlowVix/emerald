@@ -53,7 +53,17 @@ pub enum RuntimeError {
     NonexistentKey {
         key: String,
         area: CodeArea,
-    }
+    },
+    BreakUsedOutside {
+        break_area: CodeArea,
+        outer_area: CodeArea,
+    },
+    ReturnUsedOutsideProgram {
+        return_area: CodeArea,
+    },
+    BreakUsedOutsideProgram {
+        break_area: CodeArea,
+    },
 }
 
 
@@ -274,6 +284,38 @@ impl ToReport for RuntimeError {
                 message: format!("Key '{}' does not exist", key),
                 labels: vec![
                     (area.clone(), format!("Key '{}' was used here", key.fg(a)))
+                ],
+                note: None,
+            },
+            RuntimeError::BreakUsedOutside {
+                break_area,
+                outer_area,
+            } => ErrorReport {
+                source: break_area.clone(),
+                message: format!("Break used outside of loop"),
+                labels: vec![
+                    (break_area.clone(), format!("Break was used here")),
+                    (outer_area.clone(), format!("Reached here")),
+                ],
+                note: None,
+            },
+            RuntimeError::ReturnUsedOutsideProgram {
+                return_area,
+            } => ErrorReport {
+                source: return_area.clone(),
+                message: format!("Return reached outside program"),
+                labels: vec![
+                    (return_area.clone(), format!("Return was used here")),
+                ],
+                note: None,
+            },
+            RuntimeError::BreakUsedOutsideProgram {
+                break_area,
+            } => ErrorReport {
+                source: break_area.clone(),
+                message: format!("Break reached outside program"),
+                labels: vec![
+                    (break_area.clone(), format!("Break was used here")),
                 ],
                 note: None,
             },

@@ -37,6 +37,8 @@ pub enum NodeType {
     Index { base: Box<ASTNode>, index: Box<ASTNode> },
     Dictionary { map: HashMap<String, ASTNode> },
     Member { base: Box<ASTNode>, member: String },
+    Return { node: Option<Box<ASTNode>> },
+    Break { node: Option<Box<ASTNode>> },
 }
 
 macro_rules! expected_err {
@@ -534,7 +536,27 @@ pub fn parse_unit(
 
             parse!(parse_expr => let code);
             ret!( NodeType::FuncDef { func_name, arg_names, arg_areas, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
-        }
+        },
+        Token::Return => {
+            pos += 1;
+            let mut node = None;
+            if_tok!(!= Eol: {
+                parse!(parse_expr => let temp); node = Some(Box::new(temp));
+            });
+            ret!( NodeType::Return {
+                node
+            } => start.0, span!(-1).1 )
+        },
+        Token::Break => {
+            pos += 1;
+            let mut node = None;
+            if_tok!(!= Eol: {
+                parse!(parse_expr => let temp); node = Some(Box::new(temp));
+            });
+            ret!( NodeType::Break {
+                node
+            } => start.0, span!(-1).1 )
+        },
         unary_op if is_unary(unary_op) => {
             pos += 1;
             let prec = unary_prec(unary_op);

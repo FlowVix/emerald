@@ -13,8 +13,8 @@ use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 use ansi_term;
 use ariadne::{Source, Cache};
 use builtins::builtin_names;
-use error::ToReport;
-use interpreter::{execute, Memory, ScopeList, RunInfo};
+use error::{ToReport, RuntimeError};
+use interpreter::{execute, Memory, ScopeList, RunInfo, Exit};
 use logos::Logos;
 use value::Value;
 
@@ -86,6 +86,14 @@ impl Default for EmeraldCache {
     }
 }
 
+macro_rules! area {
+    ($source:expr, $area:expr) => {
+        CodeArea {source: $source, range: $area}
+    };
+    ($source:expr, $start:expr, $end:expr) => {
+        CodeArea {source: $source, range: ($start, $end)}
+    };
+}
 
 
 
@@ -131,14 +139,36 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                 ));
             }
 
-
-            let result = execute(
+            let mut info = RunInfo {source, exits: vec![]};
+            let mut result = execute(
                 &node,
                 0,
                 &mut memory,
                 &mut scopes,
-                &mut RunInfo {source}
+                &mut info,
             );
+
+            result = match info.exits.last() {
+                Some(
+                    Exit::Return(_, span)
+                ) => {
+                    Err(
+                        RuntimeError::ReturnUsedOutsideProgram {
+                            return_area: area!(info.source.clone(), *span),
+                        }
+                    )
+                },
+                Some(
+                    Exit::Break(_, span)
+                ) => {
+                    Err(
+                        RuntimeError::BreakUsedOutsideProgram {
+                            break_area: area!(info.source.clone(), *span),
+                        }
+                    )
+                },
+                None => result,
+            };
 
             match result {
                 Ok(pos) => {
