@@ -227,7 +227,7 @@ builtin_types!(
     Number,
     Bool,
     String,
-    Null,
+    Nulltype,
     Builtin,
     Function,
     Array,

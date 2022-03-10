@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory, TypePos, CustomType}, CodeArea, builtins::{BuiltinType, builtin_type_str}};
+use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory, TypePos, CustomStruct}, CodeArea, builtins::{BuiltinType, builtin_type_str}};
 
 
 
@@ -17,15 +17,15 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     Builtin(BuiltinType),
-    Custom(TypePos),
+    CustomStruct(TypePos),
 }
 
 impl ValueType {
     pub fn to_str(&self, memory: &Memory) -> String {
         match self {
             ValueType::Builtin(b) => builtin_type_str(b.clone()),
-            ValueType::Custom(id) => match memory.custom_types.get(id).unwrap() {
-                CustomType::Struct { name, .. } => name.to_string()
+            ValueType::CustomStruct(id) => match &memory.custom_structs[id] {
+                CustomStruct { name, .. } => name.to_string()
             },
         }
     }
@@ -43,6 +43,8 @@ pub enum Value {
     Array(Vec<MemoryPos>),
     Dictionary(HashMap<String, MemoryPos>),
     Type(ValueType),
+
+    StructInstance { struct_id: TypePos, fields: HashMap<String, MemoryPos> },
 }
 
 impl Value {
@@ -52,16 +54,19 @@ impl Value {
             Value::Number(_) => ValueType::Builtin(BuiltinType::Number),
             Value::Boolean(_) => ValueType::Builtin(BuiltinType::Bool),
             Value::String(_) => ValueType::Builtin(BuiltinType::String),
-            Value::Null => ValueType::Builtin(BuiltinType::Null),
+            Value::Null => ValueType::Builtin(BuiltinType::Nulltype),
             Value::Builtin(_) => ValueType::Builtin(BuiltinType::Builtin),
             Value::Function{..} => ValueType::Builtin(BuiltinType::Function),
             Value::Array(_) => ValueType::Builtin(BuiltinType::Array),
             Value::Dictionary(_) => ValueType::Builtin(BuiltinType::Dict),
             Value::Type(_) => ValueType::Builtin(BuiltinType::Type),
+
+            Value::StructInstance { struct_id, .. } => ValueType::CustomStruct(*struct_id),
         }
     }
 
     pub fn type_str(&self, memory: &Memory) -> String {
+        println!("{:?}", self.typ());
         self.typ().to_str(memory)
     }
 
@@ -97,9 +102,25 @@ impl Value {
             },
             Value::Type(v) => match v {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
-                ValueType::Custom(pos) => match memory.custom_types.get(pos).unwrap() {
-                    CustomType::Struct { name, .. } => format!("<struct: {}>", name)
+                ValueType::CustomStruct(pos) => match memory.custom_structs.get(pos).unwrap() {
+                    CustomStruct { name, .. } => format!("<struct: {}>", name)
                 },
+            },
+            Value::StructInstance { struct_id, fields } => {
+
+                let name = match &memory.custom_structs[struct_id] {
+                    CustomStruct { name, .. } => name,
+                };
+
+                if visited.contains(&self) {
+                    return name.clone() + "::{...}"
+                }
+                visited.push( self );
+                let out_str = "{".to_string() + &fields.into_iter().map(
+                    |(k, v)| format!("{}: {}", k, memory.get(*v).value.to_str(memory, visited))
+                ).collect::<Vec<String>>().join(", ") + "}";
+                visited.pop();
+                format!("{}::{}", name, out_str)
             }
         }
     }
@@ -155,6 +176,25 @@ pub mod value_ops {
             }
         }
     }
+
+    pub fn is_type(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<bool, RuntimeError> {
+        match (&a.value, &b.value) {
+            (v, Value::Type(t)) => {
+                Ok( v.typ() == t.clone() )
+            },
+            
+            (_, value) => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "type".to_string(),
+                    found: format!("{}", value.type_str(memory)),
+                    area,
+                    defs: vec![(value.type_str(memory), b.def_area.clone())],
+                } )
+            }
+        }
+    }
+
+
 
     pub fn plus(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {

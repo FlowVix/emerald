@@ -27,16 +27,22 @@ pub struct StoredValue {
     pub def_area: CodeArea,
 }
 
-pub enum CustomType {
-    Struct { name: String, fields: HashMap<String, (Value, Option<Value>)>, header_area: CodeArea, field_areas: Vec<CodeArea> }
+#[derive(Debug, Clone)]
+pub struct CustomStruct {
+    pub name: String,
+    pub fields: HashMap<String, (MemoryPos, Option<MemoryPos>)>,
+    pub field_areas: HashMap<String, CodeArea>,
+    pub def_area: CodeArea,
 }
+
+
 
 pub struct Memory {
     counter: MemoryPos,
     pub register: HashMap<MemoryPos, StoredValue>,
     // protected: Vec<Vec<MemoryPos>>,
-    custom_type_counter: TypePos,
-    pub custom_types: HashMap<TypePos, CustomType>,
+    custom_struct_counter: TypePos,
+    pub custom_structs: HashMap<TypePos, CustomStruct>,
     // impls: HashMap<String, HashMap<String, MemoryPos>>,
 }
 
@@ -60,8 +66,8 @@ impl Memory {
         Self {
             counter: 0,
             register: HashMap::new(),
-            custom_type_counter: 0,
-            custom_types: HashMap::new(),
+            custom_struct_counter: 0,
+            custom_structs: HashMap::new(),
             // protected: vec![],
             // custom_types: vec![],
             // impls: HashMap::new()
@@ -76,14 +82,16 @@ impl Memory {
     // }
 
 
-    pub fn new_type(
+    pub fn new_struct(
         &mut self,
-        typ: CustomType,
+        typ: CustomStruct,
     ) -> MemoryPos {
-        self.custom_type_counter += 1;
-        self.custom_types.insert( self.custom_type_counter, typ );
-        self.custom_type_counter
+        self.custom_struct_counter += 1;
+        self.custom_structs.insert( self.custom_struct_counter, typ );
+        self.custom_struct_counter
     }
+
+
 
     pub fn insert(
         &mut self,
@@ -266,7 +274,7 @@ pub fn execute(
         )),
         NodeType::Op { left, op, right } => {
             match op {
-                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As => {
+                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As | Token::Is => {
                     let left = execute!(left => scope_id);
                     let right = execute!(right => scope_id);
                     match op {
@@ -358,6 +366,13 @@ pub fn execute(
                             let result = value_ops::convert(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Is => {
+                            let result = value_ops::is_type(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                Value::Boolean(result),
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -678,8 +693,17 @@ pub fn execute(
                         } ),
                     }
                 }
+                Value::StructInstance { fields, .. } => {
+                    match fields.get(member) {
+                        Some(i) => Ok(*i),
+                        None => return Err( RuntimeError::NonexistentField {
+                            field: member.clone(),
+                            area: area!(info.source.clone(), start_node.span),
+                        } ),
+                    }
+                }
                 other => return Err( RuntimeError::TypeMismatch {
-                    expected: "dict".to_string(),
+                    expected: "dict or struct instance".to_string(),
                     found: format!("{}", other.type_str(memory)),
                     area: area!(info.source.clone(), base.span),
                     defs: vec![(other.type_str(memory), memory.get(base_id).def_area.clone())],
@@ -710,15 +734,15 @@ pub fn execute(
             info.exits.push( Exit::Break(ret_value, node.span) );
             Ok( clone!(ret_value => @) )
         }
-        NodeType::StructDef { struct_name, fields, field_areas, header_area } => {
+        NodeType::StructDef { struct_name, fields, field_areas, def_area } => {
             let mut fields_exec = HashMap::new();
 
             for (k, (t, d)) in fields {
-                let t = execute!(t => scope_id);
-                let t = memory.get(t).value.clone();
+                let _t = execute!(t => scope_id);
+                let t = clone!( _t => area!(info.source.clone(), t.span) );
                 let d = if let Some(n) = d {
                     let temp = execute!(n => scope_id);
-                    Some(memory.get(temp).value.clone())
+                    Some(temp)
                 } else { None };
                 fields_exec.insert(
                     k.clone(),
@@ -726,18 +750,78 @@ pub fn execute(
                 );
             }
 
-            let type_id = memory.new_type( CustomType::Struct {
+            let type_id = memory.new_struct( CustomStruct {
                 name: struct_name.clone(),
                 fields: fields_exec,
-                header_area: header_area.clone(),
+                def_area: def_area.clone(),
                 field_areas: field_areas.clone(),
             });
             let value_id = memory.insert(
-                Value::Type(ValueType::Custom(type_id)),
+                Value::Type(ValueType::CustomStruct(type_id)),
                 area!(info.source.clone(), start_node.span)
             );
             scopes.set_var(scope_id, struct_name.to_string(), value_id);
             Ok( value_id )
+        }
+        NodeType::StructInstance { fields, base, field_areas } => {
+            let base_id = execute!(base => scope_id);
+            match &memory.get(base_id).value.clone() {
+                Value::Type(ValueType::CustomStruct(id)) => {
+                    let struct_type = memory.custom_structs[id].clone();
+
+                    let mut id_map = HashMap::new();
+
+                    for (f, (_, d)) in struct_type.fields.clone() {
+                        match d {
+                            Some(v) => { id_map.insert(f.clone(), v); },
+                            None => (),
+                        }
+                    }
+                    for (k, v) in fields {
+                        if !struct_type.fields.contains_key(k) {
+                            return Err( RuntimeError::NoStructField {
+                                field_name: k.clone(),
+                                used: field_areas[k].clone(),
+                                struct_def: struct_type.def_area.clone(),
+                            } )
+                        }
+                        id_map.insert( k.clone(), execute!(v => scope_id) );
+                    }
+                    for (k, v) in &id_map {
+                        let typ = struct_type.fields[k].0;
+                        let result = value_ops::is_type(&memory.get(*v).clone(), &memory.get(typ).clone(), area!(info.source.clone(), node.span), memory)?;
+                        if !result {
+                            return Err( RuntimeError::PatternMismatch {
+                                typ: memory.get(*v).value.type_str(memory),
+                                pattern: match &memory.get(typ).value {
+                                    Value::Type(t) => t.to_str(memory),
+                                    _ => unreachable!(),
+                                },
+                                pattern_area: memory.get(typ).def_area.clone(),
+                                type_area: memory.get(*v).def_area.clone(),
+                            } )
+                        }
+                    }
+                    if id_map.len() != memory.custom_structs[id].fields.len() {
+                        let mut missing = vec![];
+                        for (k, _) in &memory.custom_structs[id].fields {
+                            if !id_map.contains_key(k) { missing.push(k.clone()) }
+                        }
+                        return Err( RuntimeError::MissingStructFields {
+                            fields: missing,
+                            area: area!(info.source.clone(), start_node.span),
+                            struct_def: memory.custom_structs[id].def_area.clone(),
+                        } )
+                    }
+                    Ok( memory.insert(
+                        Value::StructInstance { struct_id: *id, fields: id_map },
+                        area!(info.source.clone(), start_node.span)
+                    ) )
+                },
+                other => return Err( RuntimeError::InstanceNonStruct {
+                    area: area!(info.source.clone(), base.span),
+                } )
+            }
         }
         NodeType::Call { base, args } => {
             let base_id = execute!(base => scope_id);
@@ -794,9 +878,26 @@ pub fn execute(
                     }
                     memory.redef(ret_id, area!(info.source.clone(), start_node.span));
                     Ok( ret_id )
+                },
+
+                Value::Type(t) => {
+                    if args.len() != 1 {
+                        return Err(
+                            RuntimeError::TypeArgCount {
+                                provided: args.len(),
+                                call_area: area!(info.source.clone(), start_node.span)
+                            }
+                        )
+                    }
+                    let arg_id = execute!(&args[0] => scope_id);
+                    let result = value_ops::convert(&memory.get(arg_id).clone(), &memory.get(base_id).clone(), area!(info.source.clone(), node.span), memory)?;
+                    Ok(memory.insert(
+                        result,
+                        area!(info.source.clone(), node.span),
+                    ))
                 }
                 other => return Err( RuntimeError::TypeMismatch {
-                    expected: "function or builtin".to_string(),
+                    expected: "function, builtin or type".to_string(),
                     found: format!("{}", other.type_str(memory)),
                     area: area!(info.source.clone(), base.span),
                     defs: vec![(other.type_str(memory), memory.get(base_id).def_area.clone())],

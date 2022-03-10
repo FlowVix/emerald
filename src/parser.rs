@@ -39,7 +39,8 @@ pub enum NodeType {
     Member { base: Box<ASTNode>, member: String },
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
-    StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: Vec<CodeArea>, header_area: CodeArea },
+    StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: HashMap<String, CodeArea>, def_area: CodeArea },
+    StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, ASTNode> },
 }
 
 macro_rules! expected_err {
@@ -288,6 +289,7 @@ macro_rules! operators {
 
 operators!(
     RightAssoc  <==  [ Assign PlusEq MinusEq MultEq DivEq ModEq PowEq ],
+    RightAssoc  <==  [ Is ],
     // LeftAssoc   <==  [ And Or ],
     // Unary       <==  [ Not ],
     LeftAssoc   <==  [ Eq NotEq Greater GreaterEq Lesser LesserEq ],
@@ -445,8 +447,21 @@ pub fn parse_unit(
 
             if matches!(tok!(0), Token::Ident(_)) && matches!(tok!(1), Token::Colon) {
                 let mut map = HashMap::new();
+                let mut areas: HashMap<String, CodeArea> = HashMap::new();
                 while_tok!(!= RBracket: {
                     check_tok!(Ident(key) else "key name");
+                    let last_area = CodeArea {
+                        source: info.source.clone(),
+                        range: span!(-1),
+                    };
+                    if map.contains_key(&key) {
+                        return Err( SyntaxError::DuplicateKey {
+                            first_used: areas[&key].clone(),
+                            key_name: key,
+                            used_again: last_area,
+                        } )
+                    }
+                    areas.insert(key.clone(), last_area);
                     check_tok!(Colon else ":");
 
                     parse!(parse_expr(false) => let value);
@@ -562,27 +577,24 @@ pub fn parse_unit(
         Token::Struct => {
             pos += 1;
             check_tok!(Ident(struct_name) else "struct name");
-            let header_area = CodeArea {
-                source: info.source.clone(),
-                range: (span!(-2).0, span!(-1).1),
-            };
             check_tok!(LBracket else "{");
 
             let mut fields = HashMap::new();
-            let mut field_areas = vec![];
+            let mut field_areas: HashMap<String, CodeArea> = HashMap::new();
             while_tok!(!= RBracket: {
                 check_tok!(Ident(field) else "field name");
-                field_areas.push(CodeArea {
+                let last_area = CodeArea {
                     source: info.source.clone(),
                     range: span!(-1),
-                });
-                if let Some(id) = fields.clone().into_iter().position(|(s, _)| s == field) {
+                };
+                if fields.contains_key(&field) {
                     return Err( SyntaxError::DuplicateField {
+                        first_used: field_areas[&field].clone(),
                         field_name: field,
-                        first_used: field_areas[id].clone(),
-                        used_again: field_areas.last().unwrap().clone(),
+                        used_again: last_area,
                     } )
                 }
+                field_areas.insert(field.clone(), last_area);
                 check_tok!(Colon else ":");
 
                 let mut default = None;
@@ -598,8 +610,13 @@ pub fn parse_unit(
                 }
                 skip_tok!(Comma);
             });
+            
+            let def_area = CodeArea {
+                source: info.source.clone(),
+                range: (start.0, span!(-1).1),
+            };
             // println!("{}: {:#?}", struct_name, fields);
-            ret!( NodeType::StructDef { struct_name, fields, field_areas, header_area } => start.0, span!(-1).1 );
+            ret!( NodeType::StructDef { struct_name, fields, field_areas, def_area } => start.0, span!(-1).1 );
         },
         unary_op if is_unary(unary_op) => {
             pos += 1;
@@ -635,7 +652,7 @@ fn parse_value(
     parse!(parse_unit => let mut value);
     let start = value.span;
 
-    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot) {
+    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon) {
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
@@ -679,6 +696,45 @@ fn parse_value(
                     span: ( start.0, span!(-1).1 )
                 }
             },
+            Token::DoubleColon => {
+                pos += 1;
+                check_tok!(LBracket else "{");
+
+                let mut fields = HashMap::new();
+                let mut areas: HashMap<String, CodeArea> = HashMap::new();
+                while_tok!(!= RBracket: {
+                    check_tok!(Ident(field) else "field name");
+                    let last_area = CodeArea {
+                        source: info.source.clone(),
+                        range: span!(-1),
+                    };
+                    if fields.contains_key(&field) {
+                        return Err( SyntaxError::DuplicateField {
+                            first_used: areas[&field].clone(),
+                            field_name: field,
+                            used_again: last_area,
+                        } )
+                    }
+                    areas.insert(field.clone(), last_area);
+                    check_tok!(Colon else ":");
+
+                    parse!(parse_expr(false) => let value);
+
+                    fields.insert(field, value);
+                    if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                        expected_err!("} or ,", tok!(0), span!(0), info )
+                    }
+                    skip_tok!(Comma);
+                });
+                value = ASTNode {
+                    node: NodeType::StructInstance {
+                        base: Box::new(value),
+                        field_areas: areas,
+                        fields,
+                    },
+                    span: ( start.0, span!(-1).1 )
+                }
+            }
             _ => unreachable!(),
         }
     }

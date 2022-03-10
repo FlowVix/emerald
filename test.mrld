@@ -2,10 +2,17 @@
 
 
 struct Person {
-    name: string,
-    age: number,
+    first_name: string,
+    last_name: string,
+    age: number = 3,
 }
 
-print(string, [Person]);
+let fart = Person::{
+    first_name: "lol",
+    last_name: "sex" + "fart"
+}
+
+
+print(number::{});
 
 

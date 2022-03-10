@@ -103,8 +103,8 @@ pub enum Token {
     Comma,
     #[token(".")]
     Dot,
-    // #[token("::")]
-    // DoubleColon,
+    #[token("::")]
+    DoubleColon,
     #[token(":")]
     Colon,
 
@@ -123,6 +123,8 @@ pub enum Token {
     // In,
     #[token("as")]
     As,
+    #[token("is")]
+    Is,
     
     #[token("let")]
     Let,
@@ -206,6 +208,7 @@ impl Token {
             Token::RSqBracket => "]",
             // Token::Pipe => 
             Token::Comma => ",",
+            Token::DoubleColon => "::",
             Token::Colon => ":",
             Token::If => "if",
             Token::Else => "else",
@@ -217,6 +220,7 @@ impl Token {
             // Token::For => "for",
             // Token::In => "in",
             Token::As => "as",
+            Token::Is => "is",
             Token::Return => "return",
             Token::Break => "break",
             Token::Struct => "struct",
