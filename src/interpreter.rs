@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::{value::{Value, value_ops, Function}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea};
+use crate::{value::{Value, value_ops, Function, ValueType}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug)]
@@ -28,7 +28,7 @@ pub struct StoredValue {
 }
 
 pub enum CustomType {
-    Struct { fields: HashMap<String, (Value, Option<Value>)> }
+    Struct { name: String, fields: HashMap<String, (Value, Option<Value>)>, header_area: CodeArea, field_areas: Vec<CodeArea> }
 }
 
 pub struct Memory {
@@ -74,6 +74,17 @@ impl Memory {
     // fn pop_protected(&mut self) {
     //     self.protected.pop();
     // }
+
+
+    pub fn new_type(
+        &mut self,
+        typ: CustomType,
+    ) -> MemoryPos {
+        self.custom_type_counter += 1;
+        self.custom_types.insert( self.custom_type_counter, typ );
+        self.custom_type_counter
+    }
+
     pub fn insert(
         &mut self,
         value: Value,
@@ -255,7 +266,7 @@ pub fn execute(
         )),
         NodeType::Op { left, op, right } => {
             match op {
-                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq => {
+                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As => {
                     let left = execute!(left => scope_id);
                     let right = execute!(right => scope_id);
                     match op {
@@ -338,6 +349,13 @@ pub fn execute(
                         },
                         Token::LesserEq => {
                             let result = value_ops::lesser_eq(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::As => {
+                            let result = value_ops::convert(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 result,
                                 area!(info.source.clone(), node.span),
@@ -484,7 +502,7 @@ pub fn execute(
                 Value::Null,
                 area!(info.source.clone(), start_node.span)
             );
-            if value_ops::to_bool(memory.get(cond_value), area!(info.source.clone(), cond.span))? {
+            if value_ops::to_bool(memory.get(cond_value), area!(info.source.clone(), cond.span), memory)? {
                 ret_id = execute!(code => scope_id)
             } else if let Some(b) = else_branch {
                 ret_id = execute!(b => scope_id)
@@ -499,7 +517,7 @@ pub fn execute(
             );
             loop {
                 let cond_value = execute!(cond => scope_id);
-                if !(value_ops::to_bool(memory.get(cond_value), area!(info.source.clone(), cond.span))?) {
+                if !(value_ops::to_bool(memory.get(cond_value), area!(info.source.clone(), cond.span), memory)?) {
                     break;
                 }
                 ret_id = execute!(code => scope_id);
@@ -614,9 +632,9 @@ pub fn execute(
                         }
                         other => return Err( RuntimeError::TypeMismatch {
                             expected: "number".to_string(),
-                            found: format!("{}", other.type_str()),
+                            found: format!("{}", other.type_str(memory)),
                             area: area!(info.source.clone(), index.span),
-                            defs: vec![(other.type_str(), memory.get(index_id).def_area.clone())],
+                            defs: vec![(other.type_str(memory), memory.get(index_id).def_area.clone())],
                         } )
                     }
                 },
@@ -634,17 +652,17 @@ pub fn execute(
                         }
                         other => return Err( RuntimeError::TypeMismatch {
                             expected: "string".to_string(),
-                            found: format!("{}", other.type_str()),
+                            found: format!("{}", other.type_str(memory)),
                             area: area!(info.source.clone(), index.span),
-                            defs: vec![(other.type_str(), memory.get(index_id).def_area.clone())],
+                            defs: vec![(other.type_str(memory), memory.get(index_id).def_area.clone())],
                         } )
                     }
                 }
                 other => return Err( RuntimeError::TypeMismatch {
                     expected: "array or dict".to_string(),
-                    found: format!("{}", other.type_str()),
+                    found: format!("{}", other.type_str(memory)),
                     area: area!(info.source.clone(), base.span),
-                    defs: vec![(other.type_str(), memory.get(base_id).def_area.clone())],
+                    defs: vec![(other.type_str(memory), memory.get(base_id).def_area.clone())],
                 } )
             }
         }
@@ -662,9 +680,9 @@ pub fn execute(
                 }
                 other => return Err( RuntimeError::TypeMismatch {
                     expected: "dict".to_string(),
-                    found: format!("{}", other.type_str()),
+                    found: format!("{}", other.type_str(memory)),
                     area: area!(info.source.clone(), base.span),
-                    defs: vec![(other.type_str(), memory.get(base_id).def_area.clone())],
+                    defs: vec![(other.type_str(memory), memory.get(base_id).def_area.clone())],
                 } )
             }
         }
@@ -691,6 +709,35 @@ pub fn execute(
             };
             info.exits.push( Exit::Break(ret_value, node.span) );
             Ok( clone!(ret_value => @) )
+        }
+        NodeType::StructDef { struct_name, fields, field_areas, header_area } => {
+            let mut fields_exec = HashMap::new();
+
+            for (k, (t, d)) in fields {
+                let t = execute!(t => scope_id);
+                let t = memory.get(t).value.clone();
+                let d = if let Some(n) = d {
+                    let temp = execute!(n => scope_id);
+                    Some(memory.get(temp).value.clone())
+                } else { None };
+                fields_exec.insert(
+                    k.clone(),
+                    (t, d)
+                );
+            }
+
+            let type_id = memory.new_type( CustomType::Struct {
+                name: struct_name.clone(),
+                fields: fields_exec,
+                header_area: header_area.clone(),
+                field_areas: field_areas.clone(),
+            });
+            let value_id = memory.insert(
+                Value::Type(ValueType::Custom(type_id)),
+                area!(info.source.clone(), start_node.span)
+            );
+            scopes.set_var(scope_id, struct_name.to_string(), value_id);
+            Ok( value_id )
         }
         NodeType::Call { base, args } => {
             let base_id = execute!(base => scope_id);
@@ -750,9 +797,9 @@ pub fn execute(
                 }
                 other => return Err( RuntimeError::TypeMismatch {
                     expected: "function or builtin".to_string(),
-                    found: format!("{}", other.type_str()),
+                    found: format!("{}", other.type_str(memory)),
                     area: area!(info.source.clone(), base.span),
-                    defs: vec![(other.type_str(), memory.get(base_id).def_area.clone())],
+                    defs: vec![(other.type_str(memory), memory.get(base_id).def_area.clone())],
                 } )
             }
 

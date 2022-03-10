@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory}, CodeArea};
+use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory, TypePos, CustomType}, CodeArea, builtins::{BuiltinType, builtin_type_str}};
 
 
 
@@ -14,6 +14,22 @@ pub struct Function {
 }
 
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueType {
+    Builtin(BuiltinType),
+    Custom(TypePos),
+}
+
+impl ValueType {
+    pub fn to_str(&self, memory: &Memory) -> String {
+        match self {
+            ValueType::Builtin(b) => builtin_type_str(b.clone()),
+            ValueType::Custom(id) => match memory.custom_types.get(id).unwrap() {
+                CustomType::Struct { name, .. } => name.to_string()
+            },
+        }
+    }
+}
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,21 +42,27 @@ pub enum Value {
     Function(Function),
     Array(Vec<MemoryPos>),
     Dictionary(HashMap<String, MemoryPos>),
+    Type(ValueType),
 }
 
 impl Value {
 
-    pub fn type_str(&self) -> String {
+    pub fn typ(&self) -> ValueType {
         match self {
-            Value::Number(_) => "number".to_string(),
-            Value::Boolean(_) => "bool".to_string(),
-            Value::String(_) => "string".to_string(),
-            Value::Null => "null".to_string(),
-            Value::Builtin(_) => "builtin".to_string(),
-            Value::Function{..} => "function".to_string(),
-            Value::Array(_) => "array".to_string(),
-            Value::Dictionary(_) => "dict".to_string(),
+            Value::Number(_) => ValueType::Builtin(BuiltinType::Number),
+            Value::Boolean(_) => ValueType::Builtin(BuiltinType::Bool),
+            Value::String(_) => ValueType::Builtin(BuiltinType::String),
+            Value::Null => ValueType::Builtin(BuiltinType::Null),
+            Value::Builtin(_) => ValueType::Builtin(BuiltinType::Builtin),
+            Value::Function{..} => ValueType::Builtin(BuiltinType::Function),
+            Value::Array(_) => ValueType::Builtin(BuiltinType::Array),
+            Value::Dictionary(_) => ValueType::Builtin(BuiltinType::Dict),
+            Value::Type(_) => ValueType::Builtin(BuiltinType::Type),
         }
+    }
+
+    pub fn type_str(&self, memory: &Memory) -> String {
+        self.typ().to_str(memory)
     }
 
     pub fn to_str<'a>(&'a self, memory: &'a Memory, visited: &mut Vec<&'a Value>) -> String {
@@ -73,6 +95,12 @@ impl Value {
                 visited.pop();
                 out_str
             },
+            Value::Type(v) => match v {
+                ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
+                ValueType::Custom(pos) => match memory.custom_types.get(pos).unwrap() {
+                    CustomType::Struct { name, .. } => format!("<struct: {}>", name)
+                },
+            }
         }
     }
 
@@ -81,9 +109,9 @@ impl Value {
 
 pub mod value_ops {
 
-    use crate::{interpreter::{StoredValue, Memory}, CodeArea, value::Value, error::RuntimeError};
+    use crate::{interpreter::{StoredValue, Memory}, CodeArea, value::{Value, ValueType}, error::RuntimeError, builtins::BuiltinType};
 
-    pub fn to_bool(a: &StoredValue, area: CodeArea) -> Result<bool, RuntimeError> {
+    pub fn to_bool(a: &StoredValue, area: CodeArea, memory: &Memory) -> Result<bool, RuntimeError> {
         match &a.value {
             Value::Boolean(b) => Ok(*b),
             Value::Null => Ok(false),
@@ -91,9 +119,38 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "bool".to_string(),
-                    found: format!("{}", value.type_str()),
+                    found: format!("{}", value.type_str(memory)),
                     area,
-                    defs: vec![(value.type_str(), a.def_area.clone())],
+                    defs: vec![(value.type_str(memory), a.def_area.clone())],
+                } )
+            }
+        }
+    }
+
+    pub fn convert(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
+        match (&a.value, &b.value) {
+            (Value::Number(n), Value::Type(ValueType::Builtin(BuiltinType::String))) => Ok(Value::String(n.to_string())),
+
+            (value, Value::Type(t)) => {
+                if value.type_str(memory) == t.to_str(memory) {
+                    Ok( value.clone() )
+                } else {
+                    Err( RuntimeError::CannotConvert {
+                        type1: value.type_str(memory),
+                        type2: t.to_str(memory),
+                        area,
+                        area1: a.def_area.clone(),
+                        // area2: b.def_area.clone(),
+                    } )
+                }
+            }
+            
+            (_, value) => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "type".to_string(),
+                    found: format!("{}", value.type_str(memory)),
+                    area,
+                    defs: vec![(value.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -117,9 +174,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number or string and string".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -131,9 +188,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -148,9 +205,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number or string and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -162,9 +219,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -176,9 +233,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -190,9 +247,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -205,9 +262,9 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", value.type_str()),
+                    found: format!("{}", value.type_str(memory)),
                     area,
-                    defs: vec![(value.type_str(), a.def_area.clone())],
+                    defs: vec![(value.type_str(memory), a.def_area.clone())],
                 } )
             }
         }
@@ -219,9 +276,9 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", value.type_str()),
+                    found: format!("{}", value.type_str(memory)),
                     area,
-                    defs: vec![(value.type_str(), a.def_area.clone())],
+                    defs: vec![(value.type_str(memory), a.def_area.clone())],
                 } )
             }
         }
@@ -252,9 +309,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -266,9 +323,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -280,9 +337,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }
@@ -294,9 +351,9 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
-                    found: format!("{} and {}", value1.type_str(), value2.type_str()),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
-                    defs: vec![(value1.type_str(), a.def_area.clone()), (value2.type_str(), b.def_area.clone())],
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
                 } )
             }
         }

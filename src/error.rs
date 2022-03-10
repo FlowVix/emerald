@@ -20,7 +20,12 @@ pub enum SyntaxError {
         not_found: String,
         for_char: String,
         area: CodeArea,
-    }
+    },
+    DuplicateField {
+        field_name: String,
+        first_used: CodeArea,
+        used_again: CodeArea,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -34,10 +39,6 @@ pub enum RuntimeError {
     UndefinedVar {
         var_name: String,
         area: CodeArea,
-    },
-    ModifyImmutable {
-        def_area: CodeArea,
-        modify_area: CodeArea,
     },
     IncorrectArgumentCount {
         provided: usize,
@@ -63,6 +64,13 @@ pub enum RuntimeError {
     },
     BreakUsedOutsideProgram {
         break_area: CodeArea,
+    },
+    CannotConvert {
+        type1: String,
+        type2: String,
+        area: CodeArea,
+        area1: CodeArea,
+        // area2: CodeArea,
     },
 }
 
@@ -197,6 +205,19 @@ impl ToReport for SyntaxError {
                 ],
                 note: None,
             },
+            SyntaxError::DuplicateField {
+                field_name,
+                first_used,
+                used_again,
+            } => ErrorReport {
+                source: used_again.clone(),
+                message: format!("Duplicate field name '{}' in struct definition", field_name),
+                labels: vec![
+                    (first_used.clone(), format!("Field name first used here")),
+                    (used_again.clone(), format!("Used again here")),
+                ],
+                note: None,
+            },
         }
     }
 }
@@ -220,7 +241,7 @@ impl ToReport for RuntimeError {
                 labels: {
                     let mut new_vec: Vec<(CodeArea, String)> = defs.iter().map(
                         |(t, def_a)|
-                        (def_a.clone(), format!("Value defined as {} here", t.fg(a)))
+                        (def_a.clone(), format!("Value defined as {} here", t.fg(colors.next())))
                     ).collect();
                     new_vec.push( (area.clone(), format!("Expected {}, found {}", expected.fg(a), found.fg(b))) );
                     new_vec
@@ -235,18 +256,6 @@ impl ToReport for RuntimeError {
                 message: format!("Variable '{}' is not defined", var_name),
                 labels: vec![
                     (area.clone(), format!("'{}' used here", var_name.fg(a)))
-                ],
-                note: None,
-            },
-            RuntimeError::ModifyImmutable {
-                def_area,
-                modify_area,
-            } => ErrorReport {
-                source: modify_area.clone(),
-                message: "Attempted to change immutable value".to_string(),
-                labels: vec![
-                    (def_area.clone(), "Value declared as immutable here".to_string()),
-                    (modify_area.clone(), "Attempted to modify here".to_string()),
                 ],
                 note: None,
             },
@@ -316,6 +325,22 @@ impl ToReport for RuntimeError {
                 message: format!("Break reached outside program"),
                 labels: vec![
                     (break_area.clone(), format!("Break was used here")),
+                ],
+                note: None,
+            },
+            RuntimeError::CannotConvert {
+                type1,
+                type2,
+                area,
+                area1,
+                // area2
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("Cannot convert {} to {}", type1, type2),
+                labels: vec![
+                    (area.clone(), format!("Couldn't convert {} to {}", type1.fg(a), type2.fg(b))),
+                    (area1.clone(), format!("Value defined as {} here", type1.fg(colors.next()))),
+                    // (area2.clone(), format!("Conversion type {} here", type2.fg(colors.next()))),
                 ],
                 note: None,
             },

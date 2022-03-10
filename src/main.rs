@@ -12,11 +12,11 @@ use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
 use ansi_term;
 use ariadne::{Source, Cache};
-use builtins::builtin_names;
+use builtins::{builtin_names, builtin_type_from_str, builtin_type_names};
 use error::{ToReport, RuntimeError};
 use interpreter::{execute, Memory, ScopeList, RunInfo, Exit};
 use logos::Logos;
-use value::Value;
+use value::{Value, ValueType};
 
 use crate::parser::parse;
 
@@ -139,6 +139,16 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                 ));
             }
 
+            for i in builtin_type_names() {
+                scopes.set_var(0, i.to_lowercase().to_string(), memory.insert(
+                    Value::Type(ValueType::Builtin(builtin_type_from_str(&i))),
+                    CodeArea {
+                        source: source.clone(),
+                        range: (0, 0)
+                    },
+                ));
+            }
+
             let mut info = RunInfo {source, exits: vec![]};
             let mut result = execute(
                 &node,
@@ -217,7 +227,7 @@ fn main() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
 
-    if true {
+    if false {
         let mut buf = PathBuf::new();
         buf.push("test.mrld");
         let code = fs::read_to_string(buf.clone()).unwrap();

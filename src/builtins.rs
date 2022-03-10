@@ -25,6 +25,47 @@ macro_rules! area {
 }
 
 
+macro_rules! builtin_types {
+    (
+        $(
+            $type_name:ident,
+        )*
+    ) => {
+        #[derive(Debug, Clone, PartialEq)]
+        pub enum BuiltinType {
+            $(
+                $type_name,
+            )*
+        }
+        pub fn builtin_type_str(b: BuiltinType) -> String {
+            match b {
+                $(
+                    BuiltinType::$type_name => stringify!($type_name).to_lowercase().to_string(),
+                )*
+            }
+        }
+        pub fn builtin_type_from_str(s: &str) -> BuiltinType {
+            match s {
+                $(
+                    stringify!($type_name) => BuiltinType::$type_name,
+                )*
+                _ => unreachable!(),
+            }
+        }
+        pub fn builtin_type_names() -> Vec<String> {
+            let mut list = vec![];
+            $(
+                list.push(stringify!($type_name).to_string());
+            )*
+            list
+        }
+
+    };
+}
+
+
+
+
 enum SpecialArgs {
     Any
 }
@@ -130,7 +171,7 @@ macro_rules! builtins {
 
                                 $areas.push($memory.get(arg_id).def_area.clone());
                                 let $arg_name = $memory.get(arg_id).value.clone();
-                                $arg_name.type_str(); // just so it doesnt say unused
+                                $arg_name.type_str($memory); // just so it doesnt say unused
 
 
                                 
@@ -140,9 +181,9 @@ macro_rules! builtins {
                                         Value::$type(inner) => {$arg_name = inner},
                                         other => return Err( RuntimeError::TypeMismatch {
                                             expected: stringify!($type).to_string(),
-                                            found: format!("{}", other.type_str()),
+                                            found: format!("{}", other.type_str($memory)),
                                             area: area!($info.source.clone(), args[__index].span),
-                                            defs: vec![(other.type_str(), $memory.get(arg_id).def_area.clone())],
+                                            defs: vec![(other.type_str($memory), $memory.get(arg_id).def_area.clone())],
                                         } )
                                     }
                                 )?
@@ -181,6 +222,18 @@ macro_rules! builtins {
     };
 }
 
+
+builtin_types!(
+    Number,
+    Bool,
+    String,
+    Null,
+    Builtin,
+    Function,
+    Array,
+    Dict,
+    Type,
+);
 
 
 builtins!{

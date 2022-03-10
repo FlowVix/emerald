@@ -1,18 +1,11 @@
 
-func ret_out(value) {
-    return return value;
+
+
+struct Person {
+    name: string,
+    age: number,
 }
 
-
-
-func thing() {
-    print("a");
-    print("b");
-    ret_out(69);
-    print("c");
-}
-
-
-print(thing());
+print(string, [Person]);
 
 

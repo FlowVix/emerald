@@ -39,6 +39,7 @@ pub enum NodeType {
     Member { base: Box<ASTNode>, member: String },
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
+    StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: Vec<CodeArea>, header_area: CodeArea },
 }
 
 macro_rules! expected_err {
@@ -294,6 +295,7 @@ operators!(
     Unary       <==  [ Plus Minus ],
     LeftAssoc   <==  [ Mult Div Mod ],
     RightAssoc  <==  [ Pow ],
+    LeftAssoc   <==  [ As ],
 );
 
 
@@ -381,11 +383,11 @@ pub fn parse_unit(
                         range: (header_start, header_end),
                     };
                     pos += 1;
-                    parse!(parse_expr => let code);
+                    parse!(parse_expr(false) => let code);
                     ret!( NodeType::Lambda { arg_names, arg_areas, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
                 },
                 _ => {
-                    parse!(parse_expr => let value);
+                    parse!(parse_expr(false) => let value);
                     check_tok!(RParen else ")");
                     ret!( value.node => start.0, span!(-1).1 );
                 }
@@ -402,7 +404,7 @@ pub fn parse_unit(
             // });
             check_tok!(Ident(var_name) else "variable name");
             check_tok!(Assign else "=");
-            parse!(parse_expr => let value);
+            parse!(parse_expr(false) => let value);
             // println!("{} {}", var_name, mutable);
             ret!( NodeType::Declaration { var_name, value: Box::new(value) } => start.0, span!(-1).1 );
         }
@@ -416,7 +418,7 @@ pub fn parse_unit(
                         source: info.source.clone(),
                         range: start,
                     };
-                    parse!(parse_expr => let code);
+                    parse!(parse_expr(false) => let code);
                     ret!( NodeType::Lambda { arg_names: vec![name.to_string()], arg_areas: vec![arg_area.clone()], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
                 }
                 _ => (),
@@ -430,7 +432,7 @@ pub fn parse_unit(
                 source: info.source.clone(),
                 range: start,
             };
-            parse!(parse_expr => let code);
+            parse!(parse_expr(false) => let code);
             ret!( NodeType::Lambda { arg_names: vec![], arg_areas: vec![], header_area, code: Box::new(code) } => start.0, span!(-1).1 );
         }
         Token::LBracket => {
@@ -447,7 +449,7 @@ pub fn parse_unit(
                     check_tok!(Ident(key) else "key name");
                     check_tok!(Colon else ":");
 
-                    parse!(parse_expr => let value);
+                    parse!(parse_expr(false) => let value);
 
                     map.insert(key, value);
                     if !matches!(tok!(0), Token::RBracket | Token::Comma) {
@@ -468,7 +470,7 @@ pub fn parse_unit(
 
             let mut elements = vec![];
             while_tok!(!= RSqBracket: {
-                parse!(parse_expr => let elem);
+                parse!(parse_expr(false) => let elem);
                 elements.push( elem );
                 if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
                     expected_err!("] or ,", tok!(0), span!(0), info )
@@ -481,24 +483,24 @@ pub fn parse_unit(
         }
         Token::If => {
             pos += 1;
-            parse!(parse_expr => let cond);
-            parse!(parse_expr => let code);
+            parse!(parse_expr(false) => let cond);
+            parse!(parse_expr(false) => let code);
             let mut else_branch = None;
             if_tok!(== Else: {
                 pos += 1;
-                parse!(parse_expr => let temp); else_branch = Some(Box::new(temp));
+                parse!(parse_expr(false) => let temp); else_branch = Some(Box::new(temp));
             });
             ret!( NodeType::If { cond: Box::new(cond), code: Box::new(code), else_branch  } => start.0, span!(-1).1 );
         }
         Token::While => {
             pos += 1;
-            parse!(parse_expr => let cond);
-            parse!(parse_expr => let code);
+            parse!(parse_expr(false) => let cond);
+            parse!(parse_expr(false) => let code);
             ret!( NodeType::While { cond: Box::new(cond), code: Box::new(code) } => start.0, span!(-1).1 );
         }
         Token::Loop => {
             pos += 1;
-            parse!(parse_expr => let code);
+            parse!(parse_expr(false) => let code);
             ret!( NodeType::Loop { code: Box::new(code) } => start.0, span!(-1).1 );
         }
         Token::Func => {
@@ -534,14 +536,14 @@ pub fn parse_unit(
                 range: (header_start, header_end),
             };
 
-            parse!(parse_expr => let code);
+            parse!(parse_expr(false) => let code);
             ret!( NodeType::FuncDef { func_name, arg_names, arg_areas, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
         },
         Token::Return => {
             pos += 1;
             let mut node = None;
             if_tok!(!= Eol: {
-                parse!(parse_expr => let temp); node = Some(Box::new(temp));
+                parse!(parse_expr(false) => let temp); node = Some(Box::new(temp));
             });
             ret!( NodeType::Return {
                 node
@@ -551,11 +553,53 @@ pub fn parse_unit(
             pos += 1;
             let mut node = None;
             if_tok!(!= Eol: {
-                parse!(parse_expr => let temp); node = Some(Box::new(temp));
+                parse!(parse_expr(false) => let temp); node = Some(Box::new(temp));
             });
             ret!( NodeType::Break {
                 node
             } => start.0, span!(-1).1 )
+        },
+        Token::Struct => {
+            pos += 1;
+            check_tok!(Ident(struct_name) else "struct name");
+            let header_area = CodeArea {
+                source: info.source.clone(),
+                range: (span!(-2).0, span!(-1).1),
+            };
+            check_tok!(LBracket else "{");
+
+            let mut fields = HashMap::new();
+            let mut field_areas = vec![];
+            while_tok!(!= RBracket: {
+                check_tok!(Ident(field) else "field name");
+                field_areas.push(CodeArea {
+                    source: info.source.clone(),
+                    range: span!(-1),
+                });
+                if let Some(id) = fields.clone().into_iter().position(|(s, _)| s == field) {
+                    return Err( SyntaxError::DuplicateField {
+                        field_name: field,
+                        first_used: field_areas[id].clone(),
+                        used_again: field_areas.last().unwrap().clone(),
+                    } )
+                }
+                check_tok!(Colon else ":");
+
+                let mut default = None;
+                parse!(parse_expr(true) => let field_type);
+                if_tok!(== Assign: {
+                    pos += 1;
+                    parse!(parse_expr(true) => let temp); default = Some(Box::new(temp));
+                });
+
+                fields.insert(field, (field_type, default));
+                if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                    expected_err!("} or ,", tok!(0), span!(0), info )
+                }
+                skip_tok!(Comma);
+            });
+            // println!("{}: {:#?}", struct_name, fields);
+            ret!( NodeType::StructDef { struct_name, fields, field_areas, header_area } => start.0, span!(-1).1 );
         },
         unary_op if is_unary(unary_op) => {
             pos += 1;
@@ -597,7 +641,7 @@ fn parse_value(
                 pos += 1;
                 let mut args = vec![];
                 while_tok!(!= RParen: {
-                    parse!(parse_expr => let arg);
+                    parse!(parse_expr(false) => let arg);
                     args.push(arg);
                     if !matches!(tok!(0), Token::RParen | Token::Comma) {
                         expected_err!(") or ,", tok!(0), span!(0), info )
@@ -614,7 +658,7 @@ fn parse_value(
             },
             Token::LSqBracket => {
                 pos += 1;
-                parse!(parse_expr => let index);
+                parse!(parse_expr(false) => let index);
                 check_tok!(RSqBracket else "]");
                 value = ASTNode {
                     node: NodeType::Index {
@@ -693,8 +737,9 @@ fn parse_expr(
     tokens: &Tokens,
     pos: usize,
     info: &ParseInfo,
+    skip_assignment: bool,
 ) -> Result<(ASTNode, usize), SyntaxError> {
-    return parse_op(tokens, pos, info, 0)
+    return parse_op(tokens, pos, info, if skip_assignment {1} else {0})
 }
 
 
@@ -705,7 +750,7 @@ fn parse_statement(
 ) -> Result<(ASTNode, usize), SyntaxError> {
     parse_util!(tokens, pos, info);
 
-    parse!(parse_expr => let value);
+    parse!(parse_expr(false) => let value);
     if !matches!(tok!(-1), Token::RBracket) {
         check_tok!(Eol else ';');
     }

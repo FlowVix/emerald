@@ -121,6 +121,8 @@ pub enum Token {
     // For,
     // #[token("in")]
     // In,
+    #[token("as")]
+    As,
     
     #[token("let")]
     Let,
@@ -129,8 +131,8 @@ pub enum Token {
     #[token("func")]
     Func,
 
-    // #[token("struct")]
-    // Struct,
+    #[token("struct")]
+    Struct,
 
     #[token("return")]
     Return,
@@ -214,8 +216,10 @@ impl Token {
             Token::Loop => "loop",
             // Token::For => "for",
             // Token::In => "in",
+            Token::As => "as",
             Token::Return => "return",
             Token::Break => "break",
+            Token::Struct => "struct",
             // Token::Type => "type",
             // Token::Impl => "impl",
             Token::Eol => ";",
