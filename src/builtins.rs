@@ -31,7 +31,8 @@ macro_rules! builtin_types {
             $type_name:ident,
         )*
     ) => {
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Debug, Clone)]
+        #[derive(Eq, Hash, PartialEq)]
         pub enum BuiltinType {
             $(
                 $type_name,
@@ -279,6 +280,13 @@ builtins!{
     [Tan]: tan(n: Number) { Value::Number(n.tan()) }
 
     [Sqrt]: sqrt(n: Number) { Value::Number(n.sqrt()) }
+
+    [Impls]: impls(@Any => poopie) {
+        println!("impls: {:?}", memory.impls);
+        println!("builtin impls: {:?}", memory.builtin_impls);
+        Value::Null
+
+    }
 
 
 

@@ -41,6 +41,8 @@ pub enum NodeType {
     Break { node: Option<Box<ASTNode>> },
     StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: HashMap<String, CodeArea>, def_area: CodeArea },
     StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, ASTNode> },
+    Impl { type_var: (String, CodeArea), fields: HashMap<String, ASTNode> },
+    Associated { base: Box<ASTNode>, assoc: String },
 }
 
 macro_rules! expected_err {
@@ -372,6 +374,11 @@ pub fn parse_unit(
                                 used_again: arg_area,
                             } )
                         }
+                        if arg_name == "self" && !args.is_empty() {
+                            return Err( SyntaxError::SelfNotFirstArg {
+                                area: arg_area,
+                            } )
+                        }
                         let mut pat = None;
                         if_tok!(== Colon: {
                             pos += 1;
@@ -484,6 +491,45 @@ pub fn parse_unit(
             }
 
         }
+        Token::Impl => {
+            pos += 1;
+            check_tok!(Ident(type_var) else "type to impl on");
+            let type_var_area = CodeArea {
+                source: info.source.clone(),
+                range: span!(-1),
+            };
+            check_tok!(LBracket else "{");
+
+            let mut fields = HashMap::new();
+            let mut areas: HashMap<String, CodeArea> = HashMap::new();
+            while_tok!(!= RBracket: {
+                check_tok!(Ident(field) else "field name");
+                let last_area = CodeArea {
+                    source: info.source.clone(),
+                    range: span!(-1),
+                };
+                if fields.contains_key(&field) {
+                    return Err( SyntaxError::DuplicateFieldImpl {
+                        first_used: areas[&field].clone(),
+                        field_name: field,
+                        used_again: last_area,
+                    } )
+                }
+                areas.insert(field.clone(), last_area);
+                check_tok!(Colon else ":");
+
+                parse!(parse_expr(false) => let value);
+
+                fields.insert(field, value);
+                if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                    expected_err!("} or ,", tok!(0), span!(0), info )
+                }
+                skip_tok!(Comma);
+            });
+            ret!( NodeType::Impl {type_var: (type_var, type_var_area), fields} => start );
+            
+
+        }
         Token::LSqBracket => {
             pos += 1;
 
@@ -540,6 +586,11 @@ pub fn parse_unit(
                         arg_name,
                         first_used: args[id].1.clone(),
                         used_again: arg_area,
+                    } )
+                }
+                if arg_name == "self" && !args.is_empty() {
+                    return Err( SyntaxError::SelfNotFirstArg {
+                        area: arg_area,
                     } )
                 }
                 let mut pat = None;
@@ -699,6 +750,7 @@ fn parse_value(
                 value = ASTNode {
                     node: NodeType::Member {
                         member: member_name,
+                        
                         base: Box::new(value),
                     },
                     span: ( start.0, span!(-1).1 )
@@ -706,41 +758,53 @@ fn parse_value(
             },
             Token::DoubleColon => {
                 pos += 1;
-                check_tok!(LBracket else "{");
+                if matches!(tok!(0), Token::LBracket) {
+                    pos += 1;
 
-                let mut fields = HashMap::new();
-                let mut areas: HashMap<String, CodeArea> = HashMap::new();
-                while_tok!(!= RBracket: {
-                    check_tok!(Ident(field) else "field name");
-                    let last_area = CodeArea {
-                        source: info.source.clone(),
-                        range: span!(-1),
-                    };
-                    if fields.contains_key(&field) {
-                        return Err( SyntaxError::DuplicateField {
-                            first_used: areas[&field].clone(),
-                            field_name: field,
-                            used_again: last_area,
-                        } )
+                    let mut fields = HashMap::new();
+                    let mut areas: HashMap<String, CodeArea> = HashMap::new();
+                    while_tok!(!= RBracket: {
+                        check_tok!(Ident(field) else "field name");
+                        let last_area = CodeArea {
+                            source: info.source.clone(),
+                            range: span!(-1),
+                        };
+                        if fields.contains_key(&field) {
+                            return Err( SyntaxError::DuplicateField {
+                                first_used: areas[&field].clone(),
+                                field_name: field,
+                                used_again: last_area,
+                            } )
+                        }
+                        areas.insert(field.clone(), last_area);
+                        check_tok!(Colon else ":");
+
+                        parse!(parse_expr(false) => let value);
+
+                        fields.insert(field, value);
+                        if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                            expected_err!("} or ,", tok!(0), span!(0), info )
+                        }
+                        skip_tok!(Comma);
+                    });
+                    value = ASTNode {
+                        node: NodeType::StructInstance {
+                            base: Box::new(value),
+                            field_areas: areas,
+                            fields,
+                        },
+                        span: ( start.0, span!(-1).1 )
                     }
-                    areas.insert(field.clone(), last_area);
-                    check_tok!(Colon else ":");
 
-                    parse!(parse_expr(false) => let value);
-
-                    fields.insert(field, value);
-                    if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                        expected_err!("} or ,", tok!(0), span!(0), info )
+                } else {
+                    check_tok!(Ident(assoc) else "identifier or {");
+                    value = ASTNode {
+                        node: NodeType::Associated {
+                            base: Box::new(value),
+                            assoc,
+                        },
+                        span: ( start.0, span!(-1).1 )
                     }
-                    skip_tok!(Comma);
-                });
-                value = ASTNode {
-                    node: NodeType::StructInstance {
-                        base: Box::new(value),
-                        field_areas: areas,
-                        fields,
-                    },
-                    span: ( start.0, span!(-1).1 )
                 }
             }
             _ => unreachable!(),

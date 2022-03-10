@@ -6,30 +6,25 @@ struct Person {
 }
 
 impl Person {
-    func baby(name: string) {
-        return Person::{name, age: 0};
-    }
-    func speak(self) {
-        print("I am ", self.name);
-    }
+    baby: (name: string) => {
+        return Person::{name: name, age: 0};
+    },
+    thingy: 3,
+    get_older: (self) => {
+        self.age += 1;
+    },
 }
 
-
-struct Person {
-    name: string,
-    age: number,
-}
-
-impl Person {
-    baby: (name: string) {
-        return Person::{name, age: 0};
-    }
-    speak: (self) {
-        print("I am ", self.name);
-    }
-}
-
-
+let a = Person::baby("fucker");
+print(a);
+a.get_older();
+print(a);
+a.get_older();
+print(a);
+a.get_older();
+print(a);
+a.get_older();
+print(a);
 
 
 

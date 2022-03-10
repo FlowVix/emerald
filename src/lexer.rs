@@ -144,8 +144,8 @@ pub enum Token {
 
     // #[token("type")]
     // Type,
-    // #[token("impl")]
-    // Impl,
+    #[token("impl")]
+    Impl,
 
     #[token(";")]
     Eol,
@@ -226,7 +226,7 @@ impl Token {
             Token::Break => "break",
             Token::Struct => "struct",
             // Token::Type => "type",
-            // Token::Impl => "impl",
+            Token::Impl => "impl",
             Token::Eol => ";",
             // Token::TypeName(_) => "type name",
             Token::Ident(_) => "identifier",

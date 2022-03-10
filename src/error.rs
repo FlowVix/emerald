@@ -26,10 +26,18 @@ pub enum SyntaxError {
         first_used: CodeArea,
         used_again: CodeArea,
     },
+    DuplicateFieldImpl {
+        field_name: String,
+        first_used: CodeArea,
+        used_again: CodeArea,
+    },
     DuplicateKey {
         key_name: String,
         first_used: CodeArea,
         used_again: CodeArea,
+    },
+    SelfNotFirstArg {
+        area: CodeArea,
     },
 }
 
@@ -104,6 +112,10 @@ pub enum RuntimeError {
         pattern_area: CodeArea,
         type_area: CodeArea,
         // area2: CodeArea,
+    },
+    NoAssociatedMember {
+        assoc: String,
+        area: CodeArea,
     },
 }
 
@@ -251,6 +263,19 @@ impl ToReport for SyntaxError {
                 ],
                 note: None,
             },
+            SyntaxError::DuplicateFieldImpl {
+                field_name,
+                first_used,
+                used_again,
+            } => ErrorReport {
+                source: used_again.clone(),
+                message: format!("Duplicate field name '{}' in impl", field_name),
+                labels: vec![
+                    (first_used.clone(), format!("Field name first used here")),
+                    (used_again.clone(), format!("Used again here")),
+                ],
+                note: None,
+            },
             SyntaxError::DuplicateKey {
                 key_name,
                 first_used,
@@ -261,6 +286,16 @@ impl ToReport for SyntaxError {
                 labels: vec![
                     (first_used.clone(), format!("Key first used here")),
                     (used_again.clone(), format!("Used again here")),
+                ],
+                note: None,
+            },
+            SyntaxError::SelfNotFirstArg {
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("'self' must be the first argument"),
+                labels: vec![
+                    (area.clone(), format!("Argument 'self' defined here"))
                 ],
                 note: None,
             },
@@ -463,6 +498,17 @@ impl ToReport for RuntimeError {
                     (pattern_area.clone(), format!("Pattern defined as {} here", pattern.fg(a))),
                     (type_area.clone(), format!("Value defined as {} here", typ.fg(b))),
                     // (area2.clone(), format!("Conversion type {} here", type2.fg(colors.next()))),
+                ],
+                note: None,
+            },
+            RuntimeError::NoAssociatedMember {
+                assoc,
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("Associated member '{}' does not exist", assoc),
+                labels: vec![
+                    (area.clone(), format!("Member '{}' was used here", assoc.fg(a)))
                 ],
                 note: None,
             },

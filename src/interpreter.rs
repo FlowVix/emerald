@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::{value::{Value, value_ops, Function, ValueType}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea};
+use crate::{value::{Value, value_ops, Function, ValueType}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea, builtins::{Builtin, BuiltinType}};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug)]
@@ -36,6 +36,20 @@ pub struct CustomStruct {
 }
 
 
+#[derive(Debug, Clone)]
+pub struct ImplData {
+    pub members: HashMap<String, MemoryPos>,
+    pub methods: Vec<String>,
+}
+
+impl ImplData {
+    pub fn new() -> Self {
+        ImplData {
+            members: HashMap::new(),
+            methods: Vec::new(),
+        }
+    }
+}
 
 pub struct Memory {
     counter: MemoryPos,
@@ -43,7 +57,9 @@ pub struct Memory {
     // protected: Vec<Vec<MemoryPos>>,
     custom_struct_counter: TypePos,
     pub custom_structs: HashMap<TypePos, CustomStruct>,
-    // impls: HashMap<String, HashMap<String, MemoryPos>>,
+
+    pub impls: HashMap<TypePos, ImplData>,
+    pub builtin_impls: HashMap<BuiltinType, ImplData>,
 }
 
 
@@ -70,7 +86,8 @@ impl Memory {
             custom_structs: HashMap::new(),
             // protected: vec![],
             // custom_types: vec![],
-            // impls: HashMap::new()
+            impls: HashMap::new(),
+            builtin_impls: HashMap::new()
         }
     }
 
@@ -605,6 +622,7 @@ pub fn execute(
                     code: code.clone(),
                     parent_scope: scope_id,
                     header_area: header_area.clone(),
+                    self_arg: None,
                 } ),
                 area!(info.source.clone(), start_node.span)
             );
@@ -627,7 +645,8 @@ pub fn execute(
                     args: args_exec,
                     code: code.clone(),
                     parent_scope: scope_id,
-                    header_area: header_area.clone()
+                    header_area: header_area.clone(),
+                    self_arg: None,
                 } ),
                 area!(info.source.clone(), start_node.span)
             ) )
@@ -708,6 +727,32 @@ pub fn execute(
         }
         NodeType::Member { base, member } => {
             let base_id = execute!(base => scope_id);
+            let typ = memory.get(base_id).value.typ();
+            if let Some(data) = match typ {
+                ValueType::Builtin(b) => memory.builtin_impls.get(&b),
+                ValueType::CustomStruct(id) => memory.impls.get(&id),
+            } {
+                if data.methods.contains(member) {
+                    let func = *data.members.get(member).unwrap();
+                    match &memory.get(func).value {
+                        Value::Function(f) => {
+                            let f_v = Value::Function( Function {
+                                args: f.args.clone(),
+                                code: f.code.clone(),
+                                parent_scope: f.parent_scope,
+                                header_area: f.header_area.clone(),
+                                self_arg: Some(base.clone()),
+                            } );
+                            let f_a = memory.get(func).def_area.clone();
+                            return Ok( memory.insert(
+                                f_v,
+                                f_a
+                            ) )
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+            }
             match &memory.get(base_id).value.clone() {
                 Value::Dictionary(map) => {
                     match map.get(member) {
@@ -849,6 +894,110 @@ pub fn execute(
                 } )
             }
         }
+        NodeType::Impl { type_var: (name, name_area), fields } => {
+
+            let mut current_scope = scope_id;
+            loop {
+                match scopes.get(current_scope).vars.get(name) {
+                    Some(id) => {
+                        match &memory.get(*id).value.clone() {
+                            Value::Type(t) => {
+                                match t {
+                                    ValueType::Builtin(b) => {
+                                        if !memory.builtin_impls.contains_key(b) {
+                                            memory.builtin_impls.insert(b.clone(), ImplData::new());
+                                        }
+                                        for (k, v) in fields {
+                                            let temp = execute!(v => scope_id);
+                                            memory.builtin_impls.get_mut(b).unwrap().members.insert( k.clone(), temp );
+                                            if let ASTNode {
+                                                node: NodeType::Lambda { args, .. },
+                                                ..
+                                            } = v.clone() {
+                                                if let Some((s, _, _)) = args.get(0) {
+                                                    if s == "self" { memory.builtin_impls.get_mut(b).unwrap().methods.push(k.clone()) }
+                                                }
+                                            }
+                                        }
+                                        // memory.builtin_impls.get_mut(b).unwrap().members.insert(k, v)
+                                    },
+                                    ValueType::CustomStruct(id) => {
+                                        if !memory.impls.contains_key(id) {
+                                            memory.impls.insert(*id, ImplData::new());
+                                        }
+                                        for (k, v) in fields {
+                                            let temp = execute!(v => scope_id);
+                                            memory.impls.get_mut(id).unwrap().members.insert( k.clone(), temp );
+                                            if let ASTNode {
+                                                node: NodeType::Lambda { args, .. },
+                                                ..
+                                            } = v.clone() {
+                                                if let Some((s, _, _)) = args.get(0) {
+                                                    if s == "self" { memory.impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                }
+                                            }
+                                        }
+                                        // memory.builtin_impls.get_mut(b).unwrap().members.insert(k, v)
+                                    },
+                                };
+                                return Ok(memory.insert(
+                                    Value::Null,
+                                    area!(info.source.clone(), start_node.span)
+                                ))
+                            },
+                            other => return Err( RuntimeError::TypeMismatch {
+                                expected: "type".to_string(),
+                                found: format!("{}", other.type_str(memory)),
+                                area: name_area.clone(),
+                                defs: vec![(other.type_str(memory), memory.get(*id).def_area.clone())],
+                            } )
+                        }
+                    },
+                    None => match scopes.get(current_scope).parent_id {
+                        Some(p_id) => current_scope = p_id,
+                        None => break,
+                    },
+                }
+            }
+            Err(
+                RuntimeError::UndefinedVar {
+                    var_name: name.to_string(),
+                    area: area!(info.source.clone(), start_node.span),
+                }
+            )
+        },
+        NodeType::Associated { base, assoc } => {
+            let base_id = execute!(base => scope_id);
+            match &memory.get(base_id).value.clone() {
+                Value::Type(t) => {
+                    let impld = match t {
+                        ValueType::Builtin(b) => memory.builtin_impls.get(b).clone(),
+                        ValueType::CustomStruct(id) => memory.impls.get(id).clone(),
+                    };
+                    match impld {
+                        None => Err( RuntimeError::NoAssociatedMember {
+                            assoc: assoc.clone(),
+                            area: area!(info.source.clone(), start_node.span),
+                        } ),
+                        Some(fields) => {
+                            match fields.members.get(assoc) {
+                                Some(i) => Ok(*i),
+                                None => return Err( RuntimeError::NoAssociatedMember {
+                                    assoc: assoc.clone(),
+                                    area: area!(info.source.clone(), start_node.span),
+                                } ),
+                            }
+                        }
+                    }
+                }
+                other => return Err( RuntimeError::TypeMismatch {
+                    expected: "type".to_string(),
+                    found: format!("{}", other.type_str(memory)),
+                    area: area!(info.source.clone(), base.span),
+                    defs: vec![(other.type_str(memory), memory.get(base_id).def_area.clone())],
+                } )
+            }
+        },
         NodeType::Call { base, args } => {
             let base_id = execute!(base => scope_id);
             
@@ -863,7 +1012,11 @@ pub fn execute(
                     info
                 ),
                 
-                Value::Function( Function { args: func_args, code, parent_scope, header_area } ) => {
+                Value::Function( Function { args: func_args, code, parent_scope, header_area, self_arg} ) => {
+                    let mut args = args.clone();
+                    if let Some(n) = self_arg {
+                        args.insert(0, *n.clone());
+                    }
                     if func_args.len() != args.len() {
                         return Err(
                             RuntimeError::IncorrectArgumentCount {
@@ -877,7 +1030,7 @@ pub fn execute(
 
                     let derived = scopes.derive(*parent_scope);
                     for (arg, (name, a, d)) in args.iter().zip(func_args) {
-                        let arg_id = execute!(arg => scope_id);
+                        let arg_id = if name == "self" { execute_raw!(arg => scope_id) } else { execute!(arg => scope_id) };
                         
                         match d {
                             Some(typ) => {
@@ -950,6 +1103,7 @@ pub fn execute(
 
 
         }
+        _ => unimplemented!()
     }
 
 }

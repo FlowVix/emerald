@@ -235,7 +235,7 @@ fn main() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
 
-    if false {
+    if true {
         let mut buf = PathBuf::new();
         buf.push("test.mrld");
         let code = fs::read_to_string(buf.clone()).unwrap();

@@ -10,6 +10,7 @@ pub struct Function {
     pub code: Box<ASTNode>,
     pub parent_scope: ScopePos,
     pub header_area: CodeArea,
+    pub self_arg: Option<(Box<ASTNode>)>,
 }
 
 
