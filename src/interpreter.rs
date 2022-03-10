@@ -15,6 +15,7 @@ pub enum Exit {
 pub struct RunInfo {
     pub source: EmeraldSource,
     pub exits: Vec<Exit>,
+    pub trace: Vec<CodeArea>,
 }
 
 pub type MemoryPos = usize;
@@ -224,6 +225,22 @@ impl ScopeList {
     ) {
         self.get_mut(scope_id).vars.insert(name, val_id);
     }
+    pub fn get_var(
+        &self,
+        scope_id: ScopePos,
+        name: &String,
+    ) -> Option<MemoryPos> {
+        let mut current_scope = scope_id;
+        loop {
+            match self.get(current_scope).vars.get(name) {
+                Some(id) => return Some(*id),
+                None => match self.get(current_scope).parent_id {
+                    Some(p_id) => current_scope = p_id,
+                    None => return None,
+                },
+            }
+        }
+    }
 }
 
 macro_rules! interpreter_util {
@@ -273,6 +290,9 @@ macro_rules! area {
 }
 
 
+
+
+
 pub fn execute(
     node: &ASTNode,
     scope_id: ScopePos,
@@ -283,6 +303,9 @@ pub fn execute(
     interpreter_util!(memory, scopes, info);
 
     let start_node = node;
+    if memory.register.len() % 10000 == 0 {
+        println!("{:?}", memory.register.len());
+    }
     
     match &node.node {
         NodeType::Value { value } => Ok(memory.insert(
@@ -498,23 +521,15 @@ pub fn execute(
             Ok(initial_id)
         }
         NodeType::Var { var_name } => {
-            let mut current_scope = scope_id;
-            loop {
-                match scopes.get(current_scope).vars.get(var_name) {
-                    Some(id) => return Ok(*id),
-                    None => match scopes.get(current_scope).parent_id {
-                        Some(p_id) => current_scope = p_id,
-                        None => break,
-                    },
-                }
+            match scopes.get_var(scope_id, var_name) {
+                Some(i) => Ok( i ),
+                None => Err(
+                    RuntimeError::UndefinedVar {
+                        var_name: var_name.to_string(),
+                        area: area!(info.source.clone(), start_node.span),
+                    }
+                ),
             }
-            Err(
-                RuntimeError::UndefinedVar {
-                    var_name: var_name.to_string(),
-                    area: area!(info.source.clone(), start_node.span),
-                }
-            )
-            
         }
         NodeType::StatementList { statements } => {
             let mut ret_id = memory.insert(
@@ -560,6 +575,38 @@ pub fn execute(
                     break;
                 }
                 ret_id = execute!(code => scope_id);
+                match info.exits.last() {
+                    Some(
+                        Exit::Break(v, _)
+                    ) => {
+                        ret_id = *v;
+                        info.exits.pop();
+                        return Ok( ret_id )
+                    },
+                    Some(
+                        Exit::Return(_, _)
+                    ) => {
+                        return Ok( ret_id )
+                    },
+                    None => (),
+                }
+            }
+            memory.redef(ret_id, area!(info.source.clone(), start_node.span));
+            Ok( ret_id )
+        }
+        NodeType::For { var: (name, var_area), code, iter } => {
+            let mut ret_id = memory.insert(
+                Value::Null,
+                area!(info.source.clone(), start_node.span)
+            );
+            let iter_id = execute!(iter => scope_id);
+            for i in value_ops::iter(&memory.get(iter_id), area!(info.source.clone(), iter.span), memory)? {
+                let derived = scopes.derive(scope_id);
+                scopes.set_var(derived, name.clone(), memory.insert(
+                    i,
+                    var_area.clone(),
+                ));
+                ret_id = execute!(code => derived);
                 match info.exits.last() {
                     Some(
                         Exit::Break(v, _)
@@ -664,7 +711,19 @@ pub fn execute(
         NodeType::Dictionary { map } => {
             let mut id_map = HashMap::new();
             for (k, v) in map {
-                id_map.insert( k.clone(), execute!(v => scope_id) );
+                let id = match v {
+                    Some(n) => execute!(n => scope_id),
+                    None => match scopes.get_var(scope_id, k) {
+                        Some(i) => clone!(i => @),
+                        None => return Err(
+                            RuntimeError::UndefinedVar {
+                                var_name: k.to_string(),
+                                area: area!(info.source.clone(), start_node.span),
+                            }
+                        ),
+                    },
+                };
+                id_map.insert( k.clone(), id );
             }
             Ok( memory.insert(
                 Value::Dictionary(id_map),
@@ -772,11 +831,9 @@ pub fn execute(
                         } ),
                     }
                 }
-                other => return Err( RuntimeError::TypeMismatch {
-                    expected: "dict or struct instance".to_string(),
-                    found: format!("{}", other.type_str(memory)),
-                    area: area!(info.source.clone(), base.span),
-                    defs: vec![(other.type_str(memory), memory.get(base_id).def_area.clone())],
+                _ => return Err( RuntimeError::NonexistentField {
+                    field: member.clone(),
+                    area: area!(info.source.clone(), start_node.span),
                 } )
             }
         }
@@ -855,7 +912,19 @@ pub fn execute(
                                 struct_def: struct_type.def_area.clone(),
                             } )
                         }
-                        id_map.insert( k.clone(), execute!(v => scope_id) );
+                        let id = match v {
+                            Some(n) => execute!(n => scope_id),
+                            None => match scopes.get_var(scope_id, k) {
+                                Some(i) => clone!(i => @),
+                                None => return Err(
+                                    RuntimeError::UndefinedVar {
+                                        var_name: k.to_string(),
+                                        area: area!(info.source.clone(), start_node.span),
+                                    }
+                                ),
+                            },
+                        };
+                        id_map.insert( k.clone(), id );
                     }
                     for (k, v) in &id_map {
                         let typ = struct_type.fields[k].0;
@@ -1049,10 +1118,14 @@ pub fn execute(
                             },
                             None => (),
                         }
-                        // let arg_id = clone!(arg_id => area.clone());
+                        let arg_id = clone!(arg_id => a.clone());
                         scopes.set_var(derived, name.clone(), arg_id);
                     }
+                    
+                    info.trace.push( area!(info.source.clone(), start_node.span) );
                     let ret_id = execute!(code => derived);
+                    info.trace.pop();
+
                     match info.exits.last() {
                         Some(
                             Exit::Return(v, _)

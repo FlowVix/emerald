@@ -177,6 +177,22 @@ pub mod value_ops {
         }
     }
 
+    pub fn iter(a: &StoredValue, area: CodeArea, memory: &Memory) -> Result<Vec<Value>, RuntimeError> {
+        match &a.value {
+            Value::Array(arr) => Ok( arr.iter().map(|e| memory.get(*e).value.clone() ).collect::<Vec<Value>>() ),
+            Value::Dictionary(map) => Ok( map.iter().map(|(s, _)| Value::String(s.clone()) ).collect::<Vec<Value>>() ),
+            
+            value => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "array or dict".to_string(),
+                    found: format!("{}", value.type_str(memory)),
+                    area,
+                    defs: vec![(value.type_str(memory), a.def_area.clone())],
+                } )
+            }
+        }
+    }
+
     pub fn convert(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n), Value::Type(ValueType::Builtin(BuiltinType::String))) => Ok(Value::String(n.to_string())),

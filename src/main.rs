@@ -124,6 +124,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     cache.fetch(&source).unwrap();
 
     let ast = parse(&tokens, &source);
+    let mut info = RunInfo {source: source.clone(), exits: vec![], trace: vec![]};
     match ast {
         Ok((node, _)) => {
             let mut memory = Memory::new();
@@ -157,7 +158,6 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                 },
             ));
 
-            let mut info = RunInfo {source, exits: vec![]};
             let mut result = execute(
                 &node,
                 0,
@@ -203,7 +203,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     return true
                 },
                 Err(e) => {
-                    e.to_report().print_error(cache);
+                    e.to_report().print_error(cache, &info);
                     return false
                 },
             }
@@ -211,7 +211,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
         },
         Err(e) => {
             let gaga = e.to_report();
-            gaga.print_error(cache);
+            gaga.print_error(cache, &info);
             // println!("{:#?}", gaga);
             return false
         },

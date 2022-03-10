@@ -1,35 +1,6 @@
 
 
-struct Person {
-    name: string,
-    age: number,
+while true {
+    let a = 3;
 }
-
-impl Person {
-    baby: (name: string) => {
-        return Person::{name: name, age: 0};
-    },
-    thingy: 3,
-    get_older: (self) => {
-        self.age += 1;
-    },
-}
-
-let a = Person::baby("fucker");
-print(a);
-a.get_older();
-print(a);
-a.get_older();
-print(a);
-a.get_older();
-print(a);
-a.get_older();
-print(a);
-
-
-
-
-
-
-
 

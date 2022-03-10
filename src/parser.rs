@@ -29,18 +29,19 @@ pub enum NodeType {
     Block { code: Box<ASTNode>, not_safe: bool },
     If {cond: Box<ASTNode>, code: Box<ASTNode>, else_branch: Option<Box<ASTNode>>},
     While {cond: Box<ASTNode>, code: Box<ASTNode> },
+    For { var: (String, CodeArea), iter: Box<ASTNode>, code: Box<ASTNode> },
     Loop { code: Box<ASTNode> },
     Call { base: Box<ASTNode>, args: Vec<ASTNode> },
     FuncDef { func_name: String, args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
     Lambda { args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
     Array { elements: Vec<ASTNode> },
     Index { base: Box<ASTNode>, index: Box<ASTNode> },
-    Dictionary { map: HashMap<String, ASTNode> },
+    Dictionary { map: HashMap<String, Option<ASTNode>> },
     Member { base: Box<ASTNode>, member: String },
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
     StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: HashMap<String, CodeArea>, def_area: CodeArea },
-    StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, ASTNode> },
+    StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, Option<ASTNode>> },
     Impl { type_var: (String, CodeArea), fields: HashMap<String, ASTNode> },
     Associated { base: Box<ASTNode>, assoc: String },
 }
@@ -473,9 +474,11 @@ pub fn parse_unit(
                         } )
                     }
                     areas.insert(key.clone(), last_area);
-                    check_tok!(Colon else ":");
-
-                    parse!(parse_expr(false) => let value);
+                    let mut value = None;
+                    if_tok!(== Colon: {
+                        pos += 1;
+                        parse!(parse_expr(false) => let temp); value = Some(temp);
+                    });
 
                     map.insert(key, value);
                     if !matches!(tok!(0), Token::RBracket | Token::Comma) {
@@ -483,7 +486,7 @@ pub fn parse_unit(
                     }
                     skip_tok!(Comma);
                 });
-                ret!( NodeType::Dictionary {map} => start );
+                ret!( NodeType::Dictionary {map} => start.0, span!(-1).1 );
             } else {
                 parse!(parse_statements => let statements);
                 check_tok!(RBracket else "}");
@@ -567,6 +570,18 @@ pub fn parse_unit(
             pos += 1;
             parse!(parse_expr(false) => let code);
             ret!( NodeType::Loop { code: Box::new(code) } => start.0, span!(-1).1 );
+        }
+        Token::For => {
+            pos += 1;
+            check_tok!(Ident(var_name) else "variable name");
+            let area = CodeArea {
+                source: info.source.clone(),
+                range: span!(-1),
+            };
+            check_tok!(In else "in");
+            parse!(parse_expr(false) => let iter);
+            parse!(parse_expr(false) => let code);
+            ret!( NodeType::For { code: Box::new(code), iter: Box::new(iter), var: (var_name, area) } => start.0, span!(-1).1 );
         }
         Token::Func => {
             pos += 1;
@@ -777,9 +792,11 @@ fn parse_value(
                             } )
                         }
                         areas.insert(field.clone(), last_area);
-                        check_tok!(Colon else ":");
-
-                        parse!(parse_expr(false) => let value);
+                        let mut value = None;
+                        if_tok!(== Colon: {
+                            pos += 1;
+                            parse!(parse_expr(false) => let temp); value = Some(temp);
+                        });
 
                         fields.insert(field, value);
                         if !matches!(tok!(0), Token::RBracket | Token::Comma) {

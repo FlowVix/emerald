@@ -118,10 +118,10 @@ pub enum Token {
     While,
     #[token("loop")]
     Loop,
-    // #[token("for")]
-    // For,
-    // #[token("in")]
-    // In,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
     #[token("as")]
     As,
     #[token("is")]
@@ -218,8 +218,8 @@ impl Token {
             Token::Func => "func",
             Token::While => "while",
             Token::Loop => "loop",
-            // Token::For => "for",
-            // Token::In => "in",
+            Token::For => "for",
+            Token::In => "in",
             Token::As => "as",
             Token::Is => "is",
             Token::Return => "return",

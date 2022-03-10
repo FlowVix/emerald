@@ -1,6 +1,6 @@
 
 
-use crate::{CodeArea, EmeraldSource, EmeraldCache};
+use crate::{CodeArea, EmeraldSource, EmeraldCache, interpreter::RunInfo};
 use ariadne::{Report, ReportKind, Label, Source, ColorGenerator, Color, Fmt, ReportBuilder, sources};
 
 
@@ -151,7 +151,7 @@ impl RainbowColorGenerator {
         Self { h, s, b }
     }
     pub fn next(&mut self) -> ariadne::Color {
-        self.h += 40.0;
+        self.h += 20.0;
         self.h %= 360.0;
 
         let hsl = self;
@@ -185,7 +185,7 @@ impl RainbowColorGenerator {
 
 
 impl ErrorReport {
-    pub fn print_error(&self, cache: EmeraldCache) {
+    pub fn print_error(&self, cache: EmeraldCache, info: &RunInfo) {
 
         let mut colors = RainbowColorGenerator::new(0.0, 1.0, 0.75);
 
@@ -196,6 +196,13 @@ impl ErrorReport {
         for (c, s) in &self.labels {
             report = report.with_label( Label::new(c.clone()).with_message(s).with_color(colors.next()) )
         }
+        
+        let mut colors = RainbowColorGenerator::new(270.0, 1.0, 0.75);
+        for t in &info.trace {
+            report = report.with_label( Label::new(t.clone()).with_message("Error comes from this function call").with_color(colors.next()) )
+        }
+
+
         if let Some(m) = &self.note {
             report = report.with_note(m)
         }
@@ -207,7 +214,7 @@ impl ErrorReport {
 
 impl ToReport for SyntaxError {
     fn to_report(&self) -> ErrorReport {
-        let mut colors = RainbowColorGenerator::new(120.0, 1.0, 0.75);
+        let mut colors = RainbowColorGenerator::new(90.0, 1.0, 0.75);
 
         let a = colors.next();
         let b = colors.next();
@@ -305,7 +312,7 @@ impl ToReport for SyntaxError {
 
 impl ToReport for RuntimeError {
     fn to_report(&self) -> ErrorReport {
-        let mut colors = RainbowColorGenerator::new(240.0, 1.0, 0.75);
+        let mut colors = RainbowColorGenerator::new(180.0, 1.0, 0.75);
 
         let a = colors.next();
         let b = colors.next();
