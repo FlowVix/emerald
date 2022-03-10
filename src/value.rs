@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory, TypePos, CustomStruct}, CodeArea, builtins::{BuiltinType, builtin_type_str}};
+use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory, TypePos, CustomStruct}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
 
 
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
-    pub arg_names: Vec<String>,
+    pub args: Vec<(String, CodeArea, Option<MemoryPos>)>,
     pub code: Box<ASTNode>,
     pub parent_scope: ScopePos,
-    pub arg_areas: Vec<CodeArea>,
     pub header_area: CodeArea,
 }
 
@@ -31,6 +30,23 @@ impl ValueType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Type(ValueType),
+    Any,
+    Either(Box<Pattern>, Box<Pattern>),
+}
+
+impl Pattern {
+    pub fn to_str(&self, memory: &Memory) -> String {
+        match self {
+            Pattern::Any => format!("any"),
+            Pattern::Type(t) => t.to_str(memory),
+            Pattern::Either(a, b) => format!("({} | {})", a.to_str(memory), b.to_str(memory)),
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -43,6 +59,7 @@ pub enum Value {
     Array(Vec<MemoryPos>),
     Dictionary(HashMap<String, MemoryPos>),
     Type(ValueType),
+    Pattern(Pattern),
 
     StructInstance { struct_id: TypePos, fields: HashMap<String, MemoryPos> },
 }
@@ -60,13 +77,13 @@ impl Value {
             Value::Array(_) => ValueType::Builtin(BuiltinType::Array),
             Value::Dictionary(_) => ValueType::Builtin(BuiltinType::Dict),
             Value::Type(_) => ValueType::Builtin(BuiltinType::Type),
+            Value::Pattern(_) => ValueType::Builtin(BuiltinType::Pattern),
 
             Value::StructInstance { struct_id, .. } => ValueType::CustomStruct(*struct_id),
         }
     }
 
     pub fn type_str(&self, memory: &Memory) -> String {
-        println!("{:?}", self.typ());
         self.typ().to_str(memory)
     }
 
@@ -77,7 +94,7 @@ impl Value {
             Value::String(s) => s.clone(),
             Value::Null => "null".to_string(),
             Value::Builtin(name) => format!("<builtin: {}>", name),
-            Value::Function( Function {arg_names, ..} )=> format!("({}) => ...", arg_names.join(", ")),
+            Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(e, _, _)| e.clone()).collect::<Vec<String>>().join(", ")),
             Value::Array(arr) => {
                 if visited.contains(&self) {
                     return "[...]".to_string()
@@ -121,7 +138,16 @@ impl Value {
                 ).collect::<Vec<String>>().join(", ") + "}";
                 visited.pop();
                 format!("{}::{}", name, out_str)
-            }
+            },
+            Value::Pattern(p) => p.to_str(memory)
+        }
+    }
+
+    pub fn matches_pat(&self, p: Pattern, memory: &Memory) -> Result<bool, RuntimeError> {
+        match p {
+            Pattern::Any => Ok( true ),
+            Pattern::Type(t) => Ok( self.typ() == t.clone() ),
+            Pattern::Either(a, b) => Ok( self.matches_pat(*a, memory)? || self.matches_pat(*b, memory)? )
         }
     }
 
@@ -131,6 +157,8 @@ impl Value {
 pub mod value_ops {
 
     use crate::{interpreter::{StoredValue, Memory}, CodeArea, value::{Value, ValueType}, error::RuntimeError, builtins::BuiltinType};
+
+    use super::Pattern;
 
     pub fn to_bool(a: &StoredValue, area: CodeArea, memory: &Memory) -> Result<bool, RuntimeError> {
         match &a.value {
@@ -177,15 +205,15 @@ pub mod value_ops {
         }
     }
 
-    pub fn is_type(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<bool, RuntimeError> {
+    pub fn is_op(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<bool, RuntimeError> {
         match (&a.value, &b.value) {
-            (v, Value::Type(t)) => {
-                Ok( v.typ() == t.clone() )
-            },
+            (v, Value::Type(t)) => Ok( v.typ() == t.clone() ),
+
+            (v, Value::Pattern(p)) => Ok( v.matches_pat(p.clone(), memory)? ),
             
             (_, value) => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "type".to_string(),
+                    expected: "type or pattern".to_string(),
                     found: format!("{}", value.type_str(memory)),
                     area,
                     defs: vec![(value.type_str(memory), b.def_area.clone())],
@@ -391,6 +419,29 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number and number".to_string(),
+                    found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
+                    area,
+                    defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],
+                } )
+            }
+        }
+    }
+
+    
+    pub fn either(a: &StoredValue, b: &StoredValue, area: CodeArea, memory: &mut Memory) -> Result<Value, RuntimeError> {
+        match (&a.value, &b.value) {
+
+            (Value::Type(t1), Value::Type(t2)) => Ok( Value::Pattern(Pattern::Either(Box::new(Pattern::Type(t1.clone())), Box::new(Pattern::Type(t2.clone())))) ),
+
+            (Value::Type(t), Value::Pattern(p)) |
+            (Value::Pattern(p), Value::Type(t)) => Ok( Value::Pattern(Pattern::Either(Box::new(Pattern::Type(t.clone())), Box::new(p.clone()))) ),
+
+            (Value::Pattern(p1), Value::Pattern(p2)) => Ok( Value::Pattern(Pattern::Either(Box::new(p1.clone()), Box::new(p2.clone()))) ),
+
+
+            (value1, value2) => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "type and type, type and pattern or pattern and pattern".to_string(),
                     found: format!("{} and {}", value1.type_str(memory), value2.type_str(memory)),
                     area,
                     defs: vec![(value1.type_str(memory), a.def_area.clone()), (value2.type_str(memory), b.def_area.clone())],

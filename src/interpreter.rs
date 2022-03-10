@@ -148,21 +148,21 @@ impl Memory {
         }
     }
 
-    pub fn propagate_def(
-        &mut self,
-        id: MemoryPos,
-    ) {
-        let def = self.get(id).def_area.clone();
-        match self.get(id).value.clone() {
-            Value::Array(arr) => {
-                for i in arr {
-                    self.redef(i, def.clone());
-                    self.propagate_def(i);
-                }
-            }
-            _ => (),
-        }
-    }
+    // pub fn propagate_def(
+    //     &mut self,
+    //     id: MemoryPos,
+    // ) {
+    //     let def = self.get(id).def_area.clone();
+    //     match self.get(id).value.clone() {
+    //         Value::Array(arr) => {
+    //             for i in arr {
+    //                 self.redef(i, def.clone());
+    //                 self.propagate_def(i);
+    //             }
+    //         }
+    //         _ => (),
+    //     }
+    // }
     // pub fn protect(&mut self, value: Value) -> MemoryPos {
     //     let pos = self.insert( value );
     //     self.protected
@@ -274,7 +274,7 @@ pub fn execute(
         )),
         NodeType::Op { left, op, right } => {
             match op {
-                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As | Token::Is => {
+                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As | Token::Is | Token::Pipe => {
                     let left = execute!(left => scope_id);
                     let right = execute!(right => scope_id);
                     match op {
@@ -370,9 +370,16 @@ pub fn execute(
                             ))
                         },
                         Token::Is => {
-                            let result = value_ops::is_type(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            let result = value_ops::is_op(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
                             Ok(memory.insert(
                                 Value::Boolean(result),
+                                area!(info.source.clone(), node.span),
+                            ))
+                        },
+                        Token::Pipe => {
+                            let result = value_ops::either(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
+                            Ok(memory.insert(
+                                result,
                                 area!(info.source.clone(), node.span),
                             ))
                         },
@@ -581,28 +588,46 @@ pub fn execute(
             // memory.redef(ret_id, area!(info.source.clone(), start_node.span));
             // Ok( ret_id )
         }
-        NodeType::FuncDef { func_name, arg_names, code, arg_areas, header_area } => {
+        NodeType::FuncDef { func_name, args, code, header_area } => {
+            let mut args_exec = vec![];
+            for (s, c, t) in args {
+                match t {
+                    Some(n) => args_exec.push( (s.clone(), c.clone(), {
+                        let _n = execute!(n => scope_id);
+                        Some( clone!( _n => area!(info.source.clone(), n.span) ) )
+                    }) ),
+                    None => args_exec.push( (s.clone(), c.clone(), None) ),
+                }
+            }
             let value_id = memory.insert(
                 Value::Function( Function {
-                    arg_names: arg_names.clone(),
+                    args: args_exec,
                     code: code.clone(),
                     parent_scope: scope_id,
                     header_area: header_area.clone(),
-                    arg_areas: arg_areas.clone()
                 } ),
                 area!(info.source.clone(), start_node.span)
             );
             scopes.set_var(scope_id, func_name.to_string(), value_id);
             Ok( clone!(value_id => @) )
         }
-        NodeType::Lambda { arg_names, code, arg_areas, header_area } => {
+        NodeType::Lambda { args, code, header_area } => {
+            let mut args_exec = vec![];
+            for (s, c, t) in args {
+                match t {
+                    Some(n) => args_exec.push( (s.clone(), c.clone(), {
+                        let _n = execute!(n => scope_id);
+                        Some( clone!( _n => area!(info.source.clone(), n.span) ) )
+                    }) ),
+                    None => args_exec.push( (s.clone(), c.clone(), None) ),
+                }
+            }
             Ok( memory.insert(
                 Value::Function( Function {
-                    arg_names: arg_names.clone(),
+                    args: args_exec,
                     code: code.clone(),
                     parent_scope: scope_id,
-                    header_area: header_area.clone(),
-                    arg_areas: arg_areas.clone()
+                    header_area: header_area.clone()
                 } ),
                 area!(info.source.clone(), start_node.span)
             ) )
@@ -789,12 +814,13 @@ pub fn execute(
                     }
                     for (k, v) in &id_map {
                         let typ = struct_type.fields[k].0;
-                        let result = value_ops::is_type(&memory.get(*v).clone(), &memory.get(typ).clone(), area!(info.source.clone(), node.span), memory)?;
+                        let result = value_ops::is_op(&memory.get(*v).clone(), &memory.get(typ).clone(), area!(info.source.clone(), node.span), memory)?;
                         if !result {
                             return Err( RuntimeError::PatternMismatch {
                                 typ: memory.get(*v).value.type_str(memory),
                                 pattern: match &memory.get(typ).value {
                                     Value::Type(t) => t.to_str(memory),
+                                    Value::Pattern(p) => p.to_str(memory),
                                     _ => unreachable!(),
                                 },
                                 pattern_area: memory.get(typ).def_area.clone(),
@@ -818,7 +844,7 @@ pub fn execute(
                         area!(info.source.clone(), start_node.span)
                     ) )
                 },
-                other => return Err( RuntimeError::InstanceNonStruct {
+                _ => return Err( RuntimeError::InstanceNonStruct {
                     area: area!(info.source.clone(), base.span),
                 } )
             }
@@ -837,12 +863,12 @@ pub fn execute(
                     info
                 ),
                 
-                Value::Function( Function { arg_names, code, parent_scope, header_area, arg_areas } ) => {
-                    if arg_names.len() != args.len() {
+                Value::Function( Function { args: func_args, code, parent_scope, header_area } ) => {
+                    if func_args.len() != args.len() {
                         return Err(
                             RuntimeError::IncorrectArgumentCount {
                                 provided: args.len(),
-                                takes: arg_names.len(),
+                                takes: func_args.len(),
                                 header_area: header_area.clone(),
                                 call_area: area!(info.source.clone(), start_node.span)
                             }
@@ -850,8 +876,26 @@ pub fn execute(
                     }
 
                     let derived = scopes.derive(*parent_scope);
-                    for ((arg, name), area) in args.iter().zip(arg_names).zip(arg_areas) {
+                    for (arg, (name, a, d)) in args.iter().zip(func_args) {
                         let arg_id = execute!(arg => scope_id);
+                        
+                        match d {
+                            Some(typ) => {
+                                let result = value_ops::is_op(&memory.get(arg_id).clone(), &memory.get(*typ).clone(), area!(info.source.clone(), node.span), memory)?;
+                                if !result {
+                                    return Err( RuntimeError::PatternMismatch {
+                                        typ: memory.get(arg_id).value.type_str(memory),
+                                        pattern: match &memory.get(*typ).value {
+                                            Value::Type(t) => t.to_str(memory),
+                                            _ => unreachable!(),
+                                        },
+                                        pattern_area: memory.get(*typ).def_area.clone(),
+                                        type_area: memory.get(arg_id).def_area.clone(),
+                                    } )
+                                }
+                            },
+                            None => (),
+                        }
                         // let arg_id = clone!(arg_id => area.clone());
                         scopes.set_var(derived, name.clone(), arg_id);
                     }
@@ -880,7 +924,7 @@ pub fn execute(
                     Ok( ret_id )
                 },
 
-                Value::Type(t) => {
+                Value::Type(_) => {
                     if args.len() != 1 {
                         return Err(
                             RuntimeError::TypeArgCount {

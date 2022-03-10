@@ -31,8 +31,8 @@ pub enum NodeType {
     While {cond: Box<ASTNode>, code: Box<ASTNode> },
     Loop { code: Box<ASTNode> },
     Call { base: Box<ASTNode>, args: Vec<ASTNode> },
-    FuncDef { func_name: String, arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
-    Lambda { arg_names: Vec<String>, arg_areas: Vec<CodeArea>, header_area: CodeArea, code: Box<ASTNode> },
+    FuncDef { func_name: String, args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
+    Lambda { args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
     Array { elements: Vec<ASTNode> },
     Index { base: Box<ASTNode>, index: Box<ASTNode> },
     Dictionary { map: HashMap<String, ASTNode> },
@@ -181,6 +181,7 @@ macro_rules! parse_util {
             };
         }
 
+        #[allow(unused_macros)]
         macro_rules! parse {
             ($fn:ident => let $var:ident) => {
                 let parsed = $fn($tokens, $pos, $info)?;
@@ -289,14 +290,14 @@ macro_rules! operators {
 
 operators!(
     RightAssoc  <==  [ Assign PlusEq MinusEq MultEq DivEq ModEq PowEq ],
-    RightAssoc  <==  [ Is ],
     // LeftAssoc   <==  [ And Or ],
     // Unary       <==  [ Not ],
-    LeftAssoc   <==  [ Eq NotEq Greater GreaterEq Lesser LesserEq ],
+    LeftAssoc   <==  [ Is Eq NotEq Greater GreaterEq Lesser LesserEq ],
     LeftAssoc   <==  [ Plus Minus ],
     Unary       <==  [ Plus Minus ],
     LeftAssoc   <==  [ Mult Div Mod ],
     RightAssoc  <==  [ Pow ],
+    LeftAssoc   <==  [ Pipe ],
     LeftAssoc   <==  [ As ],
 );
 
@@ -335,7 +336,6 @@ pub fn parse_unit(
 
             let mut i = 0;
             let mut depth = 1;
-            let prev_pos = pos;
 
             loop {
                 match tok!(i) {
@@ -358,22 +358,26 @@ pub fn parse_unit(
                 Token::FatArrow => {
                     let header_start = span!(-1).0;
 
-                    let mut arg_names = vec![];
-                    let mut arg_areas = vec![];
+                    let mut args: Vec<(String, CodeArea, Option<ASTNode>)> = vec![];
                     while_tok!(!= RParen: {
                         check_tok!(Ident(arg_name) else "argument name");
-                        arg_areas.push(CodeArea {
+                        let arg_area = CodeArea {
                             source: info.source.clone(),
                             range: span!(-1),
-                        });
-                        if let Some(id) = arg_names.clone().into_iter().position(|e| e == arg_name) {
+                        };
+                        if let Some(id) = args.iter().position(|(e, _, _)| e == &arg_name) {
                             return Err( SyntaxError::DuplicateArg {
                                 arg_name,
-                                first_used: arg_areas[id].clone(),
-                                used_again: arg_areas.last().unwrap().clone(),
+                                first_used: args[id].1.clone(),
+                                used_again: arg_area,
                             } )
                         }
-                        arg_names.push(arg_name);
+                        let mut pat = None;
+                        if_tok!(== Colon: {
+                            pos += 1;
+                            parse!(parse_expr(true) => let temp); pat = Some(temp);
+                        });
+                        args.push((arg_name, arg_area, pat));
                         if !matches!(tok!(0), Token::RParen | Token::Comma) {
                             expected_err!(") or ,", tok!(0), span!(0), info )
                         }
@@ -386,7 +390,7 @@ pub fn parse_unit(
                     };
                     pos += 1;
                     parse!(parse_expr(false) => let code);
-                    ret!( NodeType::Lambda { arg_names, arg_areas, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
+                    ret!( NodeType::Lambda { args, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
                 },
                 _ => {
                     parse!(parse_expr(false) => let value);
@@ -421,7 +425,7 @@ pub fn parse_unit(
                         range: start,
                     };
                     parse!(parse_expr(false) => let code);
-                    ret!( NodeType::Lambda { arg_names: vec![name.to_string()], arg_areas: vec![arg_area.clone()], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
+                    ret!( NodeType::Lambda { args: vec![(name.to_string(), arg_area.clone(), None)], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
                 }
                 _ => (),
             }
@@ -435,7 +439,7 @@ pub fn parse_unit(
                 range: start,
             };
             parse!(parse_expr(false) => let code);
-            ret!( NodeType::Lambda { arg_names: vec![], arg_areas: vec![], header_area, code: Box::new(code) } => start.0, span!(-1).1 );
+            ret!( NodeType::Lambda { args: vec![], header_area, code: Box::new(code) } => start.0, span!(-1).1 );
         }
         Token::LBracket => {
             pos += 1;
@@ -524,22 +528,26 @@ pub fn parse_unit(
             check_tok!(LParen else "(");
             let header_start = span!(-1).0;
 
-            let mut arg_names = vec![];
-            let mut arg_areas = vec![];
+            let mut args: Vec<(String, CodeArea, Option<ASTNode>)> = vec![];
             while_tok!(!= RParen: {
                 check_tok!(Ident(arg_name) else "argument name");
-                arg_areas.push(CodeArea {
+                let arg_area = CodeArea {
                     source: info.source.clone(),
                     range: span!(-1),
-                });
-                if let Some(id) = arg_names.clone().into_iter().position(|e| e == arg_name) {
+                };
+                if let Some(id) = args.iter().position(|(e, _, _)| e == &arg_name) {
                     return Err( SyntaxError::DuplicateArg {
                         arg_name,
-                        first_used: arg_areas[id].clone(),
-                        used_again: arg_areas.last().unwrap().clone(),
+                        first_used: args[id].1.clone(),
+                        used_again: arg_area,
                     } )
                 }
-                arg_names.push(arg_name);
+                let mut pat = None;
+                if_tok!(== Colon: {
+                    pos += 1;
+                    parse!(parse_expr(true) => let temp); pat = Some(temp);
+                });
+                args.push((arg_name, arg_area, pat));
                 if !matches!(tok!(0), Token::RParen | Token::Comma) {
                     expected_err!(") or ,", tok!(0), span!(0), info )
                 }
@@ -552,7 +560,7 @@ pub fn parse_unit(
             };
 
             parse!(parse_expr(false) => let code);
-            ret!( NodeType::FuncDef { func_name, arg_names, arg_areas, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
+            ret!( NodeType::FuncDef { func_name, args, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
         },
         Token::Return => {
             pos += 1;

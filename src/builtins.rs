@@ -233,6 +233,7 @@ builtin_types!(
     Array,
     Dict,
     Type,
+    Pattern,
 );
 
 

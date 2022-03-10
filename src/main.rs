@@ -16,7 +16,7 @@ use builtins::{builtin_names, builtin_type_from_str, builtin_type_names};
 use error::{ToReport, RuntimeError};
 use interpreter::{execute, Memory, ScopeList, RunInfo, Exit};
 use logos::Logos;
-use value::{Value, ValueType};
+use value::{Value, ValueType, Pattern};
 
 use crate::parser::parse;
 
@@ -148,6 +148,14 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     },
                 ));
             }
+
+            scopes.set_var(0, "any".to_string(), memory.insert(
+                Value::Pattern(Pattern::Any),
+                CodeArea {
+                    source: source.clone(),
+                    range: (0, 0)
+                },
+            ));
 
             let mut info = RunInfo {source, exits: vec![]};
             let mut result = execute(

@@ -97,8 +97,9 @@ pub enum Token {
     #[token("]")]
     RSqBracket,
 
-    // #[token("|")]
-    // Pipe,
+    #[token("|")]
+    Pipe,
+
     #[token(",")]
     Comma,
     #[token(".")]
@@ -206,7 +207,7 @@ impl Token {
             Token::RBracket => "}",
             Token::LSqBracket => "[",
             Token::RSqBracket => "]",
-            // Token::Pipe => 
+            Token::Pipe => "|",
             Token::Comma => ",",
             Token::DoubleColon => "::",
             Token::Colon => ":",

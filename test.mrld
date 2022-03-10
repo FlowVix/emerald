@@ -1,18 +1,40 @@
 
 
+struct Person {
+    name: string,
+    age: number,
+}
+
+impl Person {
+    func baby(name: string) {
+        return Person::{name, age: 0};
+    }
+    func speak(self) {
+        print("I am ", self.name);
+    }
+}
+
 
 struct Person {
-    first_name: string,
-    last_name: string,
-    age: number = 3,
+    name: string,
+    age: number,
 }
 
-let fart = Person::{
-    first_name: "lol",
-    last_name: "sex" + "fart"
+impl Person {
+    baby: (name: string) {
+        return Person::{name, age: 0};
+    }
+    speak: (self) {
+        print("I am ", self.name);
+    }
 }
 
 
-print(number::{});
+
+
+
+
+
+
 
 
