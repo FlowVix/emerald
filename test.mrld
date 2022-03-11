@@ -1,6 +1,19 @@
 
 
-while true {
-    let a = 3;
+
+
+let a = [1, 3, 5];
+
+
+let b = for i in a {
+    print(i);
+    if i == 3 {
+        break "gaga";
+    }
 }
+print(b);
+
+
+
+
 

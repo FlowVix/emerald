@@ -196,6 +196,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                             other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&memory, &mut vec![]))))
                         }
                     }
+                    println!("{:?}", memory.protected);
                     // println!("{}", memory.register.len());
                     // for i in &memory.register {
                     //     println!("{}: {:?}", i.0, i.1)
