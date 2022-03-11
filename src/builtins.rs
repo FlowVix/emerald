@@ -4,7 +4,6 @@ use crate::error::RuntimeError;
 use crate::interpreter::MemoryPos;
 use crate::CodeArea;
 use crate::RunInfo;
-use crate::ScopeList;
 use crate::Memory;
 use crate::interpreter::ScopePos;
 use crate::parser::ASTNode;
@@ -75,7 +74,7 @@ enum SpecialArgs {
 
 macro_rules! builtins {
     {
-        ($call_node:ident, $scope_id:ident, $memory:ident, $scopes:ident, $info:ident, $areas:ident)
+        ($call_node:ident, $scope_id:ident, $memory:ident, $info:ident, $areas:ident)
         $(
             [$builtin_name:ident]: $func_name:ident(
                 $(@$arg_info:ident => $var:ident)?
@@ -141,7 +140,6 @@ macro_rules! builtins {
             args: &Vec<ASTNode>,
             $scope_id: ScopePos,
             $memory: &mut Memory,
-            $scopes: &mut ScopeList,
             $info: &mut RunInfo,
         ) -> Result<MemoryPos, RuntimeError> {
             match arg_amount(func) {
@@ -168,7 +166,7 @@ macro_rules! builtins {
                             let mut __arg_ids = vec![];
                             let mut __index = 0;
                             $(
-                                let arg_id = execute(&args[__index], $scope_id, $memory, $scopes, $info)?;
+                                let arg_id = execute(&args[__index], $scope_id, $memory, $info)?;
 
                                 $areas.push($memory.get(arg_id).def_area.clone());
                                 let $arg_name = $memory.get(arg_id).value.clone();
@@ -205,7 +203,7 @@ macro_rules! builtins {
                                     let mut $areas = vec![];
                                     let mut $var = vec![];
                                     for i in args {
-                                        let arg_id = execute(&i, $scope_id, $memory, $scopes, $info)?;
+                                        let arg_id = execute(&i, $scope_id, $memory, $info)?;
                                         $areas.push($memory.get(arg_id).def_area.clone());
                                         $var.push( $memory.get(arg_id).value.clone() )
                                     }
@@ -240,7 +238,7 @@ builtin_types!(
 
 builtins!{
 
-    (call_node, scope_id, memory, scopes, info, __areas)
+    (call_node, scope_id, memory, info, __areas)
 
     [Print]: print(@Any => poopie) {
         let mut out_str = String::new();

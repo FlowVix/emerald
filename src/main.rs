@@ -14,7 +14,7 @@ use ansi_term;
 use ariadne::{Source, Cache};
 use builtins::{builtin_names, builtin_type_from_str, builtin_type_names};
 use error::{ToReport, RuntimeError};
-use interpreter::{execute, Memory, ScopeList, RunInfo, Exit};
+use interpreter::{execute, Memory, RunInfo, Exit};
 use logos::Logos;
 use value::{Value, ValueType, Pattern};
 
@@ -128,65 +128,67 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     match ast {
         Ok((node, _)) => {
             let mut memory = Memory::new();
-            let mut scopes = ScopeList::new();
             
             for i in builtin_names() {
-                scopes.set_var(0, i.clone(), memory.insert(
-                    Value::Builtin(i),
+                let id = memory.insert(
+                    Value::Builtin(i.clone()),
                     CodeArea {
                         source: source.clone(),
                         range: (0, 0)
                     },
-                ));
+                );
+                memory.set_var(0, i, id);
             }
 
             for i in builtin_type_names() {
-                scopes.set_var(0, i.to_lowercase().to_string(), memory.insert(
+                let id = memory.insert(
                     Value::Type(ValueType::Builtin(builtin_type_from_str(&i))),
                     CodeArea {
                         source: source.clone(),
                         range: (0, 0)
                     },
-                ));
+                );
+                memory.set_var(0, i.to_lowercase().to_string(), id);
             }
-
-            scopes.set_var(0, "any".to_string(), memory.insert(
-                Value::Pattern(Pattern::Any),
-                CodeArea {
-                    source: source.clone(),
-                    range: (0, 0)
-                },
-            ));
-
+            {
+                let id = memory.insert(
+                    Value::Pattern(Pattern::Any),
+                    CodeArea {
+                        source: source.clone(),
+                        range: (0, 0)
+                    },
+                );
+                memory.set_var(0, "any".to_string(), id);
+            }
             let mut result = execute(
                 &node,
                 0,
                 &mut memory,
-                &mut scopes,
                 &mut info,
             );
-
-            result = match info.exits.last() {
-                Some(
-                    Exit::Return(_, span)
-                ) => {
-                    Err(
-                        RuntimeError::ReturnUsedOutsideProgram {
-                            return_area: area!(info.source.clone(), *span),
-                        }
-                    )
-                },
-                Some(
-                    Exit::Break(_, span)
-                ) => {
-                    Err(
-                        RuntimeError::BreakUsedOutsideProgram {
-                            break_area: area!(info.source.clone(), *span),
-                        }
-                    )
-                },
-                None => result,
-            };
+            if let Ok(_) = result {
+                result = match info.exits.last() {
+                    Some(
+                        Exit::Return(_, span)
+                    ) => {
+                        Err(
+                            RuntimeError::ReturnUsedOutsideProgram {
+                                return_area: area!(info.source.clone(), *span),
+                            }
+                        )
+                    },
+                    Some(
+                        Exit::Break(_, span)
+                    ) => {
+                        Err(
+                            RuntimeError::BreakUsedOutsideProgram {
+                                break_area: area!(info.source.clone(), *span),
+                            }
+                        )
+                    },
+                    None => result,
+                };
+            }
 
             match result {
                 Ok(pos) => {
@@ -196,7 +198,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                             other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&memory, &mut vec![]))))
                         }
                     }
-                    println!("{:?}", memory.protected);
+                    // println!("{:?}", memory.values.map.len());
                     // println!("{}", memory.register.len());
                     // for i in &memory.register {
                     //     println!("{}: {:?}", i.0, i.1)

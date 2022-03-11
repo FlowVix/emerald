@@ -198,8 +198,8 @@ impl ErrorReport {
         }
         
         let mut colors = RainbowColorGenerator::new(270.0, 1.0, 0.75);
-        for t in &info.trace {
-            report = report.with_label( Label::new(t.clone()).with_message("Error comes from this function call").with_color(colors.next()) )
+        for (i, t) in info.trace.iter().enumerate() {
+            report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
         }
 
 

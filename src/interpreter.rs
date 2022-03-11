@@ -1,6 +1,6 @@
 
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{value::{Value, value_ops, Function, ValueType}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea, builtins::{Builtin, BuiltinType}};
 use crate::builtins::{run_builtin, name_to_builtin};
@@ -54,23 +54,61 @@ impl ImplData {
 
 
 
+#[derive(Debug)]
 pub struct Collector {
-    pub marked_values: Vec<MemoryPos>,
-    pub marked_scopes: Vec<ScopePos>,
+    pub marked_values: HashSet<MemoryPos>,
+    pub marked_scopes: HashSet<ScopePos>,
+}
+
+impl Collector {
+    pub fn new(memory: &Memory) -> Self {
+        let mut marked_scopes = HashSet::new();
+        let mut marked_values = HashSet::new();
+        for (i, _) in &memory.values.map {
+            marked_values.insert(*i);
+        }
+        for (i, _) in &memory.scopes.map {
+            marked_scopes.insert(*i);
+        }
+        Self {
+            marked_values,
+            marked_scopes,
+        }
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Protector {
+    pub values: Vec<MemoryPos>,
+    pub scopes: Vec<ScopePos>,
+}
+
+impl Protector {
+    pub fn new() -> Self {
+        Protector {
+            values: vec![],
+            scopes: vec![],
+        }
+    }
 }
 
 
 
+pub struct Register<K, V> {
+    pub counter: K,
+    pub map: HashMap<K, V>,
+}
 
 
 
 pub struct Memory {
-    counter: MemoryPos,
-    pub register: HashMap<MemoryPos, StoredValue>,
-    pub protected: Vec<Vec<MemoryPos>>,
-
-    custom_struct_counter: TypePos,
-    pub custom_structs: HashMap<TypePos, CustomStruct>,
+    pub values: Register<MemoryPos, StoredValue>,
+    pub scopes: Register<ScopePos, Scope>,
+    pub custom_structs: Register<TypePos, CustomStruct>,
+    pub last_amount: usize,
+    
+    pub protected: Vec<Protector>,
 
     pub impls: HashMap<TypePos, ImplData>,
     pub builtin_impls: HashMap<BuiltinType, ImplData>,
@@ -80,25 +118,32 @@ pub struct Memory {
 
 
 
-struct Scope {
+pub struct Scope {
     vars: HashMap<String, MemoryPos>,
     parent_id: Option<ScopePos>,
 }
 
-pub struct ScopeList {
-    counter: ScopePos,
-    register: HashMap<ScopePos, Scope>,
-}
 
 
 impl Memory {
 
     pub fn new() -> Self {
-        Self {
+        let mut scopes = Register {
+            map: HashMap::new(),
             counter: 0,
-            register: HashMap::new(),
-            custom_struct_counter: 0,
-            custom_structs: HashMap::new(),
+        };
+        scopes.map.insert(0, Scope { vars: HashMap::new(), parent_id: None });
+        Self {
+            values: Register {
+                map: HashMap::new(),
+                counter: 0,
+            },
+            scopes,
+            custom_structs: Register {
+                map: HashMap::new(),
+                counter: 0,
+            },
+            last_amount: 0,
             protected: vec![],
             // custom_types: vec![],
             impls: HashMap::new(),
@@ -107,7 +152,7 @@ impl Memory {
     }
 
     fn push_protected(&mut self) {
-        self.protected.push( vec![] );
+        self.protected.push( Protector::new() );
     }
     fn pop_protected(&mut self) {
         self.protected.pop();
@@ -118,9 +163,9 @@ impl Memory {
         &mut self,
         typ: CustomStruct,
     ) -> MemoryPos {
-        self.custom_struct_counter += 1;
-        self.custom_structs.insert( self.custom_struct_counter, typ );
-        self.custom_struct_counter
+        self.custom_structs.counter += 1;
+        self.custom_structs.map.insert( self.custom_structs.counter, typ );
+        self.custom_structs.counter
     }
 
 
@@ -130,12 +175,12 @@ impl Memory {
         value: Value,
         def_area: CodeArea,
     ) -> MemoryPos {
-        self.counter += 1;
-        self.register.insert( self.counter, StoredValue {
+        self.values.counter += 1;
+        self.values.map.insert( self.values.counter, StoredValue {
             value,
             def_area,
         } );
-        self.counter
+        self.values.counter
     }
     pub fn set(
         &mut self,
@@ -147,7 +192,7 @@ impl Memory {
             let val = self.get(id);
             val.def_area.clone()
         };
-        self.register.insert( id, StoredValue {
+        self.values.map.insert( id, StoredValue {
             value,
             def_area: if let Some(m) = def_area {m} else {v_a},
         } );
@@ -157,7 +202,7 @@ impl Memory {
         id: MemoryPos,
         def_area: CodeArea,
     ) {
-        self.register.get_mut(&id).unwrap().def_area = def_area;
+        self.values.map.get_mut(&id).unwrap().def_area = def_area;
     }
     pub fn clone_id(
         &mut self,
@@ -174,7 +219,7 @@ impl Memory {
         )
     }
     pub fn get(&self, id: MemoryPos) -> &StoredValue {
-        return match self.register.get(&id) {
+        return match self.values.map.get(&id) {
             Some(v) => v,
             None => panic!("bad value fuck you"),
         }
@@ -195,48 +240,48 @@ impl Memory {
     //         _ => (),
     //     }
     // }
-    pub fn protect(&mut self, pos: MemoryPos) {
+    pub fn protect_memory(&mut self, pos: MemoryPos) {
         self.protected
             .last_mut()
             .unwrap()
+            .values
             .push(pos);
     }
-}
-
-
-impl ScopeList {
-
-    pub fn new() -> Self {
-        let mut new = Self {
-            counter: 0,
-            register: HashMap::new(),
-        };
-        new.register.insert(0, Scope { vars: HashMap::new(), parent_id: None });
-        new
+    pub fn protect_scope(&mut self, pos: ScopePos) {
+        self.protected
+            .last_mut()
+            .unwrap()
+            .scopes
+            .push(pos);
     }
 
-    fn get(&self, scope_id: ScopePos) -> &Scope {
-        self.register.get(&scope_id).unwrap()
+
+    fn get_scope(&self, scope_id: ScopePos) -> &Scope {
+        self.scopes.map.get(&scope_id).unwrap()
     }
-    fn get_mut(&mut self, scope_id: ScopePos) -> &mut Scope {
-        self.register.get_mut(&scope_id).unwrap()
+    fn get_scope_mut(&mut self, scope_id: ScopePos) -> &mut Scope {
+        self.scopes.map.get_mut(&scope_id).unwrap()
     }
-    fn derive(&mut self, scope_id: ScopePos) -> ScopePos {
-        self.counter += 1;
-        self.register.insert(self.counter, Scope {
+
+    fn derive_scope(&mut self, scope_id: ScopePos) -> ScopePos {
+        self.scopes.counter += 1;
+        self.scopes.map.insert(self.scopes.counter, Scope {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
         });
-        self.counter
+        self.protect_scope(self.scopes.counter);
+        self.scopes.counter
     }
+
     pub fn set_var(
         &mut self,
         scope_id: ScopePos,
         name: String,
         val_id: MemoryPos,
     ) {
-        self.get_mut(scope_id).vars.insert(name, val_id);
+        self.get_scope_mut(scope_id).vars.insert(name, val_id);
     }
+
     pub fn get_var(
         &self,
         scope_id: ScopePos,
@@ -244,41 +289,128 @@ impl ScopeList {
     ) -> Option<MemoryPos> {
         let mut current_scope = scope_id;
         loop {
-            match self.get(current_scope).vars.get(name) {
+            match self.get_scope(current_scope).vars.get(name) {
                 Some(id) => return Some(*id),
-                None => match self.get(current_scope).parent_id {
+                None => match self.get_scope(current_scope).parent_id {
                     Some(p_id) => current_scope = p_id,
                     None => return None,
                 },
             }
         }
     }
+
+
+    pub fn collect(&mut self, scope_id: ScopePos) {
+        let mut collector = Collector::new(self);
+
+        self.mark_scope(scope_id, &mut collector);
+
+        for prot in &self.protected {
+            for id in &prot.values {
+                if collector.marked_values.remove(id) {
+                    let mut value_ids: HashSet<MemoryPos> = HashSet::new();
+                    let mut scope_ids: HashSet<ScopePos> = HashSet::new();
+                    self.get(*id).value.get_references(self, &mut value_ids, &mut scope_ids);
+                    for i in scope_ids {
+                        if collector.marked_scopes.contains(&i) {
+                            self.mark_scope(i, &mut collector);
+                        }
+                    }
+                    for i in value_ids {
+                        collector.marked_values.remove(&i);
+                    }
+                }
+            }
+            for id in &prot.scopes {
+                if collector.marked_scopes.contains(id) {
+                    self.mark_scope(*id, &mut collector);
+                }
+            }
+        }
+
+        for i in collector.marked_scopes {
+            self.scopes.map.remove(&i);
+        }
+        for i in collector.marked_values {
+            self.values.map.remove(&i);
+        }
+
+        self.last_amount = self.values.map.len();
+
+    }
+
+    pub fn mark_scope(&self, scope_id: ScopePos, collector: &mut Collector) {
+        let mut var_checks = Vec::new();
+        collector.marked_scopes.remove(&scope_id);
+        for (_, id) in &self.get_scope(scope_id).vars {
+            var_checks.push(*id);
+        }
+        for id in var_checks {
+            if collector.marked_values.remove(&id) {
+                let mut value_ids: HashSet<MemoryPos> = HashSet::new();
+                let mut scope_ids: HashSet<ScopePos> = HashSet::new();
+                self.get(id).value.get_references(self, &mut value_ids, &mut scope_ids);
+                for i in scope_ids {
+                    if collector.marked_scopes.contains(&i) {
+                        self.mark_scope(i, collector);
+                    }
+                }
+                for i in value_ids {
+                    collector.marked_values.remove(&i);
+                }
+            }
+        }
+        match self.get_scope(scope_id).parent_id {
+            Some(id) => if collector.marked_scopes.contains(&id) { self.mark_scope(id, collector) },
+            None => (),
+        }
+    }
+
+
 }
 
 
 
 
 macro_rules! interpreter_util {
-    ($memory:expr, $scopes:expr, $info:expr) => {
+    ($memory:expr, $info:expr) => {
         macro_rules! execute {
             ($node:expr => $scope_id:expr) => {
                 {
-                    let id = execute($node, $scope_id, $memory, $scopes, $info)?;
-                    let out = $memory.clone_id(
+                    let id = execute($node, $scope_id, $memory, $info)?;
+                    $memory.clone_id(
                         id,
                         None,
-                    );
-                    $memory.protect(id);
-                    $memory.protect(out);
-                    out
+                    )
                 }
             }
         }
         macro_rules! execute_raw {
             ($node:expr => $scope_id:expr) => {
                 {
-                    let id = execute($node, $scope_id, $memory, $scopes, $info)?;
-                    $memory.protect(id);
+                    execute($node, $scope_id, $memory, $info)?
+                }
+            }
+        }
+        macro_rules! protecute {
+            ($node:expr => $scope_id:expr) => {
+                {
+                    let id = execute($node, $scope_id, $memory, $info)?;
+                    let out = $memory.clone_id(
+                        id,
+                        None,
+                    );
+                    $memory.protect_memory(id);
+                    $memory.protect_memory(out);
+                    out
+                }
+            }
+        }
+        macro_rules! protecute_raw {
+            ($node:expr => $scope_id:expr) => {
+                {
+                    let id = execute($node, $scope_id, $memory, $info)?;
+                    $memory.protect_memory(id);
                     id
                 }
             }
@@ -290,7 +422,6 @@ macro_rules! interpreter_util {
                         $id,
                         None,
                     );
-                    $memory.protect(new_id);
                     new_id
                 }
             };
@@ -300,7 +431,28 @@ macro_rules! interpreter_util {
                         $id,
                         Some($area),
                     );
-                    $memory.protect(new_id);
+                    new_id
+                }
+            };
+        }
+        macro_rules! proteclone {
+            ($id:expr => @ ) => {
+                {
+                    let new_id = $memory.clone_id(
+                        $id,
+                        None,
+                    );
+                    $memory.protect_memory(new_id);
+                    new_id
+                }
+            };
+            ($id:expr => $area:expr ) => {
+                {
+                    let new_id = $memory.clone_id(
+                        $id,
+                        Some($area),
+                    );
+                    $memory.protect_memory(new_id);
                     new_id
                 }
             };
@@ -335,12 +487,17 @@ pub fn execute(
     node: &ASTNode,
     scope_id: ScopePos,
     memory: &mut Memory,
-    scopes: &mut ScopeList,
     info: &mut RunInfo
 ) -> Result<MemoryPos, RuntimeError> {
-    interpreter_util!(memory, scopes, info);
+    interpreter_util!(memory, info);
 
     let start_node = node;
+
+    if memory.values.map.len() > 50000 + memory.last_amount {
+        // println!("{}", memory.values.map.len());
+        memory.collect(scope_id);
+        // println!("{} {}\n", memory.values.map.len(), memory.last_amount);
+    }
 
     memory.push_protected();
     
@@ -352,8 +509,8 @@ pub fn execute(
         NodeType::Op { left, op, right } => {
             match op {
                 Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As | Token::Is | Token::Pipe => {
-                    let left = execute!(left => scope_id);
-                    let right = execute!(right => scope_id);
+                    let left = protecute!(left => scope_id);
+                    let right = protecute!(right => scope_id);
                     match op {
                         Token::Plus => {
                             let result = value_ops::plus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
@@ -467,7 +624,7 @@ pub fn execute(
                     let left = execute_raw!(left => scope_id);
                     
 
-                    let mut right = execute!(right => scope_id);
+                    let mut right = protecute!(right => scope_id);
                     match op {
                         Token::PlusEq => {
                             let result = value_ops::plus(&memory.get(left).clone(), &memory.get(right).clone(), area!(info.source.clone(), node.span), memory)?;
@@ -524,7 +681,7 @@ pub fn execute(
             }
         },
         NodeType::Unary { op, node } => {
-            let value = execute!(node => scope_id);
+            let value = protecute!(node => scope_id);
             match op {
                 Token::Plus => {
                     let result = value_ops::identity(&memory.get(value).clone(), area!(info.source.clone(), node.span), memory)?;
@@ -549,11 +706,11 @@ pub fn execute(
             memory.redef(initial_id, area!(info.source.clone(), start_node.span));
             // memory.propagate_def(value_id);
 
-            scopes.set_var(scope_id, var_name.to_string(), initial_id);
+            memory.set_var(scope_id, var_name.to_string(), initial_id);
             Ok(initial_id)
         }
         NodeType::Var { var_name } => {
-            match scopes.get_var(scope_id, var_name) {
+            match memory.get_var(scope_id, var_name) {
                 Some(i) => Ok( i ),
                 None => Err(
                     RuntimeError::UndefinedVar {
@@ -577,7 +734,7 @@ pub fn execute(
             Ok(ret_id)
         }
         NodeType::Block { code, not_safe } => {
-            let derived = scopes.derive(scope_id);
+            let derived = memory.derive_scope(scope_id);
             let value = execute!(code => derived);
             memory.redef(value, area!(info.source.clone(), start_node.span));
             Ok( value )
@@ -633,11 +790,14 @@ pub fn execute(
             );
             let iter_id = execute!(iter => scope_id);
             for i in value_ops::iter(&memory.get(iter_id), area!(info.source.clone(), iter.span), memory)? {
-                let derived = scopes.derive(scope_id);
-                scopes.set_var(derived, name.clone(), memory.insert(
-                    i,
-                    var_area.clone(),
-                ));
+                let derived = memory.derive_scope(scope_id);
+                {
+                    let temp = memory.insert(
+                        i,
+                        var_area.clone(),
+                    );
+                    memory.set_var(derived, name.clone(), temp);
+                }
                 ret_id = execute!(code => derived);
                 match info.exits.last() {
                     Some(
@@ -690,7 +850,7 @@ pub fn execute(
                 match t {
                     Some(n) => args_exec.push( (s.clone(), c.clone(), {
                         let _n = execute!(n => scope_id);
-                        Some( clone!( _n => area!(info.source.clone(), n.span) ) )
+                        Some( proteclone!( _n => area!(info.source.clone(), n.span) ) )
                     }) ),
                     None => args_exec.push( (s.clone(), c.clone(), None) ),
                 }
@@ -705,7 +865,7 @@ pub fn execute(
                 } ),
                 area!(info.source.clone(), start_node.span)
             );
-            scopes.set_var(scope_id, func_name.to_string(), value_id);
+            memory.set_var(scope_id, func_name.to_string(), value_id);
             Ok( clone!(value_id => @) )
         }
         NodeType::Lambda { args, code, header_area } => {
@@ -714,7 +874,7 @@ pub fn execute(
                 match t {
                     Some(n) => args_exec.push( (s.clone(), c.clone(), {
                         let _n = execute!(n => scope_id);
-                        Some( clone!( _n => area!(info.source.clone(), n.span) ) )
+                        Some( proteclone!( _n => area!(info.source.clone(), n.span) ) )
                     }) ),
                     None => args_exec.push( (s.clone(), c.clone(), None) ),
                 }
@@ -733,7 +893,7 @@ pub fn execute(
         NodeType::Array { elements } => {
             let mut ids = vec![];
             for i in elements {
-                ids.push( execute!(i => scope_id) );
+                ids.push( protecute!(i => scope_id) );
             }
             Ok( memory.insert(
                 Value::Array(ids),
@@ -744,9 +904,9 @@ pub fn execute(
             let mut id_map = HashMap::new();
             for (k, v) in map {
                 let id = match v {
-                    Some(n) => execute!(n => scope_id),
-                    None => match scopes.get_var(scope_id, k) {
-                        Some(i) => clone!(i => @),
+                    Some(n) => protecute!(n => scope_id),
+                    None => match memory.get_var(scope_id, k) {
+                        Some(i) => proteclone!(i => @),
                         None => ret!(Err(
                             RuntimeError::UndefinedVar {
                                 var_name: k.to_string(),
@@ -763,7 +923,7 @@ pub fn execute(
             ) )
         }
         NodeType::Index { base, index } => {
-            let base_id = execute!(base => scope_id);
+            let base_id = protecute!(base => scope_id);
             match &memory.get(base_id).value.clone() {
                 Value::Array(arr) => {
                     let index_id = execute!(index => scope_id);
@@ -897,10 +1057,10 @@ pub fn execute(
             let mut fields_exec = HashMap::new();
 
             for (k, (t, d)) in fields {
-                let _t = execute!(t => scope_id);
+                let _t = protecute!(t => scope_id);
                 let t = clone!( _t => area!(info.source.clone(), t.span) );
                 let d = if let Some(n) = d {
-                    let temp = execute!(n => scope_id);
+                    let temp = protecute!(n => scope_id);
                     Some(temp)
                 } else { None };
                 fields_exec.insert(
@@ -919,14 +1079,14 @@ pub fn execute(
                 Value::Type(ValueType::CustomStruct(type_id)),
                 area!(info.source.clone(), start_node.span)
             );
-            scopes.set_var(scope_id, struct_name.to_string(), value_id);
+            memory.set_var(scope_id, struct_name.to_string(), value_id);
             Ok( value_id )
         }
         NodeType::StructInstance { fields, base, field_areas } => {
-            let base_id = execute!(base => scope_id);
+            let base_id = protecute!(base => scope_id);
             match &memory.get(base_id).value.clone() {
                 Value::Type(ValueType::CustomStruct(id)) => {
-                    let struct_type = memory.custom_structs[id].clone();
+                    let struct_type = memory.custom_structs.map[id].clone();
 
                     let mut id_map = HashMap::new();
 
@@ -945,9 +1105,9 @@ pub fn execute(
                             } ))
                         }
                         let id = match v {
-                            Some(n) => execute!(n => scope_id),
-                            None => match scopes.get_var(scope_id, k) {
-                                Some(i) => clone!(i => @),
+                            Some(n) => protecute!(n => scope_id),
+                            None => match memory.get_var(scope_id, k) {
+                                Some(i) => proteclone!(i => @),
                                 None => ret!(Err(
                                     RuntimeError::UndefinedVar {
                                         var_name: k.to_string(),
@@ -974,15 +1134,15 @@ pub fn execute(
                             } ))
                         }
                     }
-                    if id_map.len() != memory.custom_structs[id].fields.len() {
+                    if id_map.len() != memory.custom_structs.map[id].fields.len() {
                         let mut missing = vec![];
-                        for (k, _) in &memory.custom_structs[id].fields {
+                        for (k, _) in &memory.custom_structs.map[id].fields {
                             if !id_map.contains_key(k) { missing.push(k.clone()) }
                         }
                         ret!(Err( RuntimeError::MissingStructFields {
                             fields: missing,
                             area: area!(info.source.clone(), start_node.span),
-                            struct_def: memory.custom_structs[id].def_area.clone(),
+                            struct_def: memory.custom_structs.map[id].def_area.clone(),
                         } ))
                     }
                     Ok( memory.insert(
@@ -999,7 +1159,7 @@ pub fn execute(
 
             let mut current_scope = scope_id;
             loop {
-                match scopes.get(current_scope).vars.get(name) {
+                match memory.get_scope(current_scope).vars.get(name) {
                     Some(id) => {
                         match &memory.get(*id).value.clone() {
                             Value::Type(t) => {
@@ -1009,7 +1169,7 @@ pub fn execute(
                                             memory.builtin_impls.insert(b.clone(), ImplData::new());
                                         }
                                         for (k, v) in fields {
-                                            let temp = execute!(v => scope_id);
+                                            let temp = protecute!(v => scope_id);
                                             memory.builtin_impls.get_mut(b).unwrap().members.insert( k.clone(), temp );
                                             if let ASTNode {
                                                 node: NodeType::Lambda { args, .. },
@@ -1027,7 +1187,7 @@ pub fn execute(
                                             memory.impls.insert(*id, ImplData::new());
                                         }
                                         for (k, v) in fields {
-                                            let temp = execute!(v => scope_id);
+                                            let temp = protecute!(v => scope_id);
                                             memory.impls.get_mut(id).unwrap().members.insert( k.clone(), temp );
                                             if let ASTNode {
                                                 node: NodeType::Lambda { args, .. },
@@ -1046,15 +1206,18 @@ pub fn execute(
                                     area!(info.source.clone(), start_node.span)
                                 )))
                             },
-                            other => ret!(Err( RuntimeError::TypeMismatch {
-                                expected: "type".to_string(),
-                                found: format!("{}", other.type_str(memory)),
-                                area: name_area.clone(),
-                                defs: vec![(other.type_str(memory), memory.get(*id).def_area.clone())],
-                            } ))
+                            other => {
+                                let temp = memory.get(*id).def_area.clone();
+                                ret!(Err( RuntimeError::TypeMismatch {
+                                    expected: "type".to_string(),
+                                    found: format!("{}", other.type_str(memory)),
+                                    area: name_area.clone(),
+                                    defs: vec![(other.type_str(memory), temp)],
+                                } ))
+                            }
                         }
                     },
-                    None => match scopes.get(current_scope).parent_id {
+                    None => match memory.get_scope(current_scope).parent_id {
                         Some(p_id) => current_scope = p_id,
                         None => break,
                     },
@@ -1068,7 +1231,7 @@ pub fn execute(
             )
         },
         NodeType::Associated { base, assoc } => {
-            let base_id = execute!(base => scope_id);
+            let base_id = protecute!(base => scope_id);
             match &memory.get(base_id).value.clone() {
                 Value::Type(t) => {
                     let impld = match t {
@@ -1100,7 +1263,7 @@ pub fn execute(
             }
         },
         NodeType::Call { base, args } => {
-            let base_id = execute!(base => scope_id);
+            let base_id = protecute!(base => scope_id);
             
             match &memory.get(base_id).value.clone() {
                 Value::Builtin(name) => run_builtin(
@@ -1109,7 +1272,6 @@ pub fn execute(
                     args,
                     scope_id,
                     memory,
-                    scopes,
                     info
                 ),
                 
@@ -1129,9 +1291,9 @@ pub fn execute(
                         ))
                     }
 
-                    let derived = scopes.derive(*parent_scope);
+                    let derived = memory.derive_scope(*parent_scope);
                     for (arg, (name, a, d)) in args.iter().zip(func_args) {
-                        let arg_id = if name == "self" { execute_raw!(arg => scope_id) } else { execute!(arg => scope_id) };
+                        let arg_id = if name == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
                         
                         match d {
                             Some(typ) => {
@@ -1151,13 +1313,11 @@ pub fn execute(
                             None => (),
                         }
                         let arg_id = clone!(arg_id => a.clone());
-                        scopes.set_var(derived, name.clone(), arg_id);
+                        memory.set_var(derived, name.clone(), arg_id);
                     }
                     
                     info.trace.push( area!(info.source.clone(), start_node.span) );
                     let ret_id = execute!(code => derived);
-                    info.trace.pop();
-
                     match info.exits.last() {
                         Some(
                             Exit::Return(v, _)
@@ -1178,6 +1338,7 @@ pub fn execute(
                         },
                         None => (),
                     }
+                    info.trace.pop();
                     memory.redef(ret_id, area!(info.source.clone(), start_node.span));
                     Ok( ret_id )
                 },
@@ -1208,7 +1369,6 @@ pub fn execute(
 
 
         }
-        _ => unimplemented!()
     };
 
     memory.pop_protected();

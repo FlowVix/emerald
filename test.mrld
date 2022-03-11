@@ -1,19 +1,18 @@
 
 
-
-
-let a = [1, 3, 5];
-
-
-let b = for i in a {
-    print(i);
-    if i == 3 {
-        break "gaga";
+impl array {
+    map: (self, f) => {
+        let out = [];
+        for i in self { out += [f(i)]; };
     }
 }
-print(b);
+
+func mult(a, b) {
+    break a * b;
+    print("b");
+}
 
 
-
+print([1, 2 + 5, 3].map(x => x ^ mult(2, 3)));
 
 

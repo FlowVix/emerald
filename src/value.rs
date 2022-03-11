@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory, TypePos, CustomStruct}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
+use crate::{parser::ASTNode, interpreter::{ScopePos, MemoryPos, Memory, TypePos, CustomStruct, Collector}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
 
 
 
@@ -24,7 +24,7 @@ impl ValueType {
     pub fn to_str(&self, memory: &Memory) -> String {
         match self {
             ValueType::Builtin(b) => builtin_type_str(b.clone()),
-            ValueType::CustomStruct(id) => match &memory.custom_structs[id] {
+            ValueType::CustomStruct(id) => match &memory.custom_structs.map[id] {
                 CustomStruct { name, .. } => name.to_string()
             },
         }
@@ -120,13 +120,13 @@ impl Value {
             },
             Value::Type(v) => match v {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
-                ValueType::CustomStruct(pos) => match memory.custom_structs.get(pos).unwrap() {
+                ValueType::CustomStruct(pos) => match &memory.custom_structs.map[pos] {
                     CustomStruct { name, .. } => format!("<struct: {}>", name)
                 },
             },
             Value::StructInstance { struct_id, fields } => {
 
-                let name = match &memory.custom_structs[struct_id] {
+                let name = match &memory.custom_structs.map[struct_id] {
                     CustomStruct { name, .. } => name,
                 };
 
@@ -151,6 +151,48 @@ impl Value {
             Pattern::Either(a, b) => Ok( self.matches_pat(*a, memory)? || self.matches_pat(*b, memory)? )
         }
     }
+
+    pub fn get_references(&self, memory: &Memory, values: &mut HashSet<MemoryPos>, scopes: &mut HashSet<ScopePos>) {
+        match self {
+            Value::Function(Function {
+                args,
+                parent_scope,
+                ..
+            }) => {
+                scopes.insert(*parent_scope);
+                for (_, _, d) in args {
+                    if let Some(id) = d {
+                        values.insert(*id);
+                        memory.get(*id).value.get_references(memory, values, scopes);
+                    }
+                }
+            },
+            Value::Array(arr) => {
+                for i in arr {
+                    values.insert(*i);
+                    memory.get(*i).value.get_references(memory, values, scopes);
+                }
+            },
+            Value::Dictionary(map) => {
+                for (_, i) in map {
+                    values.insert(*i);
+                    memory.get(*i).value.get_references(memory, values, scopes);
+                }
+            },
+            Value::StructInstance { struct_id, fields } => {
+                for (_, i) in fields {
+                    values.insert(*i);
+                    memory.get(*i).value.get_references(memory, values, scopes);
+                }
+            },
+            _ => (),
+        }
+    }
+
+
+
+
+
 
 
 }
