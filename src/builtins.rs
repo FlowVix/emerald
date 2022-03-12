@@ -167,6 +167,7 @@ macro_rules! builtins {
                             let mut __index = 0;
                             $(
                                 let arg_id = execute(&args[__index], $scope_id, $globals, $source.clone())?;
+                                $globals.protect_value(arg_id);
 
                                 $areas.push($globals.get(arg_id).def_area.clone());
                                 let $arg_name = $globals.get(arg_id).value.clone();
@@ -204,6 +205,7 @@ macro_rules! builtins {
                                     let mut $var = vec![];
                                     for i in args {
                                         let arg_id = execute(&i, $scope_id, $globals, $source.clone())?;
+                                        $globals.protect_value(arg_id);
                                         $areas.push($globals.get(arg_id).def_area.clone());
                                         $var.push( $globals.get(arg_id).value.clone() )
                                     }

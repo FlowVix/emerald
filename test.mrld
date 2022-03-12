@@ -1,2 +1,19 @@
 
-import "dog.mrld";
+
+struct Details {
+    name: string,
+    age: number = 0,
+}
+
+impl Details {
+    shit: (self) => Details,
+}
+
+let dog = Details::{
+    name: "fuck",
+}
+
+
+print(dog.shit());
+
+

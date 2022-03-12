@@ -309,24 +309,32 @@ impl Globals {
 
         for prot in &self.protected {
             for id in &prot.values {
-                if collector.marked_values.remove(id) {
-                    let mut value_ids: HashSet<ValuePos> = HashSet::new();
-                    let mut scope_ids: HashSet<ScopePos> = HashSet::new();
-                    self.get(*id).value.get_references(self, &mut value_ids, &mut scope_ids);
-                    for i in scope_ids {
-                        if collector.marked_scopes.contains(&i) {
-                            self.mark_scope(i, &mut collector);
-                        }
-                    }
-                    for i in value_ids {
-                        collector.marked_values.remove(&i);
-                    }
-                }
+                self.mark_value(*id, &mut collector);
             }
             for id in &prot.scopes {
                 if collector.marked_scopes.contains(id) {
                     self.mark_scope(*id, &mut collector);
                 }
+            }
+        }
+
+        for (_, s) in &self.custom_structs.map {
+            for (_, (t, d)) in &s.fields {
+                self.mark_value(*t, &mut collector);
+                if let Some(d) = d {
+                    self.mark_value(*d, &mut collector);
+                }
+            }
+        }
+
+        for (_, ImplData { members, .. }) in &self.impls {
+            for (_, v) in members {
+                self.mark_value(*v, &mut collector);
+            }
+        }
+        for (_, ImplData { members, .. }) in &self.builtin_impls {
+            for (_, v) in members {
+                self.mark_value(*v, &mut collector);
             }
         }
 
@@ -341,6 +349,22 @@ impl Globals {
 
     }
 
+    pub fn mark_value(&self, value_id: ValuePos, collector: &mut Collector) {
+        if collector.marked_values.remove(&value_id) {
+            let mut value_ids: HashSet<ValuePos> = HashSet::new();
+            let mut scope_ids: HashSet<ScopePos> = HashSet::new();
+            self.get(value_id).value.get_references(self, &mut value_ids, &mut scope_ids);
+            for i in scope_ids {
+                if collector.marked_scopes.contains(&i) {
+                    self.mark_scope(i, collector);
+                }
+            }
+            for i in value_ids {
+                collector.marked_values.remove(&i);
+            }
+        }
+    }
+
     pub fn mark_scope(&self, scope_id: ScopePos, collector: &mut Collector) {
         let mut var_checks = Vec::new();
         collector.marked_scopes.remove(&scope_id);
@@ -348,19 +372,7 @@ impl Globals {
             var_checks.push(*id);
         }
         for id in var_checks {
-            if collector.marked_values.remove(&id) {
-                let mut value_ids: HashSet<ValuePos> = HashSet::new();
-                let mut scope_ids: HashSet<ScopePos> = HashSet::new();
-                self.get(id).value.get_references(self, &mut value_ids, &mut scope_ids);
-                for i in scope_ids {
-                    if collector.marked_scopes.contains(&i) {
-                        self.mark_scope(i, collector);
-                    }
-                }
-                for i in value_ids {
-                    collector.marked_values.remove(&i);
-                }
-            }
+            self.mark_value(id, collector);
         }
         match self.get_scope(scope_id).parent_id {
             Some(id) => if collector.marked_scopes.contains(&id) { self.mark_scope(id, collector) },
@@ -1055,7 +1067,7 @@ pub fn execute(
 
             for (k, (t, d)) in fields {
                 let _t = protecute!(t => scope_id);
-                let t = clone!( _t => area!(source.clone(), t.span) );
+                let t = proteclone!( _t => area!(source.clone(), t.span) );
                 let d = if let Some(n) = d {
                     let temp = protecute!(n => scope_id);
                     Some(temp)
@@ -1325,7 +1337,7 @@ pub fn execute(
                             },
                             None => (),
                         }
-                        let arg_id = clone!(arg_id => a.clone());
+                        let arg_id = proteclone!(arg_id => a.clone());
                         globals.set_var(derived, name.clone(), arg_id);
                     }
                     
