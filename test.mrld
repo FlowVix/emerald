@@ -1,19 +1,10 @@
 
+let bruh = import "funny.mrld";
 
-struct Details {
-    name: string,
-    age: number = 0,
-}
-
-impl Details {
-    shit: (self) => Details,
-}
-
-let dog = Details::{
-    name: "fuck",
-}
+print(bruh);
+print(bruh.get_fucked());
 
 
-print(dog.shit());
+print(bruh.Funny::{name: "fucker"});
 
 

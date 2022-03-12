@@ -2,7 +2,9 @@
 
 use std::{collections::{HashMap, HashSet}, fs, path::PathBuf};
 
-use crate::{value::{Value, value_ops, Function, ValueType}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::Token, CodeArea, builtins::{BuiltinType}};
+use logos::Logos;
+
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -112,6 +114,9 @@ pub struct Globals {
     
     pub exits: Vec<Exit>,
     pub trace: Vec<CodeArea>,
+    pub import_trace: Vec<CodeArea>,
+
+    pub exports: Vec<HashMap<String, ValuePos>>,
 
 }
 
@@ -121,6 +126,7 @@ pub struct Globals {
 pub struct Scope {
     vars: HashMap<String, ValuePos>,
     parent_id: Option<ScopePos>,
+    extra_prot: Vec<ScopePos>,
 }
 
 
@@ -132,7 +138,7 @@ impl Globals {
             map: HashMap::new(),
             counter: 0,
         };
-        scopes.map.insert(0, Scope { vars: HashMap::new(), parent_id: None });
+        scopes.map.insert(0, Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![] });
         Self {
             values: Register {
                 map: HashMap::new(),
@@ -150,8 +156,45 @@ impl Globals {
             builtin_impls: HashMap::new(),
             exits: vec![],
             trace: vec![],
+            import_trace: vec![],
+            exports: vec![],
         }
     }
+
+    pub fn init_global(&mut self, scope_id: ScopePos, source: EmeraldSource) {
+        for i in builtin_names() {
+            let id = self.insert_value(
+                Value::Builtin(i.clone()),
+                CodeArea {
+                    source: source.clone(),
+                    range: (0, 0)
+                },
+            );
+            self.set_var(scope_id, i, id);
+        }
+
+        for i in builtin_type_names() {
+            let id = self.insert_value(
+                Value::Type(ValueType::Builtin(builtin_type_from_str(&i))),
+                CodeArea {
+                    source: source.clone(),
+                    range: (0, 0)
+                },
+            );
+            self.set_var(scope_id, i.to_lowercase().to_string(), id);
+        }
+        {
+            let id = self.insert_value(
+                Value::Pattern(Pattern::Any),
+                CodeArea {
+                    source: source.clone(),
+                    range: (0, 0)
+                },
+            );
+            self.set_var(scope_id, "any".to_string(), id);
+        }
+    }
+
 
     fn push_protected(&mut self) {
         self.protected.push( Protector::new() );
@@ -265,11 +308,21 @@ impl Globals {
         self.scopes.map.get_mut(&scope_id).unwrap()
     }
 
+
+    pub fn insert_scope(
+        &mut self,
+        scope: Scope,
+    ) -> ValuePos {
+        self.scopes.counter += 1;
+        self.scopes.map.insert( self.scopes.counter, scope );
+        self.scopes.counter
+    }
     fn derive_scope(&mut self, scope_id: ScopePos) -> ScopePos {
         self.scopes.counter += 1;
         self.scopes.map.insert(self.scopes.counter, Scope {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
+            extra_prot: vec![],
         });
         self.protect_scope(self.scopes.counter);
         self.scopes.counter
@@ -337,6 +390,11 @@ impl Globals {
                 self.mark_value(*v, &mut collector);
             }
         }
+        for e in &self.exports {
+            for (_, v) in e {
+                self.mark_value(*v, &mut collector);
+            }
+        }
 
         for i in collector.marked_scopes {
             self.scopes.map.remove(&i);
@@ -377,6 +435,9 @@ impl Globals {
         match self.get_scope(scope_id).parent_id {
             Some(id) => if collector.marked_scopes.contains(&id) { self.mark_scope(id, collector) },
             None => (),
+        }
+        for i in &self.get_scope(scope_id).extra_prot {
+            if collector.marked_scopes.contains(&i) { self.mark_scope(*i, collector) }
         }
     }
 
@@ -725,6 +786,7 @@ pub fn execute(
             Ok(initial_id)
         }
         NodeType::Var { var_name } => {
+            // println!("c: {:?} {}", globals.get_scope(scope_id).vars, var_name);
             match globals.get_var(scope_id, var_name) {
                 Some(i) => Ok( i ),
                 None => Err(
@@ -741,7 +803,9 @@ pub fn execute(
                 area!(source.clone(), start_node.span)
             );
             for i in statements {
+                // println!("d1: {:?}", globals.get_scope(scope_id).vars);
                 ret_id = execute!(i => scope_id);
+                // println!("d2: {:?}", globals.get_scope(scope_id).vars);
                 if globals.exits.len() > 0 {
                     ret!( Ok( ret_id ) );
                 }
@@ -1282,10 +1346,82 @@ pub fn execute(
                     area: area!(source.clone(), start_node.span),
                 } )),
             };
-            println!("{}", code);
 
-            panic!();
+            let mut tokens_iter = lexer::Token
+                ::lexer(&code);
+            let mut tokens = vec![];
+            loop {
+                match tokens_iter.next() {
+                    Some(t) => tokens.push((
+                        t,
+                        (
+                            tokens_iter.span().start,
+                            tokens_iter.span().end,
+                        )
+                    )),
+                    None => break,
+                }
+            }
+            tokens.push((
+                lexer::Token::Eof,
+                (code.len(), code.len())
+            ));
 
+            // println!("{:?}", tokens);
+
+            let mod_source = EmeraldSource::File(buf);
+            let ast = crate::parser::parse(&tokens, &mod_source);
+            match ast {
+                Ok((node, _)) => {
+                    
+
+                    let mod_scope_root = globals.insert_scope(Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![scope_id] });
+                    globals.protect_scope(mod_scope_root);
+
+                    globals.import_trace.push( area!(source.clone(), start_node.span) );
+                    globals.exports.push( HashMap::new() );
+                    globals.init_global(mod_scope_root, mod_source.clone());
+
+                    execute(
+                        &node,
+                        mod_scope_root,
+                        globals,
+                        mod_source.clone(),
+                    )?;
+
+                    globals.import_trace.pop();
+
+                    let ret_value = Value::Dictionary( globals.exports.last().unwrap().clone() );
+                    // for i in globals.exports.last().unwrap() {
+                    //     println!("_ {} {}", i.0, i.1);
+                    //     println!("__ {:?}", globals.get(*i.1).value);
+                    // }
+
+
+                    globals.exports.pop();
+
+                    
+                    Ok(globals.insert_value(
+                        ret_value,
+                        area!(source.clone(), start_node.span),
+                    ))
+        
+                },
+                Err(e) => {
+                    ret!(Err( RuntimeError::ErrorParsingImport {
+                        import_area: area!(source.clone(), start_node.span),
+                        error: e,
+                    } ))
+                },
+            }
+
+        },
+        NodeType::Export { name, value } => {
+            // println!("a: {:?}", globals.get_scope(scope_id).vars);
+            let val = execute!(value => scope_id);
+            // println!("b: {:?}", globals.get_scope(scope_id).vars);
+            globals.exports.last_mut().unwrap().insert(name.clone(), val);
+            Ok( val )
         },
         NodeType::Call { base, args } => {
             let base_id = protecute!(base => scope_id);
@@ -1394,10 +1530,6 @@ pub fn execute(
             }
 
 
-        }
-        g => {
-            println!("{:#?}", g);
-            panic!();
         }
     };
 

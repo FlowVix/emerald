@@ -1,0 +1,13 @@
+
+
+let fucked = 5;
+
+export let shit = 0;
+export func get_fucked() {
+    return fucked;
+}
+
+export struct Funny {
+    name: string,
+    piss: number = 5,
+}

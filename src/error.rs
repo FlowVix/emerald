@@ -121,6 +121,10 @@ pub enum RuntimeError {
         path: String,
         area: CodeArea,
     },
+    ErrorParsingImport {
+        import_area: CodeArea,
+        error: SyntaxError,
+    },
 }
 
 
@@ -195,7 +199,11 @@ impl ErrorReport {
 
 
         let mut report: ReportBuilder<CodeArea> = Report::build(ReportKind::Error, self.source.clone(), self.source.range.0)
-        .with_message(self.message.clone());
+        .with_message(self.message.clone() + "\n");
+
+        for (i, t) in globals.import_trace.iter().enumerate() {
+            report = report.with_label( Label::new(t.clone()).with_message(format!("Error when running this import")).with_color(colors.next()).with_order(-(i as i32) - 1) )
+        }
 
         for (c, s) in &self.labels {
             report = report.with_label( Label::new(c.clone()).with_message(s).with_color(colors.next()) )
@@ -533,6 +541,23 @@ impl ToReport for RuntimeError {
                     (area.clone(), format!("Import used here"))
                 ],
                 note: None,
+            },
+            RuntimeError::ErrorParsingImport {
+                import_area,
+                error,
+            } => {
+                let mut labels = error.to_report().labels;
+                for i in &labels {
+                    println!("{:#?}", i.0);
+                }
+                labels.insert(0, (import_area.clone(), format!("Import used here")));
+
+                ErrorReport {
+                    source: import_area.clone(),
+                    message: format!("Error parsing this import"),
+                    labels,
+                    note: None,
+                }
             },
         }
     }

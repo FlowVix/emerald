@@ -125,40 +125,12 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
 
     let ast = parse(&tokens, &source);
     let mut globals = Globals::new();
+    globals.exports.push( HashMap::new() );
     match ast {
         Ok((node, _)) => {
             
-            for i in builtin_names() {
-                let id = globals.insert_value(
-                    Value::Builtin(i.clone()),
-                    CodeArea {
-                        source: source.clone(),
-                        range: (0, 0)
-                    },
-                );
-                globals.set_var(0, i, id);
-            }
+            globals.init_global(0, source.clone());
 
-            for i in builtin_type_names() {
-                let id = globals.insert_value(
-                    Value::Type(ValueType::Builtin(builtin_type_from_str(&i))),
-                    CodeArea {
-                        source: source.clone(),
-                        range: (0, 0)
-                    },
-                );
-                globals.set_var(0, i.to_lowercase().to_string(), id);
-            }
-            {
-                let id = globals.insert_value(
-                    Value::Pattern(Pattern::Any),
-                    CodeArea {
-                        source: source.clone(),
-                        range: (0, 0)
-                    },
-                );
-                globals.set_var(0, "any".to_string(), id);
-            }
             let mut result = execute(
                 &node,
                 0,
