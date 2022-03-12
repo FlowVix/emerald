@@ -1,10 +1,11 @@
 
-let bruh = import "funny.mrld";
-
-print(bruh);
-print(bruh.get_fucked());
 
 
-print(bruh.Funny::{name: "fucker"});
 
+id();
 
+let a = !{
+    id();
+}
+
+print(a);

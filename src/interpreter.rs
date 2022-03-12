@@ -1,10 +1,10 @@
 
 
-use std::{collections::{HashMap, HashSet}, fs, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io};
 
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern}, parser::{ASTNode, NodeType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern}, parser::{ASTNode, NodeType, BlockType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -17,6 +17,7 @@ pub enum Exit {
 pub type ValuePos = usize;
 pub type ScopePos = usize;
 pub type TypePos = usize;
+pub type McFuncID = usize;
 
 #[derive(Debug, Clone)]
 pub struct StoredValue {
@@ -118,15 +119,18 @@ pub struct Globals {
 
     pub exports: Vec<HashMap<String, ValuePos>>,
 
+    pub mcfuncs: Register<McFuncID, Vec<String>>,
+
 }
 
 
 
 
 pub struct Scope {
-    vars: HashMap<String, ValuePos>,
-    parent_id: Option<ScopePos>,
-    extra_prot: Vec<ScopePos>,
+    pub vars: HashMap<String, ValuePos>,
+    pub parent_id: Option<ScopePos>,
+    pub extra_prot: Vec<ScopePos>,
+    pub func_id: McFuncID,
 }
 
 
@@ -138,7 +142,7 @@ impl Globals {
             map: HashMap::new(),
             counter: 0,
         };
-        scopes.map.insert(0, Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![] });
+        scopes.map.insert(0, Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![], func_id: 0 });
         Self {
             values: Register {
                 map: HashMap::new(),
@@ -158,6 +162,10 @@ impl Globals {
             trace: vec![],
             import_trace: vec![],
             exports: vec![],
+            mcfuncs: Register {
+                map: HashMap::new(),
+                counter: 0,
+            },
         }
     }
 
@@ -301,10 +309,10 @@ impl Globals {
     }
 
 
-    fn get_scope(&self, scope_id: ScopePos) -> &Scope {
+    pub fn get_scope(&self, scope_id: ScopePos) -> &Scope {
         self.scopes.map.get(&scope_id).unwrap()
     }
-    fn get_scope_mut(&mut self, scope_id: ScopePos) -> &mut Scope {
+    pub fn get_scope_mut(&mut self, scope_id: ScopePos) -> &mut Scope {
         self.scopes.map.get_mut(&scope_id).unwrap()
     }
 
@@ -323,6 +331,19 @@ impl Globals {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
             extra_prot: vec![],
+            func_id: self.get_scope(scope_id).func_id,
+        });
+        self.protect_scope(self.scopes.counter);
+        self.scopes.counter
+    }
+    fn derive_scope_mcfunc(&mut self, scope_id: ScopePos) -> ScopePos {
+        self.scopes.counter += 1;
+        self.mcfuncs.counter += 1;
+        self.scopes.map.insert(self.scopes.counter, Scope {
+            vars: HashMap::new(),
+            parent_id: Some(scope_id),
+            extra_prot: vec![],
+            func_id: self.mcfuncs.counter,
         });
         self.protect_scope(self.scopes.counter);
         self.scopes.counter
@@ -565,6 +586,10 @@ pub fn execute(
     source: EmeraldSource,
 ) -> Result<ValuePos, RuntimeError> {
     interpreter_util!(globals, source.clone());
+
+    // println!("aaaa");
+    // io::stdout().flush().unwrap();
+
 
     let start_node = node;
 
@@ -812,9 +837,19 @@ pub fn execute(
             }
             Ok(ret_id)
         }
-        NodeType::Block { code, .. } => {
-            let derived = globals.derive_scope(scope_id);
-            let value = execute!(code => derived);
+        NodeType::Block { code, typ } => {
+            let value = match typ {
+                BlockType::Regular { .. } => execute!(code => globals.derive_scope(scope_id)),
+                BlockType::McFunc => {
+                    let derived = globals.derive_scope_mcfunc(scope_id);
+                    let id = globals.mcfuncs.counter;
+                    execute!(code => derived);
+                    globals.insert_value(
+                        Value::McFunc(id),
+                        area!(source.clone(), node.span),
+                    )
+                },
+            };
             globals.redef_value(value, area!(source.clone(), start_node.span));
             Ok( value )
         }
@@ -1337,7 +1372,17 @@ pub fn execute(
         },
         NodeType::Import { path } => {
 
-            let mut buf = PathBuf::new();
+            let mut buf;
+            match &source {
+                EmeraldSource::String(_) => ret!(Err( RuntimeError::CantImportInEval {
+                    import_area: area!(source.clone(), start_node.span),
+                } )),
+                EmeraldSource::File(f) => {
+                    buf = f.clone();
+                },
+            }
+            
+            buf.pop();
             buf.push(path);
             let code = match fs::read_to_string(buf.clone()) {
                 Ok(s) => s,
@@ -1375,12 +1420,18 @@ pub fn execute(
                 Ok((node, _)) => {
                     
 
-                    let mod_scope_root = globals.insert_scope(Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![scope_id] });
+                    let mod_scope_root = globals.insert_scope(Scope {
+                        vars: HashMap::new(),
+                        parent_id: None,
+                        extra_prot: vec![scope_id],
+                        func_id: globals.get_scope(scope_id).func_id,
+                    });
                     globals.protect_scope(mod_scope_root);
 
                     globals.import_trace.push( area!(source.clone(), start_node.span) );
                     globals.exports.push( HashMap::new() );
                     globals.init_global(mod_scope_root, mod_source.clone());
+
 
                     execute(
                         &node,

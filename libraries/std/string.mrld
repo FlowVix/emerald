@@ -1,0 +1,9 @@
+
+
+impl string {
+    shit: (self) => print(self),
+    arr: (v) => [v],
+}
+
+
+

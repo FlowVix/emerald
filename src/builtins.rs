@@ -235,6 +235,7 @@ builtin_types!(
     Dict,
     Type,
     Pattern,
+    McFunc,
 );
 
 
@@ -281,9 +282,8 @@ builtins!{
 
     [Sqrt]: sqrt(n: Number) { Value::Number(n.sqrt()) }
 
-    [Impls]: impls(@Any => poopie) {
-        println!("impls: {:?}", globals.impls);
-        println!("builtin impls: {:?}", globals.builtin_impls);
+    [ID]: id(@Any => poopie) {
+        println!("id: {:?}", globals.get_scope(scope_id).func_id);
         Value::Null
 
     }

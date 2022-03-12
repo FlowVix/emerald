@@ -125,6 +125,9 @@ pub enum RuntimeError {
         import_area: CodeArea,
         error: SyntaxError,
     },
+    CantImportInEval {
+        import_area: CodeArea,
+    },
 }
 
 
@@ -558,6 +561,16 @@ impl ToReport for RuntimeError {
                     labels,
                     note: None,
                 }
+            },
+            RuntimeError::CantImportInEval {
+                import_area,
+            } => ErrorReport {
+                source: import_area.clone(),
+                message: format!("Can't import in eval"),
+                labels: vec![
+                    (import_area.clone(), format!("Import used here"))
+                ],
+                note: None,
             },
         }
     }

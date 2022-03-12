@@ -208,6 +208,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
 fn main() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
+    fs::create_dir_all("test/fuck/shit").unwrap();
 
     if true {
         let mut buf = PathBuf::new();

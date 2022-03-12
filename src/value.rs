@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
+use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
 
 
 
@@ -62,6 +62,8 @@ pub enum Value {
     Type(ValueType),
     Pattern(Pattern),
 
+    McFunc(McFuncID),
+
     StructInstance { struct_id: TypePos, fields: HashMap<String, ValuePos> },
 }
 
@@ -79,6 +81,7 @@ impl Value {
             Value::Dictionary(_) => ValueType::Builtin(BuiltinType::Dict),
             Value::Type(_) => ValueType::Builtin(BuiltinType::Type),
             Value::Pattern(_) => ValueType::Builtin(BuiltinType::Pattern),
+            Value::McFunc(_) => ValueType::Builtin(BuiltinType::McFunc),
 
             Value::StructInstance { struct_id, .. } => ValueType::CustomStruct(*struct_id),
         }
@@ -140,7 +143,8 @@ impl Value {
                 visited.pop();
                 format!("{}::{}", name, out_str)
             },
-            Value::Pattern(p) => p.to_str(globals)
+            Value::Pattern(p) => p.to_str(globals),
+            Value::McFunc(_) => format!("!{{...}}"),
         }
     }
 

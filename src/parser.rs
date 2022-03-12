@@ -17,6 +17,13 @@ pub struct ASTNode {
 }
 
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockType {
+    Regular {not_safe: bool},
+    McFunc,
+}
+
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -26,7 +33,7 @@ pub enum NodeType {
     Declaration { var_name: String, value: Box<ASTNode> },
     Var { var_name: String },
     StatementList { statements: Vec<ASTNode> },
-    Block { code: Box<ASTNode>, not_safe: bool },
+    Block { code: Box<ASTNode>, typ: BlockType },
     If {cond: Box<ASTNode>, code: Box<ASTNode>, else_branch: Option<Box<ASTNode>>},
     While {cond: Box<ASTNode>, code: Box<ASTNode> },
     For { var: (String, CodeArea), iter: Box<ASTNode>, code: Box<ASTNode> },
@@ -492,9 +499,16 @@ pub fn parse_unit(
             } else {
                 parse!(parse_statements => let statements);
                 check_tok!(RBracket else "}");
-                ret!( NodeType::Block { code: Box::new(statements), not_safe: false } => start.0, span!(-1).1 );
+                ret!( NodeType::Block { code: Box::new(statements), typ: BlockType::Regular {not_safe: false} } => start.0, span!(-1).1 );
             }
 
+        }
+        Token::ExcLBracket => {
+            pos += 1;
+
+            parse!(parse_statements => let statements);
+            check_tok!(RBracket else "}");
+            ret!( NodeType::Block { code: Box::new(statements), typ: BlockType::McFunc } => start.0, span!(-1).1 );
         }
         Token::Impl => {
             pos += 1;
