@@ -1,18 +1,2 @@
 
-
-impl array {
-    map: (self, f) => {
-        let out = [];
-        for i in self { out += [f(i)]; };
-    }
-}
-
-func mult(a, b) {
-    break a * b;
-    print("b");
-}
-
-
-print([1, 2 + 5, 3].map(x => x ^ mult(2, 3)));
-
-
+import "dog.mrld";

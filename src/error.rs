@@ -1,7 +1,7 @@
 
 
-use crate::{CodeArea, EmeraldSource, EmeraldCache, interpreter::RunInfo};
-use ariadne::{Report, ReportKind, Label, Source, ColorGenerator, Color, Fmt, ReportBuilder, sources};
+use crate::{CodeArea, EmeraldSource, EmeraldCache, interpreter::{Globals}};
+use ariadne::{Report, ReportKind, Label, Fmt, ReportBuilder};
 
 
 #[derive(Debug, Clone)]
@@ -117,6 +117,10 @@ pub enum RuntimeError {
         assoc: String,
         area: CodeArea,
     },
+    NonexistentFile {
+        path: String,
+        area: CodeArea,
+    },
 }
 
 
@@ -185,7 +189,7 @@ impl RainbowColorGenerator {
 
 
 impl ErrorReport {
-    pub fn print_error(&self, cache: EmeraldCache, info: &RunInfo) {
+    pub fn print_error(&self, cache: EmeraldCache, globals: &Globals) {
 
         let mut colors = RainbowColorGenerator::new(0.0, 1.0, 0.75);
 
@@ -198,7 +202,7 @@ impl ErrorReport {
         }
         
         let mut colors = RainbowColorGenerator::new(270.0, 1.0, 0.75);
-        for (i, t) in info.trace.iter().enumerate() {
+        for (i, t) in globals.trace.iter().enumerate() {
             report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
         }
 
@@ -206,7 +210,7 @@ impl ErrorReport {
         if let Some(m) = &self.note {
             report = report.with_note(m)
         }
-        report.finish().print(cache);
+        report.finish().print(cache).unwrap();
 
     }
 }
@@ -516,6 +520,17 @@ impl ToReport for RuntimeError {
                 message: format!("Associated member '{}' does not exist", assoc),
                 labels: vec![
                     (area.clone(), format!("Member '{}' was used here", assoc.fg(a)))
+                ],
+                note: None,
+            },
+            RuntimeError::NonexistentFile {
+                path,
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("File at path '{}' was not found", path),
+                labels: vec![
+                    (area.clone(), format!("Import used here"))
                 ],
                 note: None,
             },

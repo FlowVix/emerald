@@ -142,6 +142,11 @@ pub enum Token {
     #[token("break")]
     Break,
 
+    #[token("export")]
+    Export,
+    #[token("import")]
+    Import,
+
     // #[token("type")]
     // Type,
     #[token("impl")]
@@ -225,6 +230,8 @@ impl Token {
             Token::Return => "return",
             Token::Break => "break",
             Token::Struct => "struct",
+            Token::Export => "export",
+            Token::Import => "export",
             // Token::Type => "type",
             Token::Impl => "impl",
             Token::Eol => ";",

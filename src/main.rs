@@ -11,10 +11,10 @@ mod builtins;
 use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
 use ansi_term;
-use ariadne::{Source, Cache};
+use ariadne::{Source};
 use builtins::{builtin_names, builtin_type_from_str, builtin_type_names};
 use error::{ToReport, RuntimeError};
-use interpreter::{execute, Memory, RunInfo, Exit};
+use interpreter::{execute, Globals, Exit};
 use logos::Logos;
 use value::{Value, ValueType, Pattern};
 
@@ -120,60 +120,59 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
 
     // println!("{:?}", tokens);
 
-    let mut cache = EmeraldCache::default();
-    cache.fetch(&source).unwrap();
+    let cache = EmeraldCache::default();
+    // cache.fetch(&source).unwrap();
 
     let ast = parse(&tokens, &source);
-    let mut info = RunInfo {source: source.clone(), exits: vec![], trace: vec![]};
+    let mut globals = Globals::new();
     match ast {
         Ok((node, _)) => {
-            let mut memory = Memory::new();
             
             for i in builtin_names() {
-                let id = memory.insert(
+                let id = globals.insert_value(
                     Value::Builtin(i.clone()),
                     CodeArea {
                         source: source.clone(),
                         range: (0, 0)
                     },
                 );
-                memory.set_var(0, i, id);
+                globals.set_var(0, i, id);
             }
 
             for i in builtin_type_names() {
-                let id = memory.insert(
+                let id = globals.insert_value(
                     Value::Type(ValueType::Builtin(builtin_type_from_str(&i))),
                     CodeArea {
                         source: source.clone(),
                         range: (0, 0)
                     },
                 );
-                memory.set_var(0, i.to_lowercase().to_string(), id);
+                globals.set_var(0, i.to_lowercase().to_string(), id);
             }
             {
-                let id = memory.insert(
+                let id = globals.insert_value(
                     Value::Pattern(Pattern::Any),
                     CodeArea {
                         source: source.clone(),
                         range: (0, 0)
                     },
                 );
-                memory.set_var(0, "any".to_string(), id);
+                globals.set_var(0, "any".to_string(), id);
             }
             let mut result = execute(
                 &node,
                 0,
-                &mut memory,
-                &mut info,
+                &mut globals,
+                source.clone(),
             );
             if let Ok(_) = result {
-                result = match info.exits.last() {
+                result = match globals.exits.last() {
                     Some(
                         Exit::Return(_, span)
                     ) => {
                         Err(
                             RuntimeError::ReturnUsedOutsideProgram {
-                                return_area: area!(info.source.clone(), *span),
+                                return_area: area!(source.clone(), *span),
                             }
                         )
                     },
@@ -182,7 +181,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     ) => {
                         Err(
                             RuntimeError::BreakUsedOutsideProgram {
-                                break_area: area!(info.source.clone(), *span),
+                                break_area: area!(source.clone(), *span),
                             }
                         )
                     },
@@ -193,20 +192,20 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             match result {
                 Ok(pos) => {
                     if print_return {
-                        match &memory.get(pos).value {
+                        match &globals.get(pos).value {
                             Value::Null => (),
-                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&memory, &mut vec![]))))
+                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&globals, &mut vec![]))))
                         }
                     }
-                    // println!("{:?}", memory.values.map.len());
-                    // println!("{}", memory.register.len());
-                    // for i in &memory.register {
+                    // println!("{:?}", globals.values.map.len());
+                    // println!("{}", globals.register.len());
+                    // for i in &globals.register {
                     //     println!("{}: {:?}", i.0, i.1)
                     // }
                     return true
                 },
                 Err(e) => {
-                    e.to_report().print_error(cache, &info);
+                    e.to_report().print_error(cache, &globals);
                     return false
                 },
             }
@@ -214,7 +213,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
         },
         Err(e) => {
             let gaga = e.to_report();
-            gaga.print_error(cache, &info);
+            gaga.print_error(cache, &globals);
             // println!("{:#?}", gaga);
             return false
         },

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{CodeArea, lexer::Token, value::Value, error::{SyntaxError, RuntimeError}, EmeraldSource, parser};
+use crate::{CodeArea, lexer::Token, value::Value, error::{SyntaxError}, EmeraldSource};
 
 
 
@@ -44,6 +44,8 @@ pub enum NodeType {
     StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, Option<ASTNode>> },
     Impl { type_var: (String, CodeArea), fields: HashMap<String, ASTNode> },
     Associated { base: Box<ASTNode>, assoc: String },
+    Export { name: String, value: Box<ASTNode> },
+    Import { path: String },
 }
 
 macro_rules! expected_err {
@@ -692,6 +694,12 @@ pub fn parse_unit(
             // println!("{}: {:#?}", struct_name, fields);
             ret!( NodeType::StructDef { struct_name, fields, field_areas, def_area } => start.0, span!(-1).1 );
         },
+        Token::Import => {
+            pos += 1;
+            check_tok!(String(path) else "string");
+
+            ret!( NodeType::Import { path } => start.0, span!(-1).1 );
+        },
         unary_op if is_unary(unary_op) => {
             pos += 1;
             let prec = unary_prec(unary_op);
@@ -895,13 +903,47 @@ fn parse_statement(
 ) -> Result<(ASTNode, usize), SyntaxError> {
     parse_util!(tokens, pos, info);
 
-    parse!(parse_expr(false) => let value);
-    if !matches!(tok!(-1), Token::RBracket) {
-        check_tok!(Eol else ';');
-    }
-    skip_toks!(Eol);
+    
 
-    Ok((value, pos))
+    if_tok!(== Export: {
+        let start = span!(0);
+        pos += 1;
+        let export_name;
+        match tok!(0) {
+            Token::Let | Token::Func | Token::Struct => {
+                match tok!(1) {
+                    Token::Ident(name) => {
+                        export_name = name.clone();
+                        parse!(parse_expr(false) => let value);
+
+                        if !matches!(tok!(-1), Token::RBracket) {
+                            check_tok!(Eol else ';');
+                        }
+                        skip_toks!(Eol);
+
+                        ret!( NodeType::Export {
+                            name: export_name,
+                            value: Box::new(value),
+                        } => start.0, span!(-1).1 )
+                    }
+
+                    // cheeky thing to make me not have to write the same errors twice
+                    _ => { parse!(parse_expr(false) => let _value); panic!() },
+                }
+            }
+            _ => expected_err!("let, func, or struct", tok!(0), span!(0), info ),
+        }
+    } else {
+        parse!(parse_expr(false) => let value);
+        if !matches!(tok!(-1), Token::RBracket) {
+            check_tok!(Eol else ';');
+        }
+        skip_toks!(Eol);
+    
+        Ok((value, pos))
+    })
+
+
 
 }
 
