@@ -53,6 +53,8 @@ pub enum NodeType {
     Associated { base: Box<ASTNode>, assoc: String },
     Export { name: String, value: Box<ASTNode> },
     Import { path: String },
+    McCall { base: Box<ASTNode> },
+    CurrentMcId,
 }
 
 macro_rules! expected_err {
@@ -505,7 +507,6 @@ pub fn parse_unit(
         }
         Token::ExcLBracket => {
             pos += 1;
-
             parse!(parse_statements => let statements);
             check_tok!(RBracket else "}");
             ret!( NodeType::Block { code: Box::new(statements), typ: BlockType::McFunc } => start.0, span!(-1).1 );
@@ -714,6 +715,11 @@ pub fn parse_unit(
 
             ret!( NodeType::Import { path } => start.0, span!(-1).1 );
         },
+        Token::Dollar => {
+            pos += 1;
+
+            ret!( NodeType::CurrentMcId => start.0, span!(-1).1 );
+        },
         unary_op if is_unary(unary_op) => {
             pos += 1;
             let prec = unary_prec(unary_op);
@@ -748,7 +754,7 @@ fn parse_value(
     parse!(parse_unit => let mut value);
     let start = value.span;
 
-    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon) {
+    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon | Token::ExclMark) {
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
@@ -845,7 +851,16 @@ fn parse_value(
                         span: ( start.0, span!(-1).1 )
                     }
                 }
-            }
+            },
+            Token::ExclMark => {
+                pos += 1;
+                value = ASTNode {
+                    node: NodeType::McCall {
+                        base: Box::new(value),
+                    },
+                    span: ( start.0, span!(-1).1 )
+                }
+            },
             _ => unreachable!(),
         }
     }

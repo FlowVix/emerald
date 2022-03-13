@@ -2,6 +2,7 @@
 
 use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io};
 
+use convert_case::{Case, Casing};
 use logos::Logos;
 
 use crate::{value::{Value, value_ops, Function, ValueType, Pattern}, parser::{ASTNode, NodeType, BlockType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
@@ -92,6 +93,7 @@ impl Protector {
 
 
 
+#[derive(Debug)]
 pub struct Register<K, V> {
     pub counter: K,
     pub map: HashMap<K, V>,
@@ -189,7 +191,7 @@ impl Globals {
                     range: (0, 0)
                 },
             );
-            self.set_var(scope_id, i.to_lowercase().to_string(), id);
+            self.set_var(scope_id, i.to_case(Case::Snake).to_string(), id);
         }
         {
             let id = self.insert_value(
@@ -325,13 +327,13 @@ impl Globals {
         self.scopes.map.insert( self.scopes.counter, scope );
         self.scopes.counter
     }
-    fn derive_scope(&mut self, scope_id: ScopePos) -> ScopePos {
+    fn derive_scope(&mut self, scope_id: ScopePos, mc_func_id: McFuncID) -> ScopePos {
         self.scopes.counter += 1;
         self.scopes.map.insert(self.scopes.counter, Scope {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
             extra_prot: vec![],
-            func_id: self.get_scope(scope_id).func_id,
+            func_id: mc_func_id,
         });
         self.protect_scope(self.scopes.counter);
         self.scopes.counter
@@ -460,6 +462,14 @@ impl Globals {
         for i in &self.get_scope(scope_id).extra_prot {
             if collector.marked_scopes.contains(&i) { self.mark_scope(*i, collector) }
         }
+    }
+
+
+    pub fn insert_command(&mut self, func_id: McFuncID, command: String) {
+        match self.mcfuncs.map.get_mut(&func_id) {
+            Some(v) => {v.push(command);},
+            None => {self.mcfuncs.map.insert(func_id, vec![command]);},
+        };
     }
 
 
@@ -839,7 +849,7 @@ pub fn execute(
         }
         NodeType::Block { code, typ } => {
             let value = match typ {
-                BlockType::Regular { .. } => execute!(code => globals.derive_scope(scope_id)),
+                BlockType::Regular { .. } => execute!(code => globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id)),
                 BlockType::McFunc => {
                     let derived = globals.derive_scope_mcfunc(scope_id);
                     let id = globals.mcfuncs.counter;
@@ -904,7 +914,7 @@ pub fn execute(
             );
             let iter_id = execute!(iter => scope_id);
             for i in value_ops::iter(&globals.get(iter_id), area!(source.clone(), iter.span), globals)? {
-                let derived = globals.derive_scope(scope_id);
+                let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
                 {
                     let temp = globals.insert_value(
                         i,
@@ -1502,8 +1512,8 @@ pub fn execute(
                             }
                         ))
                     }
-
-                    let derived = globals.derive_scope(*parent_scope);
+                    
+                    let derived = globals.derive_scope(*parent_scope, globals.get_scope(scope_id).func_id);
                     for (arg, (name, a, d)) in args.iter().zip(func_args) {
                         let arg_id = if name == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
                         
@@ -1573,7 +1583,7 @@ pub fn execute(
                     ))
                 }
                 other => ret!(Err( RuntimeError::TypeMismatch {
-                    expected: "function, builtin or type".to_string(),
+                    expected: "function, builtin, or type".to_string(),
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
@@ -1581,7 +1591,39 @@ pub fn execute(
             }
 
 
-        }
+        },
+        NodeType::McCall { base } => {
+            let base_id = protecute!(base => scope_id);
+            
+            match &globals.get(base_id).value.clone() {
+
+                Value::McFunc(id) => {
+
+                    let current_id = globals.get_scope(scope_id).func_id;
+                    globals.insert_command(current_id, format!("function mrld:gen{}", id));
+                    
+                    Ok(globals.insert_value(
+                        Value::Null,
+                        area!(source.clone(), node.span),
+                    ))
+                }
+                other => ret!(Err( RuntimeError::TypeMismatch {
+                    expected: "mc_func".to_string(),
+                    found: format!("{}", other.type_str(globals)),
+                    area: area!(source.clone(), base.span),
+                    defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
+                } ))
+            }
+
+
+        },
+        NodeType::CurrentMcId => {
+            let val_id = globals.insert_value(
+                Value::McFunc( globals.get_scope(scope_id).func_id ),
+                area!(source.clone(), node.span),
+            );
+            Ok( val_id )
+        },
     };
 
     globals.pop_protected();

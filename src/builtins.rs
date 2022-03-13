@@ -8,6 +8,7 @@ use crate::Globals;
 use crate::interpreter::ScopePos;
 use crate::parser::ASTNode;
 use crate::value::Value;
+use convert_case::{Case, Casing};
 
 use core::time;
 use std::io;
@@ -40,7 +41,7 @@ macro_rules! builtin_types {
         pub fn builtin_type_str(b: BuiltinType) -> String {
             match b {
                 $(
-                    BuiltinType::$type_name => stringify!($type_name).to_lowercase().to_string(),
+                    BuiltinType::$type_name => stringify!($type_name).to_case(Case::Snake).to_string(),
                 )*
             }
         }
@@ -180,7 +181,7 @@ macro_rules! builtins {
                                     match $globals.get(arg_id).value.clone() {
                                         Value::$type(inner) => {$arg_name = inner},
                                         other => return Err( RuntimeError::TypeMismatch {
-                                            expected: stringify!($type).to_string(),
+                                            expected: stringify!($type).to_case(Case::Snake).to_string(),
                                             found: format!("{}", other.type_str($globals)),
                                             area: area!($source.clone(), args[__index].span),
                                             defs: vec![(other.type_str($globals), $globals.get(arg_id).def_area.clone())],
@@ -288,6 +289,16 @@ builtins!{
 
     }
 
+    [Command]: command(n: String) {
+        let id = globals.get_scope(scope_id).func_id;
+        globals.insert_command(id, n);
+        Value::Null
+    }
+    [McPrint]: mc_print(n: String) {
+        let id = globals.get_scope(scope_id).func_id;
+        globals.insert_command(id, format!("tellraw @a \"{}\"", n));
+        Value::Null
+    }
 
 
 

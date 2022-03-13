@@ -1,5 +1,9 @@
 
 
+let a = 0;
+
+export let get = () => print(a);
+export let set = (v) => a = v;
 
 
-id();
+

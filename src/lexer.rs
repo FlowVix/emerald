@@ -42,8 +42,8 @@ pub enum Token {
     // And,
     // #[token("||")]
     // Or,
-    // #[token("!")]
-    // Not,
+    #[token("!")]
+    ExclMark,
 
     #[token("=")]
     Assign,
@@ -111,6 +111,9 @@ pub enum Token {
     DoubleColon,
     #[token(":")]
     Colon,
+
+    #[token("$")]
+    Dollar,
 
     #[token("if")]
     If,
@@ -191,7 +194,7 @@ impl Token {
             Token::FatArrow => "=>",
             // Token::And => "&&",
             // Token::Or => "||",
-            // Token::Not => "!",
+            Token::ExclMark => "!",
             Token::Assign => "=",
             Token::PlusEq => "+=",
             Token::MinusEq => "-=",
@@ -220,6 +223,7 @@ impl Token {
             Token::Comma => ",",
             Token::DoubleColon => "::",
             Token::Colon => ":",
+            Token::Dollar => "$",
             Token::If => "if",
             Token::Else => "else",
             Token::Let => "let",

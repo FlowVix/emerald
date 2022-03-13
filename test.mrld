@@ -1,11 +1,16 @@
 
 
-
-
-id();
+mc_print("gaga");
 
 let a = !{
-    id();
-}
+    command("funky2");
+    command("funky3");
+    $!;
+    
+};
 
-print(a);
+
+a!;
+a!;
+a!;
+

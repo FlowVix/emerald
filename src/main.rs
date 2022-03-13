@@ -7,6 +7,7 @@ mod interpreter;
 
 mod error;
 mod builtins;
+mod generator;
 
 use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
@@ -18,7 +19,7 @@ use interpreter::{execute, Globals, Exit};
 use logos::Logos;
 use value::{Value, ValueType, Pattern};
 
-use crate::parser::parse;
+use crate::{parser::parse, generator::generate_datapack};
 
 
 
@@ -174,6 +175,11 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     // for i in &globals.register {
                     //     println!("{}: {:?}", i.0, i.1)
                     // }
+
+                    println!("{:#?}", globals.mcfuncs);
+
+                    generate_datapack(&globals);
+
                     return true
                 },
                 Err(e) => {
@@ -208,7 +214,6 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
 fn main() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
-    fs::create_dir_all("test/fuck/shit").unwrap();
 
     if true {
         let mut buf = PathBuf::new();
