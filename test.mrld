@@ -1,16 +1,14 @@
 
 
-mc_print("gaga");
-
-let a = !{
-    command("funky2");
-    command("funky3");
-    $!;
-    
-};
 
 
-a!;
-a!;
-a!;
+impl number {
+    _is_: (self, v) => self ^= v,
+}
 
+
+let a = 5;
+
+a is 3;
+
+print(a);

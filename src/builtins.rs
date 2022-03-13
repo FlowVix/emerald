@@ -236,7 +236,10 @@ builtin_types!(
     Dict,
     Type,
     Pattern,
+    Range,
+
     McFunc,
+    McVector,
 );
 
 

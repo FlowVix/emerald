@@ -70,6 +70,8 @@ pub enum Token {
     #[token("<=")]
     LesserEq,
 
+    #[token("**")]
+    Pow,
     #[token("+")]
     Plus,
     #[token("-")]
@@ -80,8 +82,6 @@ pub enum Token {
     Div,
     #[token("%")]
     Mod,
-    #[token("^")]
-    Pow,
 
     #[token("(")]
     LParen,
@@ -105,6 +105,8 @@ pub enum Token {
 
     #[token(",")]
     Comma,
+    #[token("..")]
+    DoubleDot,
     #[token(".")]
     Dot,
     #[token("::")]
@@ -161,6 +163,20 @@ pub enum Token {
     #[token(";")]
     Eol,
 
+    
+    #[token(r#"\"#)]
+    Backslash,
+    #[token(r#"v\"#)]
+    VectorSpecial,
+    #[token(r#"id\"#)]
+    IDSpecial,
+
+    
+    #[token(r#"~"#)]
+    Tilde,
+    #[token("^")]
+    Caret,
+
     // #[regex(r#"#[a-zA-Z_]\w*"#, |lex| lex.slice()[1..].to_string())]
     // TypeName(String),
 
@@ -206,12 +222,13 @@ impl Token {
             Token::Lesser => "<",
             Token::GreaterEq => ">=",
             Token::LesserEq => "<=",
+            Token::Pow => "**",
             Token::Plus => "+",
             Token::Minus => "-",
             Token::Mult => "*",
             Token::Div => "/",
             Token::Mod => "%",
-            Token::Pow => "^",
+            Token::Caret => "^",
             Token::LParen => "(",
             Token::RParen => ")",
             Token::LBracket => "{",
@@ -248,6 +265,11 @@ impl Token {
             Token::Error => "what the fuck is that",
             Token::Eof => "end of file",
             Token::Dot => ".",
+            Token::DoubleDot => "..",
+            Token::Backslash => "\\",
+            Token::VectorSpecial => "v\\",
+            Token::IDSpecial => "id\\",
+            Token::Tilde => "~",
             // Token::DoubleColon => "::",
         }
     }

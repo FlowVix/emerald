@@ -39,6 +39,10 @@ pub enum SyntaxError {
     SelfNotFirstArg {
         area: CodeArea,
     },
+    VectorMismatch {
+        in_rot: bool,
+        area: CodeArea,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +322,17 @@ impl ToReport for SyntaxError {
                 message: format!("'self' must be the first argument"),
                 labels: vec![
                     (area.clone(), format!("Argument 'self' defined here"))
+                ],
+                note: None,
+            },
+            SyntaxError::VectorMismatch {
+                in_rot,
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: (if *in_rot {"Cannot use caret coords in rotation"} else {"Cannot mix caret coords and relative/absolute coords"}).to_string(),
+                labels: vec![
+                    (area.clone(), format!("Coord used here"))
                 ],
                 note: None,
             },

@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io};
 use convert_case::{Case, Casing};
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern}, parser::{ASTNode, NodeType, BlockType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector}, parser::{ASTNode, NodeType, BlockType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -472,6 +472,29 @@ impl Globals {
         };
     }
 
+    pub fn get_impl_data(&self, id: ValuePos) -> Option<&ImplData> {
+        match self.get(id).value.typ() {
+            ValueType::Builtin(b) => self.builtin_impls.get(&b),
+            ValueType::CustomStruct(id) => self.impls.get(&id),
+        }
+    }
+
+    pub fn get_method(&self, id: ValuePos, name: &str) -> Option<Function> {
+        match self.get_impl_data(id) {
+            Some(d) => if d.methods.contains(&name.to_string()) {
+                let m_id = d.members.get(&name.to_string()).unwrap();
+                match self.get(*m_id).value.clone() {
+                    Value::Function(f) => Some( f ),
+                    _ => unreachable!(),
+                }
+            } else { None },
+            None => None,
+        }
+    }
+
+
+
+
 
 }
 
@@ -599,10 +622,78 @@ pub fn execute(
 
     // println!("aaaa");
     // io::stdout().flush().unwrap();
-
-
     let start_node = node;
 
+    macro_rules! run_func {
+        ($arg_ids:expr, $func:expr) => {
+            {
+
+                
+                if $func.args.len() != $arg_ids.len() {
+                    ret!(Err(
+                        RuntimeError::IncorrectArgumentCount {
+                            provided: $arg_ids.len(),
+                            takes: $func.args.len(),
+                            header_area: $func.header_area.clone(),
+                            call_area: area!(source.clone(), start_node.span)
+                        }
+                    ))
+                }
+
+
+                let derived = globals.derive_scope($func.parent_scope, globals.get_scope(scope_id).func_id);
+                for (arg_id, (name, _, d)) in $arg_ids.iter().zip($func.args.clone()) {
+                    
+                    match d {
+                        Some(typ) => {
+                            let result = value_ops::is_op_raw(&globals.get(*arg_id).clone(), &globals.get(typ).clone(), area!(source.clone(), node.span), globals)?;
+                            if !result {
+                                ret!(Err( RuntimeError::PatternMismatch {
+                                    typ: globals.get(*arg_id).value.type_str(globals),
+                                    pattern: match &globals.get(typ).value {
+                                        Value::Type(t) => t.to_str(globals),
+                                        _ => unreachable!(),
+                                    },
+                                    pattern_area: globals.get(typ).def_area.clone(),
+                                    type_area: globals.get(*arg_id).def_area.clone(),
+                                } ))
+                            }
+                        },
+                        None => (),
+                    }
+                    globals.set_var(derived, name.clone(), *arg_id);
+                }
+                
+                globals.trace.push( area!(source.clone(), start_node.span) );
+                let ret_id = execute!(&$func.code => derived);
+                match globals.exits.last() {
+                    Some(
+                        Exit::Return(v, _)
+                    ) => {
+                        let ret_id = *v;
+                        globals.exits.pop();
+                        ret!( Ok( ret_id ) )
+                    },
+                    Some(
+                        Exit::Break(_, span)
+                    ) => {
+                        let bruh = span.clone();
+                        ret!(Err(
+                            RuntimeError::BreakUsedOutside {
+                                break_area: area!(source.clone(), bruh),
+                                outer_area: area!(source.clone(), $func.code.span),
+                            }
+                        ))
+                    },
+                    None => (),
+                }
+                globals.trace.pop();
+                globals.redef_value(ret_id, area!(source.clone(), start_node.span));
+                Ok( ret_id )
+            }
+        }
+    }
+    
     // if globals.values.map.len() > 50000 + globals.last_amount {
     if true {
         // println!("{}", globals.values.map.len());
@@ -619,120 +710,58 @@ pub fn execute(
         )),
         NodeType::Op { left, op, right } => {
             match op {
-                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As | Token::Is | Token::Pipe => {
-                    let left = protecute!(left => scope_id);
+                Token::Plus | Token::Minus | Token::Mult | Token::Div | Token::Mod | Token::Pow | Token::Eq | Token::NotEq | Token::Greater | Token::GreaterEq | Token::Lesser | Token::LesserEq | Token::As | Token::Is | Token::Pipe | Token::DoubleDot => {
+                    let left = protecute_raw!(left => scope_id);
                     let right = protecute!(right => scope_id);
-                    match op {
-                        Token::Plus => {
-                            let result = value_ops::plus(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Minus => {
-                            let result = value_ops::minus(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Mult => {
-                            let result = value_ops::mult(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Div => {
-                            let result = value_ops::div(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Mod => {
-                            let result = value_ops::modulo(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Pow => {
-                            let result = value_ops::pow(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Eq => {
-                            let result = value_ops::eq(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::NotEq => {
-                            let result = value_ops::neq(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Greater => {
-                            let result = value_ops::greater(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::GreaterEq => {
-                            let result = value_ops::greater_eq(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Lesser => {
-                            let result = value_ops::lesser(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::LesserEq => {
-                            let result = value_ops::lesser_eq(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::As => {
-                            let result = value_ops::convert(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Is => {
-                            let result = value_ops::is_op(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                Value::Boolean(result),
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        Token::Pipe => {
-                            let result = value_ops::either(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
-                            Ok(globals.insert_value(
-                                result,
-                                area!(source.clone(), node.span),
-                            ))
-                        },
-                        _ => unreachable!()
+
+                    macro_rules! op_helper {
+                        (
+                            $(
+                                $tok:ident: $name:ident Overload: $overload_name:ident
+                            )+
+                        ) => {
+                            match op {
+                                $(
+                                    Token::$tok => {
+                                        match globals.get_method(left, &format!("_{}_", stringify!($overload_name))) {
+                                            Some(f) => run_func!(vec![left, right], f),
+                                            None => {
+                                                let result = value_ops::$name(&globals.get(left).clone(), &globals.get(right).clone(), area!(source.clone(), node.span), globals)?;
+                                                Ok(globals.insert_value(
+                                                    result,
+                                                    area!(source.clone(), node.span),
+                                                ))
+                                            },
+                                        }
+                                    }
+                                )+
+                                _ => unreachable!(),
+                            }
+                        }
                     }
+
+                    op_helper!(
+                        Plus: plus                  Overload: plus
+                        Minus: minus                Overload: minus
+                        Mult: mult                  Overload: mult
+                        Div: div                    Overload: div
+                        Mod: modulo                 Overload: mod
+                        Pow: pow                    Overload: pow
+                        Eq: eq                      Overload: eq
+                        NotEq: neq                  Overload: neq
+                        Greater: greater            Overload: greater
+                        GreaterEq: greater_eq       Overload: greater_eq
+                        Lesser: lesser              Overload: lesser
+                        LesserEq: lesser_eq         Overload: lesser_eq
+                        As: convert                 Overload: as
+                        Is: is_op                   Overload: is
+                        Pipe: either                Overload: either
+                        DoubleDot: range            Overload: range
+                    )
+            
                 }
                 Token::Assign | Token::PlusEq | Token::MinusEq | Token::MultEq | Token::DivEq | Token::ModEq | Token::PowEq => {
-                    let left = execute_raw!(left => scope_id);
+                    let left = protecute_raw!(left => scope_id);
                     
 
                     let mut right = protecute!(right => scope_id);
@@ -1238,7 +1267,7 @@ pub fn execute(
                     }
                     for (k, v) in &id_map {
                         let typ = struct_type.fields[k].0;
-                        let result = value_ops::is_op(&globals.get(*v).clone(), &globals.get(typ).clone(), area!(source.clone(), node.span), globals)?;
+                        let result = value_ops::is_op_raw(&globals.get(*v).clone(), &globals.get(typ).clone(), area!(source.clone(), node.span), globals)?;
                         if !result {
                             ret!(Err( RuntimeError::PatternMismatch {
                                 typ: globals.get(*v).value.type_str(globals),
@@ -1497,73 +1526,21 @@ pub fn execute(
                     source,
                 ),
                 
-                Value::Function( Function { args: func_args, code, parent_scope, header_area, self_arg} ) => {
+                Value::Function( f @ Function { args: func_args, code, parent_scope, header_area, self_arg} ) => {
                     let mut args = args.clone();
                     if let Some(n) = self_arg {
                         args.insert(0, *n.clone());
                     }
-                    if func_args.len() != args.len() {
-                        ret!(Err(
-                            RuntimeError::IncorrectArgumentCount {
-                                provided: args.len(),
-                                takes: func_args.len(),
-                                header_area: header_area.clone(),
-                                call_area: area!(source.clone(), start_node.span)
-                            }
-                        ))
-                    }
-                    
-                    let derived = globals.derive_scope(*parent_scope, globals.get_scope(scope_id).func_id);
-                    for (arg, (name, a, d)) in args.iter().zip(func_args) {
+                    let mut arg_ids = vec![];
+                    for (arg, (name, a, _)) in args.iter().zip(func_args) {
                         let arg_id = if name == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
-                        
-                        match d {
-                            Some(typ) => {
-                                let result = value_ops::is_op(&globals.get(arg_id).clone(), &globals.get(*typ).clone(), area!(source.clone(), node.span), globals)?;
-                                if !result {
-                                    ret!(Err( RuntimeError::PatternMismatch {
-                                        typ: globals.get(arg_id).value.type_str(globals),
-                                        pattern: match &globals.get(*typ).value {
-                                            Value::Type(t) => t.to_str(globals),
-                                            _ => unreachable!(),
-                                        },
-                                        pattern_area: globals.get(*typ).def_area.clone(),
-                                        type_area: globals.get(arg_id).def_area.clone(),
-                                    } ))
-                                }
-                            },
-                            None => (),
-                        }
-                        let arg_id = proteclone!(arg_id => a.clone());
-                        globals.set_var(derived, name.clone(), arg_id);
+                        // if name != "self" {
+                        //     arg_id = proteclone!(arg_id => a.clone());
+                        // }
+                        arg_ids.push( arg_id );
                     }
                     
-                    globals.trace.push( area!(source.clone(), start_node.span) );
-                    let ret_id = execute!(code => derived);
-                    match globals.exits.last() {
-                        Some(
-                            Exit::Return(v, _)
-                        ) => {
-                            let ret_id = *v;
-                            globals.exits.pop();
-                            ret!( Ok( ret_id ) )
-                        },
-                        Some(
-                            Exit::Break(_, span)
-                        ) => {
-                            let bruh = span.clone();
-                            ret!(Err(
-                                RuntimeError::BreakUsedOutside {
-                                    break_area: area!(source.clone(), bruh),
-                                    outer_area: area!(source.clone(), code.span),
-                                }
-                            ))
-                        },
-                        None => (),
-                    }
-                    globals.trace.pop();
-                    globals.redef_value(ret_id, area!(source.clone(), start_node.span));
-                    Ok( ret_id )
+                    run_func!(arg_ids, f)
                 },
 
                 Value::Type(_) => {
@@ -1592,7 +1569,7 @@ pub fn execute(
 
 
         },
-        NodeType::McCall { base } => {
+        NodeType::MCCall { base } => {
             let base_id = protecute!(base => scope_id);
             
             match &globals.get(base_id).value.clone() {
@@ -1624,6 +1601,86 @@ pub fn execute(
             );
             Ok( val_id )
         },
+        NodeType::McVector { x, y, z, rot } => {
+            let x_val_id = execute!(x.get_inner() => scope_id); let x_val =  globals.get(x_val_id).value.clone();
+            match x_val {
+                Value::Number(_) => (),
+                other => ret!(Err( RuntimeError::TypeMismatch {
+                    expected: "number".to_string(),
+                    found: format!("{}", other.type_str(globals)),
+                    area: area!(source.clone(), x.get_inner().span),
+                    defs: vec![(other.type_str(globals), globals.get(x_val_id).def_area.clone())],
+                } )),
+            }
+            let y_val_id = execute!(y.get_inner() => scope_id); let y_val =  globals.get(y_val_id).value.clone();
+            match y_val {
+                Value::Number(_) => (),
+                other => ret!(Err( RuntimeError::TypeMismatch {
+                    expected: "number".to_string(),
+                    found: format!("{}", other.type_str(globals)),
+                    area: area!(source.clone(), y.get_inner().span),
+                    defs: vec![(other.type_str(globals), globals.get(y_val_id).def_area.clone())],
+                } )),
+            }
+            let z_val_id = execute!(z.get_inner() => scope_id); let z_val =  globals.get(z_val_id).value.clone();
+            match z_val {
+                Value::Number(_) => (),
+                other => ret!(Err( RuntimeError::TypeMismatch {
+                    expected: "number".to_string(),
+                    found: format!("{}", other.type_str(globals)),
+                    area: area!(source.clone(), z.get_inner().span),
+                    defs: vec![(other.type_str(globals), globals.get(z_val_id).def_area.clone())],
+                } )),
+            }
+
+            let val_id = match rot {
+                None => {
+                    globals.insert_value(
+                        Value::McVector(McVector::Pos(
+                            x.reapply(Box::new(x_val)),
+                            y.reapply(Box::new(y_val)),
+                            z.reapply(Box::new(z_val))
+                        )),
+                        area!(source.clone(), start_node.span),
+                    )
+                },
+                Some((h, v)) => {
+                    
+                    let h_val_id = execute!(h.get_inner() => scope_id); let h_val =  globals.get(h_val_id).value.clone();
+                    match h_val {
+                        Value::Number(_) => (),
+                        other => ret!(Err( RuntimeError::TypeMismatch {
+                            expected: "number".to_string(),
+                            found: format!("{}", other.type_str(globals)),
+                            area: area!(source.clone(), h.get_inner().span),
+                            defs: vec![(other.type_str(globals), globals.get(h_val_id).def_area.clone())],
+                        } )),
+                    }
+                    let v_val_id = execute!(v.get_inner() => scope_id); let v_val =  globals.get(v_val_id).value.clone();
+                    match v_val {
+                        Value::Number(_) => (),
+                        other => ret!(Err( RuntimeError::TypeMismatch {
+                            expected: "number".to_string(),
+                            found: format!("{}", other.type_str(globals)),
+                            area: area!(source.clone(), v.get_inner().span),
+                            defs: vec![(other.type_str(globals), globals.get(v_val_id).def_area.clone())],
+                        } )),
+                    }
+                    globals.insert_value(
+                        Value::McVector(McVector::WithRot(
+                            x.reapply(Box::new(x_val)),
+                            y.reapply(Box::new(y_val)),
+                            z.reapply(Box::new(z_val)),
+                            h.reapply(Box::new(h_val)),
+                            v.reapply(Box::new(v_val))
+                        )),
+                        area!(source.clone(), start_node.span),
+                    )
+                },
+            };
+            Ok( val_id )
+        },
+        _ => unimplemented!()
     };
 
     globals.pop_protected();

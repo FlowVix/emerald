@@ -176,7 +176,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     //     println!("{}: {:?}", i.0, i.1)
                     // }
 
-                    println!("{:#?}", globals.mcfuncs);
+                    // println!("{:#?}", globals.mcfuncs);
 
                     generate_datapack(&globals);
 

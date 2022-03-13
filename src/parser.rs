@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{CodeArea, lexer::Token, value::Value, error::{SyntaxError}, EmeraldSource};
+use crate::{CodeArea, lexer::Token, value::{Value, CoordType}, error::{SyntaxError}, EmeraldSource};
 
 
 
@@ -53,8 +53,9 @@ pub enum NodeType {
     Associated { base: Box<ASTNode>, assoc: String },
     Export { name: String, value: Box<ASTNode> },
     Import { path: String },
-    McCall { base: Box<ASTNode> },
+    MCCall { base: Box<ASTNode> },
     CurrentMcId,
+    McVector { x: CoordType<Box<ASTNode>>, y: CoordType<Box<ASTNode>>, z: CoordType<Box<ASTNode>>, rot: Option<(CoordType<Box<ASTNode>>, CoordType<Box<ASTNode>>)> },
 }
 
 macro_rules! expected_err {
@@ -307,6 +308,7 @@ operators!(
     // LeftAssoc   <==  [ And Or ],
     // Unary       <==  [ Not ],
     LeftAssoc   <==  [ Is Eq NotEq Greater GreaterEq Lesser LesserEq ],
+    LeftAssoc   <==  [ DoubleDot ],
     LeftAssoc   <==  [ Plus Minus ],
     Unary       <==  [ Plus Minus ],
     LeftAssoc   <==  [ Mult Div Mod ],
@@ -720,6 +722,118 @@ pub fn parse_unit(
 
             ret!( NodeType::CurrentMcId => start.0, span!(-1).1 );
         },
+        Token::VectorSpecial => {
+            pos += 1;
+            let mut is_caret_type = None;
+            macro_rules! parse_coord {
+                ($rot:expr) => {
+                    match tok!(0) {
+                        Token::Tilde => {
+                            if !$rot {
+                                match is_caret_type {
+                                    Some(true) => return Err( SyntaxError::VectorMismatch {
+                                        in_rot: false,
+                                        area: CodeArea {
+                                            source: info.source.clone(),
+                                            range: span!(0),
+                                        },
+                                    } ),
+                                    None => {is_caret_type = Some(false);},
+                                    Some(false) => (),
+                                }
+                            }
+        
+                            pos += 1;
+                            let value;
+                            if !matches!(tok!(0), Token::Tilde | Token::Caret | Token::Comma | Token::Backslash) {
+                                parse!(parse_expr(false) => value);
+                            } else {
+                                value = ASTNode {
+                                    node: NodeType::Value {
+                                        value: Value::Number(0.0),
+                                    },
+                                    span: span!(-1),
+                                };
+                            }
+                            CoordType::Tilde(Box::new(value))
+                        }
+                        Token::Caret => {
+        
+                            if !$rot {
+                                match is_caret_type {
+                                    Some(false) => return Err( SyntaxError::VectorMismatch {
+                                        in_rot: false,
+                                        area: CodeArea {
+                                            source: info.source.clone(),
+                                            range: span!(0),
+                                        },
+                                    } ),
+                                    None => {is_caret_type = Some(true);},
+                                    Some(true) => (),
+                                }
+                            } else {
+                                return Err( SyntaxError::VectorMismatch {
+                                    in_rot: true,
+                                    area: CodeArea {
+                                        source: info.source.clone(),
+                                        range: span!(0),
+                                    },
+                                } )
+                            }
+        
+                            pos += 1;
+                            let value;
+                            if !matches!(tok!(0), Token::Tilde | Token::Caret | Token::Comma | Token::Backslash) {
+                                parse!(parse_expr(false) => value);
+                            } else {
+                                value = ASTNode {
+                                    node: NodeType::Value {
+                                        value: Value::Number(0.0),
+                                    },
+                                    span: span!(-1),
+                                };
+                            }
+                            CoordType::Caret(Box::new(value))
+                        }
+                        _ => {
+        
+                            if !$rot {
+                                match is_caret_type {
+                                    Some(true) => return Err( SyntaxError::VectorMismatch {
+                                        in_rot: false,
+                                        area: CodeArea {
+                                            source: info.source.clone(),
+                                            range: span!(0),
+                                        },
+                                    } ),
+                                    None => {is_caret_type = Some(false);},
+                                    Some(false) => (),
+                                }
+                            }
+        
+                            parse!(parse_expr(false) => let value);
+                            CoordType::Absolute(Box::new(value))
+                        }
+                    }
+                }
+            }
+
+            let x = parse_coord!(false);
+            let y = parse_coord!(false);
+            let z = parse_coord!(false);
+            let mut rot = None;
+            if_tok!(== Comma: {
+                pos += 1;
+                let h = parse_coord!(true);
+                let v = parse_coord!(true);
+                rot = Some((h, v))
+            });
+            check_tok!(Backslash else "\\");
+
+            // println!("{:#?} {:#?} {:#?} {:#?}", x, y, z, rot);
+
+            ret!( NodeType::McVector { x, y, z, rot } => start.0, span!(-1).1 );
+        },
         unary_op if is_unary(unary_op) => {
             pos += 1;
             let prec = unary_prec(unary_op);
@@ -855,7 +969,7 @@ fn parse_value(
             Token::ExclMark => {
                 pos += 1;
                 value = ASTNode {
-                    node: NodeType::McCall {
+                    node: NodeType::MCCall {
                         base: Box::new(value),
                     },
                     span: ( start.0, span!(-1).1 )

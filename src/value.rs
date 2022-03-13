@@ -48,6 +48,53 @@ impl Pattern {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoordType<T> {
+    Absolute(T),
+    Tilde(T),
+    Caret(T),
+}
+
+impl<T> CoordType<T> {
+    pub fn get_inner(&self) -> &T {
+        match self {
+            CoordType::Absolute(v) => v,
+            CoordType::Tilde(v) => v,
+            CoordType::Caret(v) => v,
+        }
+    }
+
+    pub fn reapply<U>(&self, val: U) -> CoordType<U> {
+        match self {
+            CoordType::Absolute(_) => CoordType::Absolute(val),
+            CoordType::Tilde(_) => CoordType::Tilde(val),
+            CoordType::Caret(_) => CoordType::Caret(val),
+        }
+    }
+
+    pub fn prefix(&self) -> &str {
+        match self {
+            CoordType::Absolute(_) => "",
+            CoordType::Tilde(_) => "~",
+            CoordType::Caret(_) => "^",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum McVector {
+    Pos(CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>),
+    WithRot(CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>),
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
+struct Range {
+    start: isize,
+    end: isize,
+    step: isize,
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -61,8 +108,11 @@ pub enum Value {
     Dictionary(HashMap<String, ValuePos>),
     Type(ValueType),
     Pattern(Pattern),
+    Range(Range),
 
     McFunc(McFuncID),
+
+    McVector(McVector),
 
     StructInstance { struct_id: TypePos, fields: HashMap<String, ValuePos> },
 }
@@ -81,7 +131,10 @@ impl Value {
             Value::Dictionary(_) => ValueType::Builtin(BuiltinType::Dict),
             Value::Type(_) => ValueType::Builtin(BuiltinType::Type),
             Value::Pattern(_) => ValueType::Builtin(BuiltinType::Pattern),
+            Value::Range(_) => ValueType::Builtin(BuiltinType::Range),
+
             Value::McFunc(_) => ValueType::Builtin(BuiltinType::McFunc),
+            Value::McVector(_) => ValueType::Builtin(BuiltinType::McVector),
 
             Value::StructInstance { struct_id, .. } => ValueType::CustomStruct(*struct_id),
         }
@@ -144,7 +197,35 @@ impl Value {
                 format!("{}::{}", name, out_str)
             },
             Value::Pattern(p) => p.to_str(globals),
+            Value::Range(Range { start, end, step }) => 
+                format!("{}..{}", start, end) + &(if *step != 1 {format!("..{}", step)} else {"".to_string() }),
             Value::McFunc(_) => format!("!{{...}}"),
+            Value::McVector(v) => {
+                match v {
+                    McVector::Pos(
+                        x,
+                        y,
+                        z,
+                    ) => format!("v\\{}{} {}{} {}{}\\",
+                        x.prefix(), x.get_inner().to_str(globals, visited),
+                        y.prefix(), y.get_inner().to_str(globals, visited),
+                        z.prefix(), z.get_inner().to_str(globals, visited),
+                    ),
+                    McVector::WithRot(
+                        x,
+                        y,
+                        z,
+                        h,
+                        v,
+                    ) => format!("v\\{}{} {}{} {}{}, {}{} {}{}\\",
+                        x.prefix(), x.get_inner().to_str(globals, visited),
+                        y.prefix(), y.get_inner().to_str(globals, visited),
+                        z.prefix(), z.get_inner().to_str(globals, visited),
+                        h.prefix(), h.get_inner().to_str(globals, visited),
+                        v.prefix(), v.get_inner().to_str(globals, visited),
+                    ),
+                }
+            },
         }
     }
 
@@ -205,7 +286,7 @@ pub mod value_ops {
 
     use crate::{interpreter::{StoredValue, Globals}, CodeArea, value::{Value, ValueType}, error::RuntimeError, builtins::BuiltinType};
 
-    use super::Pattern;
+    use super::{Pattern, Range};
 
     pub fn to_bool(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<bool, RuntimeError> {
         match &a.value {
@@ -227,10 +308,21 @@ pub mod value_ops {
         match &a.value {
             Value::Array(arr) => Ok( arr.iter().map(|e| globals.get(*e).value.clone() ).collect::<Vec<Value>>() ),
             Value::Dictionary(map) => Ok( map.iter().map(|(s, _)| Value::String(s.clone()) ).collect::<Vec<Value>>() ),
+            Value::Range(Range { start, end, step }) => Ok(
+                {
+                    let mut v = vec![];
+                    let mut i = *start;
+                    while i < *end {
+                        v.push( Value::Number( i as f64 ) );
+                        i += *step;
+                    }
+                    v
+                }
+            ),
             
             value => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "array or dict".to_string(),
+                    expected: "array, range, or dict".to_string(),
                     found: format!("{}", value.type_str(globals)),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
@@ -268,7 +360,8 @@ pub mod value_ops {
         }
     }
 
-    pub fn is_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<bool, RuntimeError> {
+    
+    pub fn is_op_raw(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<bool, RuntimeError> {
         match (&a.value, &b.value) {
             (v, Value::Type(t)) => Ok( v.typ() == t.clone() ),
 
@@ -283,6 +376,10 @@ pub mod value_ops {
                 } )
             }
         }
+    }
+
+    pub fn is_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        Ok( Value::Boolean( is_op_raw(a, b, area, globals)? ) )
     }
 
 
@@ -505,6 +602,25 @@ pub mod value_ops {
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "type and type, type and pattern or pattern and pattern".to_string(),
+                    found: format!("{} and {}", value1.type_str(globals), value2.type_str(globals)),
+                    area,
+                    defs: vec![(value1.type_str(globals), a.def_area.clone()), (value2.type_str(globals), b.def_area.clone())],
+                } )
+            }
+        }
+    }
+
+    pub fn range(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        match (&a.value, &b.value) {
+            (Value::Number(n1), Value::Number(n2)) => Ok(Value::Range(Range{
+                start: n1.floor() as isize,
+                end: n2.floor() as isize,
+                step: 1isize,
+            })),
+            
+            (value1, value2) => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "number and number".to_string(),
                     found: format!("{} and {}", value1.type_str(globals), value2.type_str(globals)),
                     area,
                     defs: vec![(value1.type_str(globals), a.def_area.clone()), (value2.type_str(globals), b.def_area.clone())],
