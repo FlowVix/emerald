@@ -688,6 +688,108 @@ pub fn do_assign(
                 }
             }
         }
+        NodeType::Dictionary { map } => {
+            match &globals.get(right).value.clone() {
+                Value::Dictionary(value_map) => {
+
+                    for (k, v) in map {
+                        if !value_map.contains_key(k) {
+                            return Err( RuntimeError::DestructureNonExistentKeyField {
+                                for_type: "dict".to_string(),
+                                what: "key".to_string(),
+                                name: k.clone(),
+                                area1: area!(source.clone(), left.span),
+                                area2: globals.get(right).def_area.clone(),
+                            } )
+                        }
+                        do_assign(v, value_map[k], scope_id, globals, source.clone(), list, is_declaration)?;
+                    }
+
+                },
+                other => {
+                    return Err( RuntimeError::DestructureTypeMismatch {
+                        tried: "dict".to_string(),
+                        found: format!("{}", other.type_str(globals)),
+                        area1: area!(source.clone(), left.span),
+                        area2: globals.get(right).def_area.clone(),
+                    } )
+                }
+            }
+        }
+        NodeType::StructInstance {
+            base,
+            field_areas,
+            fields,
+        } => {
+            let base_id = protecute!(base => scope_id);
+            match &globals.get(base_id).value.clone() {
+                Value::Type(ValueType::CustomStruct(id)) => {
+                    match &globals.get(right).value.clone() {
+                        Value::StructInstance { struct_id, fields: value_fields } => {
+                            if struct_id != id {
+                                return Err( RuntimeError::DestructureTypeMismatch {
+                                    tried: globals.custom_structs.map[id].name.clone(),
+                                    found: globals.custom_structs.map[struct_id].name.clone(),
+                                    area1: area!(source.clone(), left.span),
+                                    area2: globals.get(right).def_area.clone(),
+                                } )
+                            }
+                            
+                            for (k, v) in fields {
+                                if !value_fields.contains_key(k) {
+                                    return Err( RuntimeError::DestructureNonExistentKeyField {
+                                        for_type: globals.custom_structs.map[id].name.clone(),
+                                        what: "field".to_string(),
+                                        name: k.clone(),
+                                        area1: area!(source.clone(), left.span),
+                                        area2: globals.get(right).def_area.clone(),
+                                    } )
+                                }
+                                do_assign(v, value_fields[k], scope_id, globals, source.clone(), list, is_declaration)?;
+                            }
+
+                        },
+                        other => {
+                            return Err( RuntimeError::DestructureTypeMismatch {
+                                tried: globals.custom_structs.map[id].name.clone(),
+                                found: format!("{}", other.type_str(globals)),
+                                area1: area!(source.clone(), left.span),
+                                area2: globals.get(right).def_area.clone(),
+                            } )
+                        }
+                    }
+                },
+                _ => ret!(Err( RuntimeError::InstanceNonStruct {
+                    area: area!(source.clone(), base.span),
+                } ))
+            }
+
+            // match &globals.get(right).value.clone() {
+            //     Value::Dictionary(value_map) => {
+
+            //         for (k, v) in map {
+            //             if !value_map.contains_key(k) {
+            //                 return Err( RuntimeError::DestructureNonExistentKeyField {
+            //                     for_type: "dict".to_string(),
+            //                     what: "key".to_string(),
+            //                     name: k.clone(),
+            //                     area1: area!(source.clone(), left.span),
+            //                     area2: globals.get(right).def_area.clone(),
+            //                 } )
+            //             }
+            //             do_assign(v, value_map[k], scope_id, globals, source.clone(), list, is_declaration)?;
+            //         }
+            //     },
+            //     other => {
+            //         return Err( RuntimeError::DestructureTypeMismatch {
+            //             tried: "dict".to_string(),
+            //             found: format!("{}", other.type_str(globals)),
+            //             area1: area!(source.clone(), left.span),
+            //             area2: globals.get(right).def_area.clone(),
+            //         } )
+            //     }
+            // }
+        }
         _ => {
             let left_id = protecute!(left => scope_id);
             let equal = value_ops::eq(&globals.get(left_id).clone(), &globals.get(right).clone(), area!(source.clone(), left.span), globals)?;
@@ -1338,18 +1440,7 @@ pub fn execute(
         NodeType::Dictionary { map } => {
             let mut id_map = HashMap::new();
             for (k, v) in map {
-                let id = match v {
-                    Some(n) => protecute!(n => scope_id),
-                    None => match globals.get_var(scope_id, k) {
-                        Some(i) => proteclone!(i => @),
-                        None => ret!(Err(
-                            RuntimeError::UndefinedVar {
-                                var_name: k.to_string(),
-                                area: area!(source.clone(), start_node.span),
-                            }
-                        ))
-                    },
-                };
+                let id = protecute!(v => scope_id);
                 id_map.insert( k.clone(), id );
             }
             Ok( globals.insert_value(
@@ -1548,18 +1639,7 @@ pub fn execute(
                                 struct_def: struct_type.def_area.clone(),
                             } ))
                         }
-                        let id = match v {
-                            Some(n) => protecute!(n => scope_id),
-                            None => match globals.get_var(scope_id, k) {
-                                Some(i) => proteclone!(i => @),
-                                None => ret!(Err(
-                                    RuntimeError::UndefinedVar {
-                                        var_name: k.to_string(),
-                                        area: area!(source.clone(), start_node.span),
-                                    }
-                                ))
-                            },
-                        };
+                        let id = protecute!(v => scope_id);
                         id_map.insert( k.clone(), id );
                     }
                     for (k, v) in &id_map {

@@ -158,6 +158,13 @@ pub enum RuntimeError {
         area1: CodeArea,
         area2: CodeArea,
     },
+    DestructureNonExistentKeyField {
+        for_type: String,
+        what: String,
+        name: String,
+        area1: CodeArea,
+        area2: CodeArea,
+    },
 }
 
 
@@ -675,6 +682,21 @@ impl ToReport for RuntimeError {
                 labels: vec![
                     (area1.clone(), format!("Tried to destructure {} with {} elements here", for_type.fg(a), expected.fg(b))),
                     (area2.clone(), format!("Found {} elements here", found.fg(colors.next()))),
+                ],
+                note: None,
+            },
+            RuntimeError::DestructureNonExistentKeyField {
+                what,
+                for_type,
+                name,
+                area1,
+                area2,
+            } => ErrorReport {
+                source: area2.clone(),
+                message: format!("Nonexistent {} in {} destructure", what, for_type),
+                labels: vec![
+                    (area1.clone(), format!("Tried to destructure into {} {} here", what, name.fg(a))),
+                    (area2.clone(), format!("{} {} not found here", what, name.fg(b))),
                 ],
                 note: None,
             },

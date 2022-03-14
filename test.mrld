@@ -1,4 +1,12 @@
 
+struct Piss {
+    a: number = 5,
+    b: string,
+}
+
+let Piss::{a, b} = Piss::{b: "fart"};
 
 
+print(a);
+print(b);
 

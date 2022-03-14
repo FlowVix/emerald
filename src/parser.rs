@@ -44,13 +44,13 @@ pub enum NodeType {
     Array { elements: Vec<ASTNode> },
     Tuple { elements: Vec<ASTNode> },
     Index { base: Box<ASTNode>, index: Box<ASTNode> },
-    Dictionary { map: HashMap<String, Option<ASTNode>> },
+    Dictionary { map: HashMap<String, ASTNode> },
     Member { base: Box<ASTNode>, member: String },
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
     Continue,
     StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: HashMap<String, CodeArea>, def_area: CodeArea },
-    StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, Option<ASTNode>> },
+    StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, ASTNode> },
     Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
     Associated { base: Box<ASTNode>, assoc: String },
     Export { name: String, value: Box<ASTNode> },
@@ -552,7 +552,7 @@ pub fn parse_unit(
                 ret!( NodeType::Dictionary {map: HashMap::new()} => start );
             }
 
-            if matches!(tok!(0), Token::Ident(_)) && matches!(tok!(1), Token::Colon) {
+            if matches!(tok!(0), Token::Ident(_)) && matches!(tok!(1), Token::Colon | Token::Comma | Token::RBracket) {
                 let mut map = HashMap::new();
                 let mut areas: HashMap<String, CodeArea> = HashMap::new();
                 while_tok!(!= RBracket: {
@@ -569,10 +569,15 @@ pub fn parse_unit(
                         } )
                     }
                     areas.insert(key.clone(), last_area);
-                    let mut value = None;
+                    let mut value = ASTNode {
+                        node: NodeType::Var {
+                            var_name: key.clone(),
+                        },
+                        span: span!(-1),
+                    };
                     if_tok!(== Colon: {
                         pos += 1;
-                        parse!(parse_expr(false) => let temp); value = Some(temp);
+                        parse!(parse_expr(false) => value);
                     });
 
                     map.insert(key, value);
@@ -1028,10 +1033,15 @@ fn parse_value(
                             } )
                         }
                         areas.insert(field.clone(), last_area);
-                        let mut value = None;
+                        let mut value = ASTNode {
+                            node: NodeType::Var {
+                                var_name: field.clone(),
+                            },
+                            span: span!(-1),
+                        };
                         if_tok!(== Colon: {
                             pos += 1;
-                            parse!(parse_expr(false) => let temp); value = Some(temp);
+                            parse!(parse_expr(false) => value);
                         });
 
                         fields.insert(field, value);
