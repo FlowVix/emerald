@@ -1,14 +1,25 @@
 
 
+extract import "libraries/std/lib.mrld";
 
+func mc_factorial(n: number) {
+    let n = Score::new( n );
+    let result = Score::new( 1 );
 
-impl number {
-    _is_: (self, v) => self ^= v,
+    !{
+        result *= n;
+        n -= 1;
+
+        (n > 0).then($);
+    }!;
+
+    result.print();
 }
 
+mc_factorial(4);
+mc_factorial(6);
+mc_factorial(7);
 
-let a = 5;
 
-a is 3;
 
-print(a);
+

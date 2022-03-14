@@ -49,13 +49,14 @@ pub enum NodeType {
     Break { node: Option<Box<ASTNode>> },
     StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: HashMap<String, CodeArea>, def_area: CodeArea },
     StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, Option<ASTNode>> },
-    Impl { type_var: (String, CodeArea), fields: HashMap<String, ASTNode> },
+    Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
     Associated { base: Box<ASTNode>, assoc: String },
     Export { name: String, value: Box<ASTNode> },
     Import { path: String },
     MCCall { base: Box<ASTNode> },
     CurrentMcId,
     McVector { x: CoordType<Box<ASTNode>>, y: CoordType<Box<ASTNode>>, z: CoordType<Box<ASTNode>>, rot: Option<(CoordType<Box<ASTNode>>, CoordType<Box<ASTNode>>)> },
+    Extract { value: Box<ASTNode> },
 }
 
 macro_rules! expected_err {
@@ -305,8 +306,8 @@ macro_rules! operators {
 
 operators!(
     RightAssoc  <==  [ Assign PlusEq MinusEq MultEq DivEq ModEq PowEq ],
-    // LeftAssoc   <==  [ And Or ],
-    // Unary       <==  [ Not ],
+    LeftAssoc   <==  [ And Or ],
+    Unary       <==  [ ExclMark ],
     LeftAssoc   <==  [ Is Eq NotEq Greater GreaterEq Lesser LesserEq ],
     LeftAssoc   <==  [ DoubleDot ],
     LeftAssoc   <==  [ Plus Minus ],
@@ -522,7 +523,8 @@ pub fn parse_unit(
             };
             check_tok!(LBracket else "{");
 
-            let mut fields = HashMap::new();
+            let mut field_names = vec![];
+            let mut fields = vec![];
             let mut areas: HashMap<String, CodeArea> = HashMap::new();
             while_tok!(!= RBracket: {
                 check_tok!(Ident(field) else "field name");
@@ -530,7 +532,7 @@ pub fn parse_unit(
                     source: info.source.clone(),
                     range: span!(-1),
                 };
-                if fields.contains_key(&field) {
+                if field_names.contains(&field) {
                     return Err( SyntaxError::DuplicateFieldImpl {
                         first_used: areas[&field].clone(),
                         field_name: field,
@@ -542,7 +544,8 @@ pub fn parse_unit(
 
                 parse!(parse_expr(false) => let value);
 
-                fields.insert(field, value);
+                field_names.push(field.clone());
+                fields.push((field, value));
                 if !matches!(tok!(0), Token::RBracket | Token::Comma) {
                     expected_err!("} or ,", tok!(0), span!(0), info )
                 }
@@ -716,6 +719,12 @@ pub fn parse_unit(
             check_tok!(String(path) else "string");
 
             ret!( NodeType::Import { path } => start.0, span!(-1).1 );
+        },
+        Token::Extract => {
+            pos += 1;
+            parse!(parse_expr(false) => let value);
+
+            ret!( NodeType::Extract { value: Box::new(value) } => start.0, span!(-1).1 );
         },
         Token::Dollar => {
             pos += 1;

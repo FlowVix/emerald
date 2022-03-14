@@ -382,6 +382,11 @@ pub mod value_ops {
         Ok( Value::Boolean( is_op_raw(a, b, area, globals)? ) )
     }
 
+    pub fn overwrite(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        match (&a.value, &b.value) {
+            (_, b) => Ok( b.clone() )
+        }
+    }
 
 
     pub fn plus(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
@@ -504,6 +509,22 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
+                    found: format!("{}", value.type_str(globals)),
+                    area,
+                    defs: vec![(value.type_str(globals), a.def_area.clone())],
+                } )
+            }
+        }
+    }
+
+    
+    pub fn not(a: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        match &a.value {
+            Value::Boolean(b) => Ok(Value::Boolean(!b)),
+            
+            value => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "bool".to_string(),
                     found: format!("{}", value.type_str(globals)),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],

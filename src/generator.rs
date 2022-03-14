@@ -12,14 +12,16 @@ const MCMETA: &str = r#"
 "#;
 
 
+const BASE_DIR: &str = r#"/Users/Flow/AppData/Roaming/.minecraft/saves/emerald/datapacks/"#;
+
 pub fn generate_datapack(globals: &Globals) {
 
-    fs::remove_dir_all("emeraldgen").unwrap();
-    fs::create_dir_all("emeraldgen/data/mrld/functions").unwrap();
-    fs::write("emeraldgen/pack.mcmeta", MCMETA).unwrap();
+    fs::remove_dir_all(BASE_DIR.to_string() + "emeraldgen");
+    fs::create_dir_all(BASE_DIR.to_string() + "emeraldgen/data/mrld/functions").unwrap();
+    fs::write(BASE_DIR.to_string() + "emeraldgen/pack.mcmeta", MCMETA).unwrap();
 
     for (i, v) in &globals.mcfuncs.map {
-        fs::write(format!("emeraldgen/data/mrld/functions/gen{}.mcfunction", i), v.join("\n")).unwrap();
+        fs::write(BASE_DIR.to_string() + &format!("emeraldgen/data/mrld/functions/gen{}.mcfunction", i), v.join("\n")).unwrap();
     }
 
 }

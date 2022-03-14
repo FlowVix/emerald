@@ -1,9 +1,6 @@
 
 
-let a = 0;
+extract import "score.mrld";
 
-export let get = () => print(a);
-export let set = (v) => a = v;
-
-
+export let Score = Score;
 

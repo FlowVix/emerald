@@ -38,10 +38,10 @@ pub enum Token {
     #[token("=>")]
     FatArrow,
 
-    // #[token("&&")]
-    // And,
-    // #[token("||")]
-    // Or,
+    #[token("&&")]
+    And,
+    #[token("||")]
+    Or,
     #[token("!")]
     ExclMark,
 
@@ -57,7 +57,7 @@ pub enum Token {
     DivEq,
     #[token("%=")]
     ModEq,
-    #[token("^=")]
+    #[token("**=")]
     PowEq,
     
 
@@ -154,6 +154,8 @@ pub enum Token {
     Export,
     #[token("import")]
     Import,
+    #[token("extract")]
+    Extract,
 
     // #[token("type")]
     // Type,
@@ -208,8 +210,8 @@ impl Token {
             Token::Eq => "==",
             Token::NotEq => "!=",
             Token::FatArrow => "=>",
-            // Token::And => "&&",
-            // Token::Or => "||",
+            Token::And => "&&",
+            Token::Or => "||",
             Token::ExclMark => "!",
             Token::Assign => "=",
             Token::PlusEq => "+=",
@@ -257,6 +259,7 @@ impl Token {
             Token::Struct => "struct",
             Token::Export => "export",
             Token::Import => "export",
+            Token::Extract => "extract",
             // Token::Type => "type",
             Token::Impl => "impl",
             Token::Eol => ";",

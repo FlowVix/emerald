@@ -284,10 +284,18 @@ builtins!{
     [Cos]: cos(n: Number) { Value::Number(n.cos()) }
     [Tan]: tan(n: Number) { Value::Number(n.tan()) }
 
+    [Floor]: floor(n: Number) { Value::Number(n.floor()) }
+
     [Sqrt]: sqrt(n: Number) { Value::Number(n.sqrt()) }
 
     [ID]: id(@Any => poopie) {
         println!("id: {:?}", globals.get_scope(scope_id).func_id);
+        Value::Null
+
+    }
+    [Impls]: impls(@Any => poopie) {
+        println!("builtin impls: {:#?}", globals.builtin_impls);
+        println!("impls: {:#?}", globals.impls);
         Value::Null
 
     }
@@ -297,10 +305,8 @@ builtins!{
         globals.insert_command(id, n);
         Value::Null
     }
-    [McPrint]: mc_print(n: String) {
-        let id = globals.get_scope(scope_id).func_id;
-        globals.insert_command(id, format!("tellraw @a \"{}\"", n));
-        Value::Null
+    [FuncStr]: func_str(f_id: McFunc) {
+        Value::String( format!("function mrld:gen{}", f_id) )
     }
 
 
