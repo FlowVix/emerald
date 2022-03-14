@@ -796,7 +796,6 @@ pub fn execute(
                     )
             
                 }
-                Token::Assign |
                 Token::PlusEq |
                 Token::MinusEq |
                 Token::MultEq |
@@ -853,7 +852,7 @@ pub fn execute(
                         DivEq: div                  Overload: div_eq
                         ModEq: modulo               Overload: mod_eq
                         PowEq: pow                  Overload: pow_eq
-                        Assign: overwrite           Overload: assign
+                        // Assign: overwrite           Overload: assign
                     )
                 }
                 Token::And => {
@@ -933,6 +932,9 @@ pub fn execute(
                         }
                     }
 
+                }
+                Token::Assign => {
+                    panic!();
                 }
                 _ => unreachable!()
             }
@@ -1866,7 +1868,6 @@ pub fn execute(
             };
             Ok( val_id )
         },
-        _ => todo!(),
     };
 
     globals.pop_protected();
