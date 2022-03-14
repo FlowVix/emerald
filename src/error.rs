@@ -705,3 +705,17 @@ impl ToReport for RuntimeError {
 }
 
 
+impl RuntimeError {
+    pub fn is_destructure_error(&self) -> bool {
+        match self {
+            RuntimeError::EqualAssertionFailed { .. } |
+            RuntimeError::DestructureTypeMismatch { .. } |
+            RuntimeError::DestructureLengthMismatch { .. } |
+            RuntimeError::DestructureNonExistentKeyField { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+
+

@@ -37,6 +37,8 @@ pub enum Token {
     
     #[token("=>")]
     FatArrow,
+    #[token("->")]
+    Arrow,
 
     #[token("&&")]
     And,
@@ -122,6 +124,12 @@ pub enum Token {
     #[token("else")]
     Else,
 
+    
+    #[token("match")]
+    Match,
+    #[token("case")]
+    Case,
+
     #[token("while")]
     While,
     #[token("loop")]
@@ -190,7 +198,7 @@ pub enum Token {
     Ident(String),
 
     #[error]
-    #[regex(r"[ \t\f\n\r]+", logos::skip)]
+    #[regex(r"[ \t\f\n\r]+|/\*[^*]*\*(([^/\*][^\*]*)?\*)*/|//[^\n]*", logos::skip)]
     Error,
 
     Eof,
@@ -212,6 +220,7 @@ impl Token {
             Token::Eq => "==",
             Token::NotEq => "!=",
             Token::FatArrow => "=>",
+            Token::Arrow => "->",
             Token::And => "&&",
             Token::Or => "||",
             Token::ExclMark => "!",
@@ -245,6 +254,8 @@ impl Token {
             Token::DoubleColon => "::",
             Token::Colon => ":",
             Token::Dollar => "$",
+            Token::Match => "match",
+            Token::Case => "case",
             Token::If => "if",
             Token::Else => "else",
             Token::Let => "let",

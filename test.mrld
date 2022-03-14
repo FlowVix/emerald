@@ -1,12 +1,21 @@
 
-struct Piss {
-    a: number = 5,
-    b: string,
+
+
+let thing = true;
+let other = 3;
+
+match [thing, other] {
+    case [false, a] -> print("the ", a),
+    case [true, a] -> print("wow ", a),
 }
 
-let Piss::{a, b} = Piss::{b: "fart"};
 
+let thing = false;
+let other = 2;
 
-print(a);
-print(b);
+match [thing, other] {
+    case [false, a] -> print("the ", a),
+    case [true, a] -> print("wow ", a),
+}
+
 

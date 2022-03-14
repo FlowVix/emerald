@@ -53,12 +53,23 @@ pub enum NodeType {
     StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, ASTNode> },
     Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
     Associated { base: Box<ASTNode>, assoc: String },
+    
+    Match {value: Box<ASTNode>, arms: Vec<(MatchArm, ASTNode)>},
+
     Export { name: String, value: Box<ASTNode> },
     Import { path: String },
     MCCall { base: Box<ASTNode> },
     CurrentMcId,
     McVector { x: CoordType<Box<ASTNode>>, y: CoordType<Box<ASTNode>>, z: CoordType<Box<ASTNode>>, rot: Option<(CoordType<Box<ASTNode>>, CoordType<Box<ASTNode>>)> },
     Extract { value: Box<ASTNode> },
+    
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchArm {
+    Pattern(ASTNode),
+    Structure(ASTNode),
 }
 
 
@@ -667,6 +678,37 @@ pub fn parse_unit(
                 parse!(parse_expr(false) => let temp); else_branch = Some(Box::new(temp));
             });
             ret!( NodeType::If { cond: Box::new(cond), code: Box::new(code), else_branch  } => start.0, span!(-1).1 );
+        }
+        Token::Match => {
+            pos += 1;
+            parse!(parse_expr(false) => let value);
+            check_tok!(LBracket else "{");
+
+            let mut arms = vec![];
+            while_tok!(!= RBracket: {
+
+                let arm;
+                if_tok!(== Case: {
+                    pos += 1;
+                    parse!(parse_expr(false) => let check);
+                    arm = MatchArm::Structure(check);
+                } else {
+                    parse!(parse_expr(false) => let check);
+                    arm = MatchArm::Pattern(check);
+                });
+
+                check_tok!(Arrow else "->");
+                parse!(parse_expr(false) => let expr);
+
+                arms.push( (arm, expr) );
+                if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                    expected_err!("} or ,", tok!(0), span!(0), info )
+                }
+                skip_tok!(Comma);
+            });
+
+
+            ret!( NodeType::Match { value: Box::new(value), arms  } => start.0, span!(-1).1 );
         }
         Token::While => {
             pos += 1;

@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io};
 use convert_case::{Case, Casing};
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector}, parser::{ASTNode, NodeType, BlockType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector}, parser::{ASTNode, NodeType, BlockType, MatchArm}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -1263,6 +1263,7 @@ pub fn execute(
                 Value::Null,
                 area!(source.clone(), start_node.span)
             );
+            globals.protect_value(ret_id);
             if value_ops::to_bool(globals.get(cond_value), area!(source.clone(), cond.span), globals)? {
                 ret_id = execute!(code => scope_id)
             } else if let Some(b) = else_branch {
@@ -1276,6 +1277,7 @@ pub fn execute(
                 Value::Null,
                 area!(source.clone(), start_node.span)
             );
+            globals.protect_value(ret_id);
             loop {
                 let cond_value = execute!(cond => scope_id);
                 if !(value_ops::to_bool(globals.get(cond_value), area!(source.clone(), cond.span), globals)?) {
@@ -1306,11 +1308,58 @@ pub fn execute(
             globals.redef_value(ret_id, area!(source.clone(), start_node.span));
             Ok( ret_id )
         }
+        NodeType::Match { value, arms } => {
+            let mut ret_id = globals.insert_value(
+                Value::Null,
+                area!(source.clone(), start_node.span)
+            );
+            globals.protect_value(ret_id);
+            let val_id = protecute!(value => scope_id);
+            for (arm, then) in arms {
+                match arm {
+                    MatchArm::Pattern(pat) => {
+                        let pat_id = protecute!(pat => scope_id);
+                        let matches = value_ops::is_op_raw(&globals.get(val_id).clone(), &globals.get(pat_id).clone(), area!(source.clone(), node.span), globals)?;
+                        if !matches {
+                            continue;
+                        } else {
+                            let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
+                            ret_id = protecute!(then => derived);
+                        }
+                    },
+                    MatchArm::Structure(structure) => {
+                        let mut list = HashMap::new();
+                        let matches = do_assign(structure, val_id, scope_id, globals, source.clone(), &mut list, true);
+                        match matches {
+                            Ok(_) => {
+                                let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
+                                for (l, r) in list.clone() {
+                                    let right_clone = proteclone!(r => @);
+                                    
+                                    globals.set_var(derived, l.1.unwrap(), right_clone);
+                                }
+                                ret_id = protecute!(then => derived);
+                            },
+                            Err(e) => {
+                                if e.is_destructure_error() {
+                                    continue;
+                                } else {
+                                    ret!(Err( e ))
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+            globals.redef_value(ret_id, area!(source.clone(), start_node.span));
+            Ok( ret_id )
+        }
         NodeType::For { var: (name, var_area), code, iter } => {
             let mut ret_id = globals.insert_value(
                 Value::Null,
                 area!(source.clone(), start_node.span)
             );
+            globals.protect_value(ret_id);
             let iter_id = execute!(iter => scope_id);
             for i in value_ops::iter(&globals.get(iter_id), area!(source.clone(), iter.span), globals)? {
                 let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
