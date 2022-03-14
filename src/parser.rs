@@ -30,7 +30,6 @@ pub enum NodeType {
     Unary { op: Token, node: Box<ASTNode> },
 
     Declaration { var_name: String, value: Box<ASTNode> },
-    // Assignment { left: Box<Destructure>, value: Box<ASTNode> },
 
 
 
@@ -65,25 +64,25 @@ pub enum NodeType {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ArrayDestrItem {
-    Single(Destructure),
-    Spread(Destructure),
-}
+// #[derive(Debug, Clone, PartialEq)]
+// pub enum ArrayDestrItem {
+//     Single(Destructure),
+//     Spread(Destructure),
+// }
 
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum DestrType {
-    Var(String),
-    Array(Vec<ArrayDestrItem>),
-}
+// #[derive(Debug, Clone, PartialEq)]
+// pub enum DestrType {
+//     Var(String),
+//     Array(Vec<ArrayDestrItem>),
+// }
 
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Destructure {
-    destr: DestrType,
-    span: (usize, usize),
-}
+// #[derive(Debug, Clone, PartialEq)]
+// pub struct Destructure {
+//     destr: DestrType,
+//     span: (usize, usize),
+// }
 
 
 
@@ -128,21 +127,6 @@ macro_rules! parse_util {
             ($node_type:expr => $start:expr, $end:expr) => {
                 return Ok((ASTNode { 
                     node: $node_type,
-                    span: ($start, $end),
-                }, $pos))
-            };
-        }
-
-        macro_rules! ret_destr {
-            ($destr_type:expr => $span:expr) => {
-                return Ok((Destructure { 
-                    destr: $destr_type,
-                    span: $span,
-                 }, $pos))
-            };
-            ($destr_type:expr => $start:expr, $end:expr) => {
-                return Ok((Destructure { 
-                    destr: $destr_type,
                     span: ($start, $end),
                 }, $pos))
             };
@@ -364,39 +348,39 @@ operators!(
 
 
 
-pub fn find_matching_offset(
-    start_tok: (Token, (usize, usize)),
-    end_tok: Token,
-    start_pos: usize,
-    tokens: &Tokens,
-    info: &ParseInfo,
-) -> Result<i32, SyntaxError> {
-    let mut i = 0;
-    let mut depth = 1;
+// pub fn find_matching_offset(
+//     start_tok: (Token, (usize, usize)),
+//     end_tok: Token,
+//     start_pos: usize,
+//     tokens: &Tokens,
+//     info: &ParseInfo,
+// ) -> Result<i32, SyntaxError> {
+//     let mut i = 0;
+//     let mut depth = 1;
 
-    loop {
-        if tokens[start_pos + i].0 == start_tok.0 {
-            depth += 1;
-        } else if tokens[start_pos + i].0 == end_tok {
-            depth -= 1;
-            if depth == 0 {
-                break;
-            }
-        } else if tokens[start_pos + i].0 == Token::Eof {
-            return Err( SyntaxError::UnmatchedChar {
-                for_char: start_tok.0.name().to_string(),
-                not_found: end_tok.name().to_string(),
-                area: CodeArea {
-                    source: info.source.clone(),
-                    range: start_tok.1,
-                }
-            } )
-        }
-        i += 1;
-    }
+//     loop {
+//         if tokens[start_pos + i].0 == start_tok.0 {
+//             depth += 1;
+//         } else if tokens[start_pos + i].0 == end_tok {
+//             depth -= 1;
+//             if depth == 0 {
+//                 break;
+//             }
+//         } else if tokens[start_pos + i].0 == Token::Eof {
+//             return Err( SyntaxError::UnmatchedChar {
+//                 for_char: start_tok.0.name().to_string(),
+//                 not_found: end_tok.name().to_string(),
+//                 area: CodeArea {
+//                     source: info.source.clone(),
+//                     range: start_tok.1,
+//                 }
+//             } )
+//         }
+//         i += 1;
+//     }
 
-    Ok( i as i32 )
-}
+//     Ok( i as i32 )
+// }
 
 
 
@@ -432,16 +416,27 @@ pub fn parse_unit(
         Token::LParen => {
             pos += 1;
 
-            let matching = find_matching_offset(
-                (Token::LParen, span!(-1)),
-                Token::RParen,
-                pos,
-                tokens,
-                info
-            )?;
+            let mut i = 0;
+            let mut depth = 1;
 
+            loop {
+                match tok!(i) {
+                    Token::LParen => depth += 1,
+                    Token::RParen => { depth -= 1; if depth == 0 {i += 1; break;} },
+                    Token::Eof => return Err( SyntaxError::UnmatchedChar {
+                        for_char: "(".to_string(),
+                        not_found: ")".to_string(),
+                        area: CodeArea {
+                            source: info.source.clone(),
+                            range: start,
+                        }
+                    } ),
+                    _ => (),
+                }
+                i += 1;
+            }
 
-            match tok!(matching) {
+            match tok!(i) {
                 Token::FatArrow => {
                     let header_start = span!(-1).0;
 
@@ -1131,87 +1126,13 @@ fn parse_op(
 }
 
 
-fn parse_destructure(
-    tokens: &Tokens,
-    mut pos: usize,
-    info: &ParseInfo,
-) -> Result<(Destructure, usize), SyntaxError> {
-    parse_util!(tokens, pos, info);
-
-    let start = span!(0);
-    
-    match tok!(0) {
-        Token::Ident(name) => {
-            pos += 1;
-            ret_destr!(DestrType::Var(name.clone()) => start.0, span!(-1).1 )
-        },
-        Token::LSqBracket => {
-            pos += 1;
-
-            let mut elements = vec![];
-            while_tok!(!= RSqBracket: {
-                let spread;
-                if_tok!(== DoubleDot: {
-                    pos += 1;
-                    spread = true;
-                } else {
-                    spread = false;
-                });
-                parse!(parse_destructure => let elem);
-                elements.push( if spread {ArrayDestrItem::Spread(elem)} else {ArrayDestrItem::Single(elem)} );
-                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                    expected_err!("] or ,", tok!(0), span!(0), info )
-                }
-                skip_tok!(Comma);
-            });
-
-            ret_destr!(DestrType::Array(elements) => start.0, span!(-1).1 )
-        },
-        _ => unreachable!(),
-    }
-
-}
-
 fn parse_expr(
     tokens: &Tokens,
     pos: usize,
     info: &ParseInfo,
     skip_assignment: bool,
 ) -> Result<(ASTNode, usize), SyntaxError> {
-    // parse_util!(tokens, pos, info);
-
-    // let start = span!(0);
-
-    // if !skip_assignment {
-    //     let mut is_destructure = false;
-    //     if let Token::Ident(_) = tok!(0) {
-    //         if let Token::Assign = tok!(1) {
-    //             is_destructure = true;
-    //         }
-    //     } else if let Token::LSqBracket = tok!(0) {
-    //         let matching = find_matching_offset(
-    //             (Token::LSqBracket, span!(0)),
-    //             Token::RSqBracket,
-    //             pos + 1,
-    //             tokens,
-    //             info
-    //         )?;
-    //         if let Token::Assign = tok!(2 + matching) {
-    //             is_destructure = true;
-    //         }
-    //     }
-
-    //     if is_destructure {
-    //         parse!(parse_destructure => let left);
-    //         check_tok!(Assign else "=");
-    //         parse!(parse_expr(false) => let value);
-    //         ret!( NodeType::Assignment {
-    //             left: Box::new(left),
-    //             value: Box::new(value),
-    //         } => start.0, span!(-1).1 )
-    //     }
-    // }
-
+    
 
     return parse_op(tokens, pos, info, if skip_assignment {1} else {0})
 }

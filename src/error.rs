@@ -139,6 +139,23 @@ pub enum RuntimeError {
     CantImportInEval {
         import_area: CodeArea,
     },
+    EqualAssertionFailed {
+        area1: CodeArea,
+        area2: CodeArea,
+    },
+    DestructureTypeMismatch {
+        tried: String,
+        found: String,
+        area1: CodeArea,
+        area2: CodeArea,
+    },
+    DestructureLengthMismatch {
+        for_type: String,
+        expected: usize,
+        found: usize,
+        area1: CodeArea,
+        area2: CodeArea,
+    },
 }
 
 
@@ -613,6 +630,47 @@ impl ToReport for RuntimeError {
                 message: format!("Can't import in eval"),
                 labels: vec![
                     (import_area.clone(), format!("Import used here"))
+                ],
+                note: None,
+            },
+            RuntimeError::EqualAssertionFailed {
+                area1,
+                area2,
+            } => ErrorReport {
+                source: area1.clone(),
+                message: format!("Equality assertion failed"),
+                labels: vec![
+                    (area1.clone(), format!("First value here")),
+                    (area2.clone(), format!("Second value here")),
+                ],
+                note: None,
+            },
+            RuntimeError::DestructureTypeMismatch {
+                tried,
+                found,
+                area1,
+                area2,
+            } => ErrorReport {
+                source: area2.clone(),
+                message: format!("Cannot destructure {} into {}", found, tried),
+                labels: vec![
+                    (area1.clone(), format!("Tried to destructure {} here", tried.fg(a))),
+                    (area2.clone(), format!("Found {} here", found.fg(b))),
+                ],
+                note: None,
+            },
+            RuntimeError::DestructureLengthMismatch {
+                for_type,
+                expected,
+                found,
+                area1,
+                area2,
+            } => ErrorReport {
+                source: area2.clone(),
+                message: format!("Unequal elements in {} destructure", for_type),
+                labels: vec![
+                    (area1.clone(), format!("Tried to destructure {} with {} elements here", for_type.fg(a), expected.fg(b))),
+                    (area2.clone(), format!("Found {} elements here", found.fg(colors.next()))),
                 ],
                 note: None,
             },

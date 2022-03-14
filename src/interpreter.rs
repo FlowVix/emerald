@@ -610,6 +610,97 @@ macro_rules! area {
 
 
 
+pub fn do_assign(
+    left: &ASTNode,
+    right: ValuePos,
+    scope_id: ScopePos,
+    globals: &mut Globals,
+    source: EmeraldSource,
+    list: &mut HashMap<ValuePos, ValuePos>,
+) -> Result<(), RuntimeError> {
+    interpreter_util!(globals, source.clone());
+
+    match &left.node {
+        NodeType::Var { .. } | NodeType::Index {..} | NodeType::Member { .. } => {
+            let left_id = protecute_raw!(left => scope_id);
+            list.insert(left_id, proteclone!(right => @));
+        },
+        NodeType::Array { elements } => {
+            match &globals.get(right).value.clone() {
+                Value::Array(arr) => {
+                    if arr.len() != elements.len() {
+                        return Err( RuntimeError::DestructureLengthMismatch {
+                            for_type: "array".to_string(),
+                            expected: elements.len(),
+                            found: arr.len(),
+                            area1: area!(source.clone(), left.span),
+                            area2: globals.get(right).def_area.clone(),
+                        } )
+                    } else {
+                        for (l, r) in elements.iter().zip(arr) {
+                            do_assign(l, *r, scope_id, globals, source.clone(), list)?;
+                        }
+                    }
+                },
+                other => {
+                    return Err( RuntimeError::DestructureTypeMismatch {
+                        tried: "array".to_string(),
+                        found: format!("{}", other.type_str(globals)),
+                        area1: area!(source.clone(), left.span),
+                        area2: globals.get(right).def_area.clone(),
+                    } )
+                }
+            }
+        },
+        NodeType::Tuple { elements } => {
+            match &globals.get(right).value.clone() {
+                Value::Tuple(arr) => {
+                    if arr.len() != elements.len() {
+                        return Err( RuntimeError::DestructureLengthMismatch {
+                            for_type: "tuple".to_string(),
+                            expected: elements.len(),
+                            found: arr.len(),
+                            area1: area!(source.clone(), left.span),
+                            area2: globals.get(right).def_area.clone(),
+                        } )
+                    } else {
+                        for (l, r) in elements.iter().zip(arr) {
+                            do_assign(l, *r, scope_id, globals, source.clone(), list)?;
+                        }
+                    }
+                },
+                other => {
+                    return Err( RuntimeError::DestructureTypeMismatch {
+                        tried: "tuple".to_string(),
+                        found: format!("{}", other.type_str(globals)),
+                        area1: area!(source.clone(), left.span),
+                        area2: globals.get(right).def_area.clone(),
+                    } )
+                }
+            }
+        }
+        _ => {
+            let left_id = protecute!(left => scope_id);
+            let equal = value_ops::eq(&globals.get(left_id).clone(), &globals.get(right).clone(), area!(source.clone(), left.span), globals)?;
+            if !equal {
+                return Err(
+                    RuntimeError::EqualAssertionFailed {
+                        area1: area!(source.clone(), left.span),
+                        area2: globals.get(right).def_area.clone(),
+                    }
+                )
+            }
+        },
+    }
+
+
+    Ok(())
+
+}
+
+
+
+
 
 
 
@@ -783,8 +874,8 @@ pub fn execute(
                         Div: div                    Overload: div
                         Mod: modulo                 Overload: mod
                         Pow: pow                    Overload: pow
-                        Eq: eq                      Overload: eq
-                        NotEq: neq                  Overload: neq
+                        Eq: eq_op                   Overload: eq
+                        NotEq: neq_op               Overload: neq
                         Greater: greater            Overload: greater
                         GreaterEq: greater_eq       Overload: greater_eq
                         Lesser: lesser              Overload: lesser
@@ -854,6 +945,33 @@ pub fn execute(
                         PowEq: pow                  Overload: pow_eq
                         // Assign: overwrite           Overload: assign
                     )
+                }
+                Token::Assign => {
+                    let right_raw = protecute_raw!(right => scope_id);
+
+                    let mut list = HashMap::new();
+                    do_assign(left, right_raw, scope_id, globals, source.clone(), &mut list)?;
+
+                    for (l, r) in list {
+                        let left_clone = proteclone!(l => @);
+                        let right_clone = proteclone!(r => @);
+
+                        match globals.get_method(left_clone, "_assign_") {
+                            Some(f) => {run_func!(vec![l, right_clone], f);},
+                            None => match globals.get_method(right_clone, "_r_assign_") {
+                                Some(f) => {run_func!(vec![r, left_clone], f);},
+                                None => {
+                                    globals.set_value(
+                                        l,
+                                        globals.get(right_clone).value.clone(),
+                                        Some(area!(source.clone(), start_node.span))
+                                    );
+                                },
+                            }
+                        }
+                    }
+                    
+                    Ok(proteclone!(right_raw => @))
                 }
                 Token::And => {
                     let left_raw = protecute_raw!(left => scope_id);
@@ -932,9 +1050,6 @@ pub fn execute(
                         }
                     }
 
-                }
-                Token::Assign => {
-                    panic!();
                 }
                 _ => unreachable!()
             }

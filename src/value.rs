@@ -552,23 +552,23 @@ pub mod value_ops {
         }
     }
 
-    pub fn eq(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+    pub fn eq(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<bool, RuntimeError> {
         match (&a.value, &b.value) {
-            (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 == n2)),
-            (Value::String(s1), Value::String(s2)) => Ok(Value::Boolean(s1 == s2)),
-            (Value::Boolean(b1), Value::Boolean(b2)) => Ok(Value::Boolean(b1 == b2)),
+            (Value::Number(n1), Value::Number(n2)) => Ok(n1 == n2),
+            (Value::String(s1), Value::String(s2)) => Ok(s1 == s2),
+            (Value::Boolean(b1), Value::Boolean(b2)) => Ok(b1 == b2),
 
-            (_, _) => Ok(Value::Boolean(false)),
+            (_, _) => Ok(false),
         }
     }
-    pub fn neq(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
-        match (&a.value, &b.value) {
-            (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(n1 != n2)),
-            (Value::String(s1), Value::String(s2)) => Ok(Value::Boolean(s1 != s2)),
-            (Value::Boolean(b1), Value::Boolean(b2)) => Ok(Value::Boolean(b1 != b2)),
 
-            (_, _) => Ok(Value::Boolean(true)),
-        }
+
+
+    pub fn eq_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        Ok(Value::Boolean(eq(a, b, area, globals)?))
+    }
+    pub fn neq_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        Ok(Value::Boolean(!eq(a, b, area, globals)?))
     }
     pub fn greater(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
