@@ -12,6 +12,7 @@ use crate::builtins::{run_builtin, name_to_builtin};
 pub enum Exit {
     Return(ValuePos, (usize, usize)),
     Break(ValuePos, (usize, usize)),
+    Continue((usize, usize)),
 }
 
 
@@ -686,6 +687,17 @@ pub fn execute(
                             }
                         ))
                     },
+                    Some(
+                        Exit::Continue(span)
+                    ) => {
+                        let bruh = span.clone();
+                        ret!(Err(
+                            RuntimeError::ContinueUsedOutside {
+                                continue_area: area!(source.clone(), bruh),
+                                outer_area: area!(source.clone(), $func.code.span),
+                            }
+                        ))
+                    },
                     None => (),
                 }
                 globals.trace.pop();
@@ -1046,6 +1058,11 @@ pub fn execute(
                     ) => {
                         ret!(Ok( ret_id ));
                     },
+                    Some(
+                        Exit::Continue(_)
+                    ) => {
+                        globals.exits.pop();
+                    },
                     None => (),
                 }
             }
@@ -1081,6 +1098,11 @@ pub fn execute(
                     ) => {
                         ret!(Ok( ret_id ));
                     },
+                    Some(
+                        Exit::Continue(_)
+                    ) => {
+                        globals.exits.pop();
+                    },
                     None => (),
                 }
             }
@@ -1102,6 +1124,11 @@ pub fn execute(
                         Exit::Return(_, _)
                     ) => {
                         ret!(Ok( ret_id ));
+                    },
+                    Some(
+                        Exit::Continue(_)
+                    ) => {
+                        globals.exits.pop();
                     },
                     None => (),
                 }
@@ -1160,6 +1187,16 @@ pub fn execute(
             }
             Ok( globals.insert_value(
                 Value::Array(ids),
+                area!(source.clone(), start_node.span)
+            ) )
+        }
+        NodeType::Tuple { elements } => {
+            let mut ids = vec![];
+            for i in elements {
+                ids.push( protecute!(i => scope_id) );
+            }
+            Ok( globals.insert_value(
+                Value::Tuple(ids),
                 area!(source.clone(), start_node.span)
             ) )
         }
@@ -1314,6 +1351,15 @@ pub fn execute(
                 ),
             };
             globals.exits.push( Exit::Break(ret_value, node.span) );
+            Ok( clone!(ret_value => @) )
+        }
+        NodeType::Continue => {
+            // println!("{:?}", info);
+            let ret_value = globals.insert_value(
+                Value::Null,
+                area!(source.clone(), start_node.span)
+            );
+            globals.exits.push( Exit::Continue(node.span) );
             Ok( clone!(ret_value => @) )
         }
         NodeType::StructDef { struct_name, fields, field_areas, def_area } => {
@@ -1820,6 +1866,7 @@ pub fn execute(
             };
             Ok( val_id )
         },
+        _ => todo!(),
     };
 
     globals.pop_protected();

@@ -105,6 +105,7 @@ pub enum Value {
     Builtin(String),
     Function(Function),
     Array(Vec<ValuePos>),
+    Tuple(Vec<ValuePos>),
     Dictionary(HashMap<String, ValuePos>),
     Type(ValueType),
     Pattern(Pattern),
@@ -128,6 +129,7 @@ impl Value {
             Value::Builtin(_) => ValueType::Builtin(BuiltinType::Builtin),
             Value::Function{..} => ValueType::Builtin(BuiltinType::Function),
             Value::Array(_) => ValueType::Builtin(BuiltinType::Array),
+            Value::Tuple(_) => ValueType::Builtin(BuiltinType::Tuple),
             Value::Dictionary(_) => ValueType::Builtin(BuiltinType::Dict),
             Value::Type(_) => ValueType::Builtin(BuiltinType::Type),
             Value::Pattern(_) => ValueType::Builtin(BuiltinType::Pattern),
@@ -160,6 +162,17 @@ impl Value {
                 let out_str = "[".to_string() + &arr.into_iter().map(
                     |i| globals.get(*i).value.to_str(globals, visited)
                 ).collect::<Vec<String>>().join(", ") + "]";
+                visited.pop();
+                out_str
+            },
+            Value::Tuple(arr) => {
+                if visited.contains(&self) {
+                    return "(...)".to_string()
+                }
+                visited.push( self );
+                let out_str = "(".to_string() + &arr.into_iter().map(
+                    |i| globals.get(*i).value.to_str(globals, visited)
+                ).collect::<Vec<String>>().join(", ") + ")";
                 visited.pop();
                 out_str
             },
@@ -253,6 +266,12 @@ impl Value {
                 }
             },
             Value::Array(arr) => {
+                for i in arr {
+                    values.insert(*i);
+                    globals.get(*i).value.get_references(globals, values, scopes);
+                }
+            },
+            Value::Tuple(arr) => {
                 for i in arr {
                     values.insert(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);

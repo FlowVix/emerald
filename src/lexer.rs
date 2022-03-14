@@ -149,6 +149,8 @@ pub enum Token {
     Return,
     #[token("break")]
     Break,
+    #[token("continue")]
+    Continue,
 
     #[token("export")]
     Export,
@@ -256,6 +258,7 @@ impl Token {
             Token::Is => "is",
             Token::Return => "return",
             Token::Break => "break",
+            Token::Continue => "continue",
             Token::Struct => "struct",
             Token::Export => "export",
             Token::Import => "export",

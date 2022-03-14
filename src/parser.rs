@@ -42,11 +42,13 @@ pub enum NodeType {
     FuncDef { func_name: String, args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
     Lambda { args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
     Array { elements: Vec<ASTNode> },
+    Tuple { elements: Vec<ASTNode> },
     Index { base: Box<ASTNode>, index: Box<ASTNode> },
     Dictionary { map: HashMap<String, Option<ASTNode>> },
     Member { base: Box<ASTNode>, member: String },
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
+    Continue,
     StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: HashMap<String, CodeArea>, def_area: CodeArea },
     StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, Option<ASTNode>> },
     Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
@@ -416,6 +418,24 @@ pub fn parse_unit(
                 },
                 _ => {
                     parse!(parse_expr(false) => let value);
+
+                    if_tok!(== Comma: {
+                        pos += 1;
+
+                        let mut elements = vec![value];
+                        while_tok!(!= RParen: {
+                            parse!(parse_expr(false) => let elem);
+                            elements.push( elem );
+                            if !matches!(tok!(0), Token::RParen | Token::Comma) {
+                                expected_err!(") or ,", tok!(0), span!(0), info )
+                            }
+                            skip_tok!(Comma);
+                        });
+                        ret!( NodeType::Tuple {
+                            elements,
+                        } => start.0, span!(-1).1 )
+                    });
+
                     check_tok!(RParen else ")");
                     ret!( value.node => start.0, span!(-1).1 );
                 }
@@ -669,6 +689,10 @@ pub fn parse_unit(
             ret!( NodeType::Break {
                 node
             } => start.0, span!(-1).1 )
+        },
+        Token::Continue => {
+            pos += 1;
+            ret!( NodeType::Continue => start.0, span!(-1).1 )
         },
         Token::Struct => {
             pos += 1;

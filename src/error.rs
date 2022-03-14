@@ -76,11 +76,18 @@ pub enum RuntimeError {
         break_area: CodeArea,
         outer_area: CodeArea,
     },
+    ContinueUsedOutside {
+        continue_area: CodeArea,
+        outer_area: CodeArea,
+    },
     ReturnUsedOutsideProgram {
         return_area: CodeArea,
     },
     BreakUsedOutsideProgram {
         break_area: CodeArea,
+    },
+    ContinueUsedOutsideProgram {
+        continue_area: CodeArea,
     },
     CannotConvert {
         type1: String,
@@ -426,6 +433,18 @@ impl ToReport for RuntimeError {
                 ],
                 note: None,
             },
+            RuntimeError::ContinueUsedOutside {
+                continue_area,
+                outer_area,
+            } => ErrorReport {
+                source: continue_area.clone(),
+                message: format!("Continue used outside of loop"),
+                labels: vec![
+                    (continue_area.clone(), format!("Continue was used here")),
+                    (outer_area.clone(), format!("Reached here")),
+                ],
+                note: None,
+            },
             RuntimeError::ReturnUsedOutsideProgram {
                 return_area,
             } => ErrorReport {
@@ -443,6 +462,16 @@ impl ToReport for RuntimeError {
                 message: format!("Break reached outside program"),
                 labels: vec![
                     (break_area.clone(), format!("Break was used here")),
+                ],
+                note: None,
+            },
+            RuntimeError::ContinueUsedOutsideProgram {
+                continue_area,
+            } => ErrorReport {
+                source: continue_area.clone(),
+                message: format!("Continue reached outside program"),
+                labels: vec![
+                    (continue_area.clone(), format!("Continue was used here")),
                 ],
                 note: None,
             },

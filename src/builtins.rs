@@ -233,6 +233,7 @@ builtin_types!(
     Builtin,
     Function,
     Array,
+    Tuple,
     Dict,
     Type,
     Pattern,

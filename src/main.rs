@@ -158,6 +158,15 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                             }
                         )
                     },
+                    Some(
+                        Exit::Continue(span)
+                    ) => {
+                        Err(
+                            RuntimeError::ContinueUsedOutsideProgram {
+                                continue_area: area!(source.clone(), *span),
+                            }
+                        )
+                    },
                     None => result,
                 };
             }
