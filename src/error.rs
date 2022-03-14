@@ -140,6 +140,8 @@ pub enum RuntimeError {
         import_area: CodeArea,
     },
     EqualAssertionFailed {
+        value1: String,
+        value2: String,
         area1: CodeArea,
         area2: CodeArea,
     },
@@ -634,14 +636,16 @@ impl ToReport for RuntimeError {
                 note: None,
             },
             RuntimeError::EqualAssertionFailed {
+                value1,
+                value2,
                 area1,
                 area2,
             } => ErrorReport {
                 source: area1.clone(),
                 message: format!("Equality assertion failed"),
                 labels: vec![
-                    (area1.clone(), format!("First value here")),
-                    (area2.clone(), format!("Second value here")),
+                    (area1.clone(), format!("Found {} here", value1.fg(a))),
+                    (area2.clone(), format!("Found {} here", value2.fg(b))),
                 ],
                 note: None,
             },

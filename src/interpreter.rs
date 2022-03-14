@@ -616,15 +616,24 @@ pub fn do_assign(
     scope_id: ScopePos,
     globals: &mut Globals,
     source: EmeraldSource,
-    list: &mut HashMap<ValuePos, ValuePos>,
+    list: &mut HashMap<(Option<ValuePos>, Option<String>), ValuePos>,
+    is_declaration: bool,
 ) -> Result<(), RuntimeError> {
     interpreter_util!(globals, source.clone());
 
     match &left.node {
-        NodeType::Var { .. } | NodeType::Index {..} | NodeType::Member { .. } => {
-            let left_id = protecute_raw!(left => scope_id);
-            list.insert(left_id, proteclone!(right => @));
+        NodeType::Var { var_name } => {
+            if !is_declaration {
+                let left_id = protecute_raw!(left => scope_id);
+                list.insert((Some(left_id), None), proteclone!(right => @));
+            } else {
+                list.insert((None, Some(var_name.clone())), proteclone!(right => @));
+            }
         },
+        NodeType::Index {..} | NodeType::Member { .. } if !is_declaration => {
+            let left_id = protecute_raw!(left => scope_id);
+            list.insert((Some(left_id), None), proteclone!(right => @));
+        }
         NodeType::Array { elements } => {
             match &globals.get(right).value.clone() {
                 Value::Array(arr) => {
@@ -638,7 +647,7 @@ pub fn do_assign(
                         } )
                     } else {
                         for (l, r) in elements.iter().zip(arr) {
-                            do_assign(l, *r, scope_id, globals, source.clone(), list)?;
+                            do_assign(l, *r, scope_id, globals, source.clone(), list, is_declaration)?;
                         }
                     }
                 },
@@ -665,7 +674,7 @@ pub fn do_assign(
                         } )
                     } else {
                         for (l, r) in elements.iter().zip(arr) {
-                            do_assign(l, *r, scope_id, globals, source.clone(), list)?;
+                            do_assign(l, *r, scope_id, globals, source.clone(), list, is_declaration)?;
                         }
                     }
                 },
@@ -683,8 +692,11 @@ pub fn do_assign(
             let left_id = protecute!(left => scope_id);
             let equal = value_ops::eq(&globals.get(left_id).clone(), &globals.get(right).clone(), area!(source.clone(), left.span), globals)?;
             if !equal {
+                let value1 = globals.get(left_id).value.to_str(globals, &mut vec![]);
+                let value2 = globals.get(right).value.to_str(globals, &mut vec![]);
                 return Err(
                     RuntimeError::EqualAssertionFailed {
+                        value1, value2,
                         area1: area!(source.clone(), left.span),
                         area2: globals.get(right).def_area.clone(),
                     }
@@ -950,19 +962,19 @@ pub fn execute(
                     let right_raw = protecute_raw!(right => scope_id);
 
                     let mut list = HashMap::new();
-                    do_assign(left, right_raw, scope_id, globals, source.clone(), &mut list)?;
+                    do_assign(left, right_raw, scope_id, globals, source.clone(), &mut list, false)?;
 
                     for (l, r) in list {
-                        let left_clone = proteclone!(l => @);
+                        let left_clone = proteclone!(l.0.unwrap() => @);
                         let right_clone = proteclone!(r => @);
 
                         match globals.get_method(left_clone, "_assign_") {
-                            Some(f) => {run_func!(vec![l, right_clone], f);},
+                            Some(f) => {run_func!(vec![l.0.unwrap(), right_clone], f);},
                             None => match globals.get_method(right_clone, "_r_assign_") {
                                 Some(f) => {run_func!(vec![r, left_clone], f);},
                                 None => {
                                     globals.set_value(
-                                        l,
+                                        l.0.unwrap(),
                                         globals.get(right_clone).value.clone(),
                                         Some(area!(source.clone(), start_node.span))
                                     );
@@ -1081,14 +1093,20 @@ pub fn execute(
                 _ => unreachable!()
             }
         },
-        NodeType::Declaration { var_name, value } => {
-            let initial_id = execute!(value => scope_id);
-            // let value_id = clone!(initial_id => area!(source.clone(), start_node.span));
-            globals.redef_value(initial_id, area!(source.clone(), start_node.span));
-            // globals.propagate_def(value_id);
+        NodeType::Declaration { left, right } => {
 
-            globals.set_var(scope_id, var_name.to_string(), initial_id);
-            Ok(initial_id)
+            let right_id = protecute!(right => scope_id);
+
+            let mut list = HashMap::new();
+            do_assign(left, right_id, scope_id, globals, source.clone(), &mut list, true)?;
+
+            for (l, r) in list {
+                let right_clone = proteclone!(r => @);
+                
+                globals.set_var(scope_id, l.1.unwrap(), right_clone);
+            }
+            
+            Ok(proteclone!(right_id => @))
         }
         NodeType::Var { var_name } => {
             // println!("c: {:?} {}", globals.get_scope(scope_id).vars, var_name);

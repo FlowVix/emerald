@@ -29,9 +29,7 @@ pub enum NodeType {
     Op { left: Box<ASTNode>, op: Token, right: Box<ASTNode> },
     Unary { op: Token, node: Box<ASTNode> },
 
-    Declaration { var_name: String, value: Box<ASTNode> },
-
-
+    Declaration { left: Box<ASTNode>, right: Box<ASTNode> },
 
     Var { var_name: String },
     StatementList { statements: Vec<ASTNode> },
@@ -416,6 +414,11 @@ pub fn parse_unit(
         Token::LParen => {
             pos += 1;
 
+            if_tok!(== RParen: {
+                pos += 1;
+                ret!( NodeType::Tuple { elements: vec![] } => start.0, span!(-1).1 );
+            });
+
             let mut i = 0;
             let mut depth = 1;
 
@@ -508,16 +511,11 @@ pub fn parse_unit(
         }
         Token::Let => {
             pos += 1;
-            // let mut mutable = false;
-            // if_tok!(== Mut: {
-            //     mutable = true;
-            //     pos += 1;
-            // });
-            check_tok!(Ident(var_name) else "variable name");
+            parse!(parse_expr(true) => let left);
             check_tok!(Assign else "=");
-            parse!(parse_expr(false) => let value);
+            parse!(parse_expr(false) => let right);
             // println!("{} {}", var_name, mutable);
-            ret!( NodeType::Declaration { var_name, value: Box::new(value) } => start.0, span!(-1).1 );
+            ret!( NodeType::Declaration { left: Box::new(left), right: Box::new(right) } => start.0, span!(-1).1 );
         }
         Token::Ident(name) => {
             pos += 1;

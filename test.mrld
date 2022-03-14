@@ -1,19 +1,4 @@
 
 
 
-impl string {
-    _assign_: (self, other) => print(other),
-}
-
-
-
-let a = "fuck";
-
-print(a);
-a = 3;
-print(a);
-[a, 6] = [[1, 2], 6];
-print(a);
-
-
 
