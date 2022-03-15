@@ -289,6 +289,7 @@ builtins!{
 
     [Sqrt]: sqrt(n: Number) { Value::Number(n.sqrt()) }
 
+
     [ID]: id(@Any => poopie) {
         println!("id: {:?}", globals.get_scope(scope_id).func_id);
         Value::Null

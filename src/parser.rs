@@ -81,7 +81,7 @@ pub enum NodeType {
     },
 
     Export { name: String, value: Box<ASTNode> },
-    Import { path: String },
+    Import { path: String, cached: bool },
     MCCall { base: Box<ASTNode> },
     CurrentMcId,
     McVector { x: CoordType<Box<ASTNode>>, y: CoordType<Box<ASTNode>>, z: CoordType<Box<ASTNode>>, rot: Option<(CoordType<Box<ASTNode>>, CoordType<Box<ASTNode>>)> },
@@ -966,9 +966,14 @@ pub fn parse_unit(
         },
         Token::Import => {
             pos += 1;
+            let mut cached = false;
+            if_tok!(== QMark: {
+                pos += 1;
+                cached = true;
+            });
             check_tok!(String(path) else "string");
 
-            ret!( NodeType::Import { path } => start.0, span!(-1).1 );
+            ret!( NodeType::Import { path, cached } => start.0, span!(-1).1 );
         },
         Token::Extract => {
             pos += 1;

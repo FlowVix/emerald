@@ -1,0 +1,25 @@
+
+
+
+
+export struct Score {
+    id: number,
+}
+
+
+export enum CompType {
+    Equal,
+    Greater,
+    GreaterEq,
+    Lesser,
+    LesserEq,
+}
+
+
+export enum RuntimeCondition {
+    Comparison { left: Score, comp: CompType, right: Score | number },
+}
+
+
+
+

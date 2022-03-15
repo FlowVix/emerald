@@ -1,52 +1,16 @@
 
 
 
-enum Op {
-    Plus,
-    Minus,
-    Mult,
-    Div,
-}
+let {
+    Score,
+} = import "libraries/std/lib.mrld";
 
-enum ASTNode {
-    Number (number),
-    Operation {left: ASTNode, op: Op, right: ASTNode},
-    Unary {op: Op, value: ASTNode},
-}
 
-impl ASTNode {
-    execute: (self) => {
-        match self {
-            case ASTNode:Number (n) -> n,
-            case ASTNode:Operation {
-                left, op, right
-            } -> {
-                match op {
-                    case Op:Plus -> left.execute() + right.execute(),
-                    case Op:Minus -> left.execute() - right.execute(),
-                    case Op:Mult -> left.execute() * right.execute(),
-                    case Op:Div -> left.execute() / right.execute(),
-                }
-            },
-            case ASTNode:Unary {op, value} -> {
-                match op {
-                    case Op:Plus -> + value.execute(),
-                    case Op:Minus -> - value.execute(),
-                }
-            }
-        }
-    }
-}
 
-let calc = ASTNode:Operation {
-    left: ASTNode:Unary {op: Op:Minus, value: ASTNode:Number(2) },
-    op: Op:Mult,
-    right: ASTNode:Operation {
-        left: ASTNode:Number(18),
-        op: Op:Div,
-        right: ASTNode:Number(3),
-    },
-}
+let a = Score::new(3);
+let b = Score::new(2);
 
-print(calc.execute());
+(a == b).then(!{
+    a += 5;
+});
 

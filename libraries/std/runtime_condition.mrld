@@ -1,0 +1,42 @@
+
+
+let {
+    Score,
+    CompType,
+    RuntimeCondition,
+} = import? "types.mrld";
+
+export let RuntimeCondition = RuntimeCondition;
+
+impl RuntimeCondition {
+    then: (self, f: mc_func) => {
+
+        match self {
+            case RuntimeCondition:Comparison { left, comp, right } -> {
+                let cond = "";
+                match right {
+                    number -> {
+                        let value = floor(right);
+                        cond = match comp {
+                            case CompType:Equal -> "matches " + string(value),
+                            case CompType:Greater -> "matches " + string(value+1) + "..",
+                            case CompType:GreaterEq -> "matches " + string(value) + "..",
+                            case CompType:Lesser -> "matches .." + string(value-1),
+                            case CompType:LesserEq -> "matches .." + string(value),
+                        }
+                    },
+                    Score -> {
+                        cond = match comp {
+                            case CompType:Equal -> "= " + right.str(),
+                            case CompType:Greater -> "> " + right.str(),
+                            case CompType:GreaterEq -> ">= " + right.str(),
+                            case CompType:Lesser -> "< " + right.str(),
+                            case CompType:LesserEq -> "<= " + right.str(),
+                        }
+                    }
+                }
+                command("execute if score " + left.str() + " " + cond + " run " + func_str(f));
+            }
+        }
+    },
+}

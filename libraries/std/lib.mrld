@@ -1,6 +1,10 @@
 
 
 extract import "score.mrld";
+extract import "runtime_condition.mrld";
+
+
 
 export let Score = Score;
+export let RuntimeCondition = RuntimeCondition;
 

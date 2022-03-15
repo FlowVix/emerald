@@ -191,6 +191,10 @@ pub enum Token {
     #[token("^")]
     Caret,
 
+
+    #[token("?")]
+    QMark,
+
     // #[regex(r#"#[a-zA-Z_]\w*"#, |lex| lex.slice()[1..].to_string())]
     // TypeName(String),
 
@@ -290,6 +294,7 @@ impl Token {
             Token::VectorSpecial => "v\\",
             Token::IDSpecial => "id\\",
             Token::Tilde => "~",
+            Token::QMark => "?",
             // Token::DoubleColon => "::",
         }
     }

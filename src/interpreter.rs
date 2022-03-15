@@ -138,6 +138,7 @@ pub struct Globals {
     pub import_trace: Vec<CodeArea>,
 
     pub exports: Vec<HashMap<String, ValuePos>>,
+    pub import_caches: HashMap<PathBuf, HashMap<String, ValuePos>>,
 
     pub mcfuncs: Register<McFuncID, Vec<String>>,
 
@@ -188,6 +189,7 @@ impl Globals {
             trace: vec![],
             import_trace: vec![],
             exports: vec![],
+            import_caches: HashMap::new(),
             mcfuncs: Register {
                 map: HashMap::new(),
                 counter: 0,
@@ -428,12 +430,11 @@ impl Globals {
         }
 
         for (_, s) in &self.custom_structs.map {
-            // for (_, (t, d)) in &s.fields {
-            //     self.mark_value(*t, &mut collector);
-            //     if let Some(d) = d {
-            //         self.mark_value(*d, &mut collector);
-            //     }
-            // }
+            if collector.marked_scopes.contains(&s.def_scope) {
+                self.mark_scope(s.def_scope, &mut collector);
+            }
+        }
+        for (_, s) in &self.custom_enums.map {
             if collector.marked_scopes.contains(&s.def_scope) {
                 self.mark_scope(s.def_scope, &mut collector);
             }
@@ -456,6 +457,12 @@ impl Globals {
         }
         for e in &self.exports {
             for (_, v) in e {
+                self.mark_value(*v, &mut collector);
+            }
+        }
+
+        for (_, map) in &self.import_caches {
+            for (_, v) in map {
                 self.mark_value(*v, &mut collector);
             }
         }
@@ -2260,7 +2267,7 @@ pub fn execute(
                 } ))
             }
         },
-        NodeType::Import { path } => {
+        NodeType::Import { path, cached } => {
 
             let mut buf;
             match &source {
@@ -2274,6 +2281,23 @@ pub fn execute(
             
             buf.pop();
             buf.push(path);
+
+            if *cached {
+                match globals.import_caches.get(&buf) {
+                    Some(cache) => {
+                        let ret_value = Value::Dictionary( cache.clone() );
+
+                        globals.import_caches.insert(buf, globals.exports.pop().unwrap());
+                        
+                        ret!( Ok(globals.insert_value(
+                            ret_value,
+                            area!(source.clone(), start_node.span),
+                        )) );
+                    },
+                    None => (),
+                }
+            }
+
             let code = match fs::read_to_string(buf.clone()) {
                 Ok(s) => s,
                 Err(_) => ret!(Err( RuntimeError::NonexistentFile {
@@ -2304,7 +2328,7 @@ pub fn execute(
 
             // println!("{:?}", tokens);
 
-            let mod_source = EmeraldSource::File(buf);
+            let mod_source = EmeraldSource::File(buf.clone());
             let ast = crate::parser::parse(&tokens, &mod_source);
             match ast {
                 Ok((node, _)) => {
@@ -2338,9 +2362,7 @@ pub fn execute(
                     //     println!("__ {:?}", globals.get(*i.1).value);
                     // }
 
-
-                    globals.exports.pop();
-
+                    globals.import_caches.insert(buf, globals.exports.pop().unwrap());
                     
                     Ok(globals.insert_value(
                         ret_value,

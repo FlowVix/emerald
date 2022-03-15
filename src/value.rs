@@ -211,10 +211,10 @@ impl Value {
             Value::Type(v) => match v {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
                 ValueType::CustomStruct(pos) => match &globals.custom_structs.map[pos] {
-                    CustomStruct { name, .. } => format!("<struct: {}>", name)
+                    CustomStruct { name, .. } => format!("<struct {}: {}>", pos, name)
                 },
                 ValueType::CustomEnum(pos) => match &globals.custom_enums.map[pos] {
-                    CustomEnum { name, .. } => format!("<enum: {}>", name)
+                    CustomEnum { name, .. } => format!("<enum {}: {}>", pos, name)
                 },
             },
             Value::StructInstance { struct_id, fields } => {
@@ -380,6 +380,8 @@ impl Value {
 
 pub mod value_ops {
 
+    use std::collections::HashMap;
+
     use crate::{interpreter::{StoredValue, Globals}, CodeArea, value::{Value, ValueType}, error::RuntimeError, builtins::BuiltinType};
 
     use super::{Pattern, Range};
@@ -499,6 +501,16 @@ pub mod value_ops {
                     new_vec.push( globals.clone_value(*i, Some(area.clone())) );
                 }
                 Ok(Value::Array(new_vec))
+            },
+            (Value::Dictionary(m1), Value::Dictionary(m2)) => {
+                let mut new_map = HashMap::new();
+                for i in m1 {
+                    new_map.insert(i.0.clone(),  globals.clone_value(*i.1, Some(area.clone())) );
+                }
+                for i in m2 {
+                    new_map.insert(i.0.clone(),  globals.clone_value(*i.1, Some(area.clone())) );
+                }
+                Ok(Value::Dictionary(new_map))
             },
             
             (value1, value2) => {

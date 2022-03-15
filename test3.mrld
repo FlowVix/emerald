@@ -1,0 +1,8 @@
+
+
+
+extract import? "test4.mrld";
+
+print(Lol);
+
+

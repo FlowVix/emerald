@@ -1,29 +1,16 @@
 
 
-let COMP_TYPES = {
-    EQ: 0,
-    GREATER: 1,
-    GREATER_EQ: 2,
-    LESSER: 3,
-    LESSER_EQ: 4,
-}
 
+let {
+    Score,
+    CompType,
+    RuntimeCondition,
+} = import? "types.mrld";
 
-export struct Score {
-    id: number,
-}
-
-export struct ScoreComp {
-    comp: number,
-    left: Score,
-    right: number | Score,
-}
-
-
-
-
+export let Score = Score;
 
 let id_counter = 0;
+
 impl Score {
 
     new: (default: number) => {
@@ -156,65 +143,44 @@ impl Score {
     },
 
     _eq_: (self, v: number | Score) => {
-        return ScoreComp::{
-            comp: COMP_TYPES.EQ,
+        return RuntimeCondition:Comparison {
             left: self,
+            comp: CompType:Equal,
             right: v,
         }
     },
     _greater_: (self, v: number | Score) => {
-        return ScoreComp::{
-            comp: COMP_TYPES.GREATER,
+        return RuntimeCondition:Comparison {
             left: self,
+            comp: CompType:Greater,
             right: v,
         }
     },
     _greater_eq_: (self, v: number | Score) => {
-        return ScoreComp::{
-            comp: COMP_TYPES.GREATER_EQ,
+        return RuntimeCondition:Comparison {
             left: self,
+            comp: CompType:GreaterEq,
             right: v,
         }
     },
     _lesser_: (self, v: number | Score) => {
-        return ScoreComp::{
-            comp: COMP_TYPES.LESSER,
+        return RuntimeCondition:Comparison {
             left: self,
+            comp: CompType:Lesser,
             right: v,
         }
     },
     _lesser_eq_: (self, v: number | Score) => {
-        return ScoreComp::{
-            comp: COMP_TYPES.LESSER_EQ,
+        return RuntimeCondition:Comparison {
             left: self,
+            comp: CompType:LesserEq,
             right: v,
         }
     },
 }
 
 
-impl ScoreComp {
-    then: (self, f: mc_func) => {
-        let cond = "";
-        if self.right is number {
-            let value = floor(self.right);
-            cond =
-                if (self.comp == COMP_TYPES.EQ) "matches " + string(value)
-                else if (self.comp == COMP_TYPES.GREATER) "matches " + string(value+1) + ".."
-                else if (self.comp == COMP_TYPES.GREATER_EQ) "matches " + string(value) + ".."
-                else if (self.comp == COMP_TYPES.LESSER) "matches .." + string(value-1)
-                else if (self.comp == COMP_TYPES.LESSER_EQ) "matches .." + string(value);
-        } else {
-            cond =
-                if (self.comp == COMP_TYPES.EQ) "= " + self.right.str()
-                else if (self.comp == COMP_TYPES.GREATER) "> " + self.right.str()
-                else if (self.comp == COMP_TYPES.GREATER_EQ) ">= " + self.right.str()
-                else if (self.comp == COMP_TYPES.LESSER) "< " + self.right.str()
-                else if (self.comp == COMP_TYPES.LESSER_EQ) "<= " + self.right.str();
-        }
-        command("execute if score " + self.left.str() + " " + cond + " run " + func_str(f));
-    },
-}
+
 
 
 
