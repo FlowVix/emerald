@@ -1,6 +1,6 @@
 
 
-use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io};
+use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io::{self, Write}};
 
 use convert_case::{Case, Casing};
 use logos::Logos;
@@ -124,7 +124,9 @@ pub struct Globals {
 
 
     pub last_amount: usize,
+
     pub protected: Vec<Protector>,
+    pub backup_protector: Option<Protector>,
 
     pub builtin_impls: HashMap<BuiltinType, ImplData>,
     pub struct_impls: HashMap<TypePos, ImplData>,
@@ -177,6 +179,7 @@ impl Globals {
             },
             last_amount: 0,
             protected: vec![],
+            backup_protector: None,
             // custom_types: vec![],
             struct_impls: HashMap::new(),
             enum_impls: HashMap::new(),
@@ -231,7 +234,7 @@ impl Globals {
         self.protected.push( Protector::new() );
     }
     fn pop_protected(&mut self) {
-        self.protected.pop();
+        self.backup_protector = self.protected.pop();
     }
 
 
@@ -833,6 +836,69 @@ pub fn do_assign(
                                     area2: globals.get(right).def_area.clone(),
                                 } )
                             }
+                            
+                            let enum_type = globals.custom_enums.map[id].clone();
+
+                            match variant {
+                                VariantType::Unit => {
+                                    match &enum_type.variants[variant_name] {
+                                        VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
+                                            expected: format!("tuple"),
+                                            found: format!("unit"),
+                                            variant_name: variant_name.clone(),
+                                            used: variant_area.clone(),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } )),
+                                        VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
+                                            expected: format!("struct"),
+                                            found: format!("unit"),
+                                            variant_name: variant_name.clone(),
+                                            used: variant_area.clone(),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } )),
+                                        VariantType::Unit => (),
+                                    }
+                                },
+                                VariantType::Tuple(_) => {
+                                    match &enum_type.variants[variant_name] {
+                                        VariantType::Unit => ret!(Err( RuntimeError::IncorrectVariantType {
+                                            expected: format!("unit"),
+                                            found: format!("tuple"),
+                                            variant_name: variant_name.clone(),
+                                            used: variant_area.clone(),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } )),
+                                        VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
+                                            expected: format!("struct"),
+                                            found: format!("tuple"),
+                                            variant_name: variant_name.clone(),
+                                            used: variant_area.clone(),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } )),
+                                        VariantType::Tuple(_) => (),
+                                    }
+                                },
+                                VariantType::Struct { .. } => {
+                                    match &enum_type.variants[variant_name] {
+                                        VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
+                                            expected: format!("tuple"),
+                                            found: format!("struct"),
+                                            variant_name: variant_name.clone(),
+                                            used: variant_area.clone(),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } )),
+                                        VariantType::Unit { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
+                                            expected: format!("unit"),
+                                            found: format!("struct"),
+                                            variant_name: variant_name.clone(),
+                                            used: variant_area.clone(),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } )),
+                                        VariantType::Struct { .. } => (),
+                                    }
+                                },
+                            }
+
 
                             match variant {
                                 VariantType::Unit => {
@@ -1483,6 +1549,7 @@ pub fn execute(
                             },
                             Err(e) => {
                                 if e.is_destructure_error() {
+                                    globals.protected.push(globals.backup_protector.clone().unwrap());
                                     continue;
                                 } else {
                                     ret!(Err( e ))
@@ -2373,6 +2440,7 @@ pub fn execute(
         },
         NodeType::MCCall { base } => {
             let base_id = protecute!(base => scope_id);
+            println!("aaa");
             
             match &globals.get(base_id).value.clone() {
 

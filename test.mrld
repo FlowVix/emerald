@@ -3,7 +3,7 @@
 
 
 enum Test {
-    It,
+    It(),
     Fucking { a: number, bruh: string },
     WorksOmg (number, any),
 }
@@ -11,7 +11,7 @@ enum Test {
 
 func shit(v) {
     match v {
-        case Test:It -> {
+        case Test:It() -> {
             print("its the it thing");
         },
         case Test:WorksOmg (a, b) -> {
@@ -23,8 +23,8 @@ func shit(v) {
     }
 }
 
-let a = Test:It;
-let b = Test:Fucking {a: 56, bruh: "ass"};
+let a = Test:It();
+let b = Test:Fucking {c: 56, bruh: "ass"};
 let c = Test:WorksOmg (3, string);
 
 shit(a);
