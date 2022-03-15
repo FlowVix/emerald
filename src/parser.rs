@@ -56,7 +56,11 @@ pub enum NodeType {
         field_areas: HashMap<String, CodeArea>,
         def_area: CodeArea
     },
-    StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, ASTNode> },
+    StructInstance {
+        base: Box<ASTNode>,
+        field_areas: HashMap<String, CodeArea>,
+        fields: HashMap<String, ASTNode>
+    },
 
     Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
     Associated { base: Box<ASTNode>, assoc: String },
@@ -68,6 +72,12 @@ pub enum NodeType {
         variants: HashMap<String, VariantType>,
         variant_areas: HashMap<String, CodeArea>,
         def_area: CodeArea,
+    },
+    EnumInstance {
+        base: Box<ASTNode>,
+        variant_name: String,
+        variant_area: CodeArea,
+        variant: VariantType,
     },
 
     Export { name: String, value: Box<ASTNode> },
@@ -1117,7 +1127,7 @@ fn parse_value(
     parse!(parse_unit => let mut value);
     let start = value.span;
 
-    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon | Token::ExclMark) {
+    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon | Token::ExclMark | Token::Colon) {
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
@@ -1228,6 +1238,96 @@ fn parse_value(
                     },
                     span: ( start.0, span!(-1).1 )
                 }
+            },
+            Token::Colon => {
+                pos += 1;
+                check_tok!(Ident(name) else "variant name");
+                let variant_area = CodeArea {
+                    source: info.source.clone(),
+                    range: span!(-1),
+                };
+
+                match tok!(0) {
+                    Token::LParen => {
+                        pos += 1;
+                        let mut elements = vec![];
+                        while_tok!(!= RParen: {
+                            parse!(parse_expr(false) => let arg);
+                            elements.push(arg);
+                            if !matches!(tok!(0), Token::RParen | Token::Comma) {
+                                expected_err!(") or ,", tok!(0), span!(0), info )
+                            }
+                            skip_tok!(Comma);
+                        });
+                        value = ASTNode {
+                            node: NodeType::EnumInstance {
+                                base: Box::new(value),
+                                variant_name: name,
+                                variant: VariantType::Tuple(elements),
+                                variant_area,
+                            },
+                            span: ( start.0, span!(-1).1 )
+                        }
+                    }
+                    Token::LBracket => {
+                        pos += 1;
+
+                        let mut fields = HashMap::new();
+                        let mut areas: HashMap<String, CodeArea> = HashMap::new();
+                        while_tok!(!= RBracket: {
+                            check_tok!(Ident(field) else "field name");
+                            let last_area = CodeArea {
+                                source: info.source.clone(),
+                                range: span!(-1),
+                            };
+                            if fields.contains_key(&field) {
+                                return Err( SyntaxError::DuplicateFieldStructVariant {
+                                    first_used: areas[&field].clone(),
+                                    field_name: field,
+                                    used_again: last_area,
+                                } )
+                            }
+                            areas.insert(field.clone(), last_area);
+                            let mut value = ASTNode {
+                                node: NodeType::Var {
+                                    var_name: field.clone(),
+                                },
+                                span: span!(-1),
+                            };
+                            if_tok!(== Colon: {
+                                pos += 1;
+                                parse!(parse_expr(false) => value);
+                            });
+
+                            fields.insert(field, value);
+                            if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                                expected_err!("} or ,", tok!(0), span!(0), info )
+                            }
+                            skip_tok!(Comma);
+                        });
+                        value = ASTNode {
+                            node: NodeType::EnumInstance {
+                                base: Box::new(value),
+                                variant_name: name,
+                                variant: VariantType::Struct { fields, field_areas: areas },
+                                variant_area,
+                            },
+                            span: ( start.0, span!(-1).1 )
+                        }
+                    }
+                    _ => {
+                        value = ASTNode {
+                            node: NodeType::EnumInstance {
+                                base: Box::new(value),
+                                variant_name: name,
+                                variant: VariantType::Unit,
+                                variant_area,
+                            },
+                            span: ( start.0, span!(-1).1 )
+                        }
+                    }
+                }
+
             },
             _ => unreachable!(),
         }

@@ -123,6 +123,9 @@ pub enum RuntimeError {
     InstanceNonStruct {
         area: CodeArea,
     },
+    InstanceNonEnum {
+        area: CodeArea,
+    },
     TypeArgCount {
         provided: usize,
         call_area: CodeArea,
@@ -174,6 +177,37 @@ pub enum RuntimeError {
         name: String,
         area1: CodeArea,
         area2: CodeArea,
+    },
+    NonexistentVariant {
+        variant_name: String,
+        used: CodeArea,
+        enum_def: CodeArea,
+    },
+    IncorrectVariantType {
+        variant_name: String,
+        expected: String,
+        found: String,
+        used: CodeArea,
+        variant_def: CodeArea,
+    },
+    TupleVariantNotEnoughArguments {
+        variant_name: String,
+        expected: usize,
+        found: usize,
+        used: CodeArea,
+        variant_def: CodeArea,
+    },
+    NoStructVariantField {
+        field_name: String,
+        variant_name: String,
+        used: CodeArea,
+        variant_def: CodeArea,
+    },
+    MissingStructVariantFields {
+        fields: Vec<String>,
+        variant_name: String,
+        area: CodeArea,
+        variant_def: CodeArea,
     },
 }
 
@@ -602,6 +636,16 @@ impl ToReport for RuntimeError {
                 ],
                 note: None,
             },
+            RuntimeError::InstanceNonEnum {
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("Can't instance variant of non-enum"),
+                labels: vec![
+                    (area.clone(), format!("This isn't an enum type"))
+                ],
+                note: None,
+            },
             RuntimeError::TypeArgCount {
                 provided,
                 call_area,
@@ -733,6 +777,79 @@ impl ToReport for RuntimeError {
                 labels: vec![
                     (area1.clone(), format!("Tried to destructure into {} {} here", what, name.fg(a))),
                     (area2.clone(), format!("{} {} not found here", what, name.fg(b))),
+                ],
+                note: None,
+            },
+            RuntimeError::NonexistentVariant {
+                variant_name,
+                used,
+                enum_def,
+            } => ErrorReport {
+                source: used.clone(),
+                message: format!("Nonexistent enum variant {}", variant_name),
+                labels: vec![
+                    (used.clone(), format!("Variant name used here")),
+                    (enum_def.clone(), format!("Enum defined here")),
+                ],
+                note: None,
+            },
+            RuntimeError::IncorrectVariantType {
+                variant_name,
+                expected,
+                found,
+                used,
+                variant_def,
+            } => ErrorReport {
+                source: used.clone(),
+                message: format!("Wrong enum variant type"),
+                labels: vec![
+                    (used.clone(), format!("Expected {} variant, found {} variant", expected.fg(a), found.fg(b))),
+                    (variant_def.clone(), format!("Variant {} defined as {} type here", variant_name.fg(colors.next()), expected.fg(colors.next()))),
+                ],
+                note: None,
+            },
+            RuntimeError::TupleVariantNotEnoughArguments {
+                variant_name,
+                expected,
+                found,
+                used,
+                variant_def,
+            } => ErrorReport {
+                source: used.clone(),
+                message: format!("{} arguments provided, but tuple variant expects {}", found, expected),
+                labels: vec![
+                    (used.clone(), format!("Found {} arguments here", found.fg(a))),
+                    (variant_def.clone(), format!("Tuple variant {} defined as taking {} arguments here", variant_name.fg(b), expected.fg(colors.next()))),
+                ],
+                note: None,
+            },
+            RuntimeError::NoStructVariantField {
+                variant_name,
+                field_name,
+                used,
+                variant_def,
+            } => ErrorReport {
+                source: used.clone(),
+                message: format!("Nonexistent struct variant field {}", field_name),
+                labels: vec![
+                    (used.clone(), format!("Field name used here")),
+                    (variant_def.clone(), format!("Variant {} defined here", variant_name.fg(a))),
+                ],
+                note: None,
+            },
+            RuntimeError::MissingStructVariantFields {
+                fields,
+                variant_name,
+                area,
+                variant_def,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("Missing struct variant fields"),
+                labels: vec![
+                    (area.clone(), format!("Missing struct fields {} here", fields.iter().map(
+                        |f| format!("{}", f.fg(colors.next()))
+                    ).collect::<Vec<String>>().join(", "))),
+                    (variant_def.clone(), format!("Struct variant {} defined here", variant_name.fg(a))),
                 ],
                 note: None,
             },

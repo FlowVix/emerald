@@ -119,8 +119,24 @@ pub enum Value {
 
     McVector(McVector),
 
-    StructInstance { struct_id: TypePos, fields: HashMap<String, ValuePos> },
+    StructInstance {
+        struct_id: TypePos,
+        fields: HashMap<String, ValuePos>
+    },
+    EnumInstance {
+        enum_id: TypePos,
+        variant_name: String,
+        variant: InstanceVariant,
+    }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstanceVariant {
+    Unit,
+    Tuple(Vec<ValuePos>),
+    Struct { fields: HashMap<String, ValuePos> }
+}
+
 
 impl Value {
 
@@ -143,6 +159,7 @@ impl Value {
             Value::McVector(_) => ValueType::Builtin(BuiltinType::McVector),
 
             Value::StructInstance { struct_id, .. } => ValueType::CustomStruct(*struct_id),
+            Value::EnumInstance { enum_id, .. } => ValueType::CustomEnum(*enum_id),
         }
     }
 
@@ -216,6 +233,42 @@ impl Value {
                 visited.pop();
                 format!("{}::{}", name, out_str)
             },
+            Value::EnumInstance {
+                enum_id,
+                variant_name,
+                variant
+            } => {
+                let name = match &globals.custom_enums.map[enum_id] {
+                    CustomEnum { name, .. } => name,
+                };
+
+                match variant {
+                    InstanceVariant::Unit => format!("{}:{}", name, variant_name),
+                    InstanceVariant::Tuple(arr) => {
+                        if visited.contains(&self) {
+                            return format!("{}:{} (...)", name, variant_name)
+                        }
+                        visited.push( self );
+                        let out_str = "(".to_string() + &arr.into_iter().map(
+                            |i| globals.get(*i).value.to_str(globals, visited)
+                        ).collect::<Vec<String>>().join(", ") + ")";
+                        visited.pop();
+                        format!("{}:{} {}", name, variant_name, out_str)
+                    },
+                    InstanceVariant::Struct { fields } => {
+                        if visited.contains(&self) {
+                            return format!("{}:{} {{...}} ", name, variant_name)
+                        }
+                        visited.push( self );
+                        let out_str = "{".to_string() + &fields.into_iter().map(
+                            |(k, v)| format!("{}: {}", k, globals.get(*v).value.to_str(globals, visited))
+                        ).collect::<Vec<String>>().join(", ") + "}";
+                        visited.pop();
+                        format!("{}:{} {}", name, variant_name, out_str)
+                    },
+                }
+
+            }
             Value::Pattern(p) => p.to_str(globals),
             Value::Range(Range { start, end, step }) => 
                 format!("{}..{}", start, end) + &(if *step != 1 {format!("..{}", step)} else {"".to_string() }),
@@ -296,6 +349,23 @@ impl Value {
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
             },
+            Value::EnumInstance { variant, .. } => {
+                match variant {
+                    InstanceVariant::Unit => (),
+                    InstanceVariant::Tuple(arr) => {
+                        for i in arr {
+                            values.insert(*i);
+                            globals.get(*i).value.get_references(globals, values, scopes);
+                        }
+                    },
+                    InstanceVariant::Struct { fields } => {
+                        for (_, i) in fields {
+                            values.insert(*i);
+                            globals.get(*i).value.get_references(globals, values, scopes);
+                        }
+                    },
+                }
+            }
             _ => (),
         }
     }

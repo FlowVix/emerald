@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io};
 use convert_case::{Case, Casing};
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -37,6 +37,7 @@ pub struct CustomStruct {
 }
 
 
+#[derive(Debug, Clone)]
 pub struct CustomEnum {
     pub name: String,
     pub variants: HashMap<String, VariantType>,
@@ -1737,7 +1738,7 @@ pub fn execute(
                     }
                     for (k, v) in &id_map {
                         let typ = protecute!(&struct_type.fields[k].0 => struct_type.def_scope);
-                        let result = value_ops::is_op_raw(&globals.get(*v).clone(), &globals.get(typ).clone(), area!(source.clone(), node.span), globals)?;
+                        let result = value_ops::is_op_raw(&globals.get(*v).clone(), &globals.get(typ).clone(), area!(source.clone(), struct_type.fields[k].0.span), globals)?;
                         if !result {
                             ret!(Err( RuntimeError::PatternMismatch {
                                 typ: globals.get(*v).value.type_str(globals),
@@ -1751,15 +1752,15 @@ pub fn execute(
                             } ))
                         }
                     }
-                    if id_map.len() != globals.custom_structs.map[id].fields.len() {
+                    if id_map.len() != struct_type.fields.len() {
                         let mut missing = vec![];
-                        for (k, _) in &globals.custom_structs.map[id].fields {
+                        for (k, _) in &struct_type.fields {
                             if !id_map.contains_key(k) { missing.push(k.clone()) }
                         }
                         ret!(Err( RuntimeError::MissingStructFields {
                             fields: missing,
                             area: area!(source.clone(), start_node.span),
-                            struct_def: globals.custom_structs.map[id].def_area.clone(),
+                            struct_def: struct_type.def_area.clone(),
                         } ))
                     }
                     Ok( globals.insert_value(
@@ -1768,6 +1769,201 @@ pub fn execute(
                     ) )
                 },
                 _ => ret!(Err( RuntimeError::InstanceNonStruct {
+                    area: area!(source.clone(), base.span),
+                } ))
+            }
+        }
+        NodeType::EnumInstance {
+            base,
+            variant_name,
+            variant,
+            variant_area,
+        }  => {
+            let base_id = protecute!(base => scope_id);
+            match &globals.get(base_id).value.clone() {
+                Value::Type(ValueType::CustomEnum(id)) => {
+                    let enum_type = globals.custom_enums.map[id].clone();
+
+                    if !enum_type.variants.contains_key(variant_name) {
+                        ret!(Err( RuntimeError::NonexistentVariant {
+                            variant_name: variant_name.clone(),
+                            used: variant_area.clone(),
+                            enum_def: enum_type.def_area.clone(),
+                        } ))
+                    }
+                    
+
+                    match variant {
+                        VariantType::Unit => {
+                            match &enum_type.variants[variant_name] {
+                                VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
+                                    expected: format!("tuple"),
+                                    found: format!("unit"),
+                                    variant_name: variant_name.clone(),
+                                    used: variant_area.clone(),
+                                    variant_def: enum_type.variant_areas[variant_name].clone(),
+                                } )),
+                                VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
+                                    expected: format!("struct"),
+                                    found: format!("unit"),
+                                    variant_name: variant_name.clone(),
+                                    used: variant_area.clone(),
+                                    variant_def: enum_type.variant_areas[variant_name].clone(),
+                                } )),
+                                VariantType::Unit => {
+                                    Ok( globals.insert_value(
+                                        Value::EnumInstance {
+                                            enum_id: *id,
+                                            variant_name: variant_name.clone(),
+                                            variant: InstanceVariant::Unit,
+                                        },
+                                        area!(source.clone(), start_node.span)
+                                    ) )
+                                },
+                            }
+                        },
+                        VariantType::Tuple(values) => {
+                            match &enum_type.variants[variant_name] {
+                                VariantType::Unit => ret!(Err( RuntimeError::IncorrectVariantType {
+                                    expected: format!("unit"),
+                                    found: format!("tuple"),
+                                    variant_name: variant_name.clone(),
+                                    used: variant_area.clone(),
+                                    variant_def: enum_type.variant_areas[variant_name].clone(),
+                                } )),
+                                VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
+                                    expected: format!("struct"),
+                                    found: format!("tuple"),
+                                    variant_name: variant_name.clone(),
+                                    used: variant_area.clone(),
+                                    variant_def: enum_type.variant_areas[variant_name].clone(),
+                                } )),
+                                VariantType::Tuple(types) => {
+
+                                    if types.len() != values.len() {
+                                        ret!(Err( RuntimeError::TupleVariantNotEnoughArguments {
+                                            expected: types.len(),
+                                            found: values.len(),
+                                            variant_name: variant_name.clone(),
+                                            used: area!(source.clone(), start_node.span),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } ))
+                                    }
+
+                                    let mut elems = vec![];
+
+                                    for (v, t) in values.iter().zip(types) {
+                                        let type_id = protecute!(t => enum_type.def_scope);
+                                        let value_id = protecute!(v => scope_id);
+
+                                        let result = value_ops::is_op_raw(&globals.get(value_id).clone(), &globals.get(type_id).clone(), area!(source.clone(), t.span), globals)?;
+                                        if !result {
+                                            ret!(Err( RuntimeError::PatternMismatch {
+                                                typ: globals.get(value_id).value.type_str(globals),
+                                                pattern: match &globals.get(type_id).value {
+                                                    Value::Type(t) => t.to_str(globals),
+                                                    Value::Pattern(p) => p.to_str(globals),
+                                                    _ => unreachable!(),
+                                                },
+                                                pattern_area: area!(source.clone(), t.span),
+                                                type_area: globals.get(value_id).def_area.clone(),
+                                            } ))
+                                        }
+
+                                        elems.push(value_id);
+                                    }
+
+                                    Ok( globals.insert_value(
+                                        Value::EnumInstance {
+                                            enum_id: *id,
+                                            variant_name: variant_name.clone(),
+                                            variant: InstanceVariant::Tuple(elems),
+                                        },
+                                        area!(source.clone(), start_node.span)
+                                    ) )
+                                },
+                            }
+                        },
+                        VariantType::Struct {
+                            fields,
+                            field_areas,
+                        } => {
+                            match &enum_type.variants[variant_name] {
+                                VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
+                                    expected: format!("tuple"),
+                                    found: format!("struct"),
+                                    variant_name: variant_name.clone(),
+                                    used: variant_area.clone(),
+                                    variant_def: enum_type.variant_areas[variant_name].clone(),
+                                } )),
+                                VariantType::Unit { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
+                                    expected: format!("unit"),
+                                    found: format!("struct"),
+                                    variant_name: variant_name.clone(),
+                                    used: variant_area.clone(),
+                                    variant_def: enum_type.variant_areas[variant_name].clone(),
+                                } )),
+                                VariantType::Struct {
+                                    fields: field_types,
+                                    field_areas: field_type_areas,
+                                } => {
+                                    let mut id_map = HashMap::new();
+
+                                    for (k, v) in fields {
+                                        if !field_types.contains_key(k) {
+                                            ret!(Err( RuntimeError::NoStructVariantField {
+                                                variant_name: variant_name.clone(),
+                                                field_name: k.clone(),
+                                                used: field_areas[k].clone(),
+                                                variant_def: enum_type.variant_areas[variant_name].clone(),
+                                            } ))
+                                        }
+                                        let id = protecute!(v => scope_id);
+                                        id_map.insert( k.clone(), id );
+                                    }
+
+                                    for (k, v) in &id_map {
+                                        let typ = protecute!(&field_types[k] => enum_type.def_scope);
+                                        let result = value_ops::is_op_raw(&globals.get(*v).clone(), &globals.get(typ).clone(), area!(source.clone(), field_types[k].span), globals)?;
+                                        if !result {
+                                            ret!(Err( RuntimeError::PatternMismatch {
+                                                typ: globals.get(*v).value.type_str(globals),
+                                                pattern: match &globals.get(typ).value {
+                                                    Value::Type(t) => t.to_str(globals),
+                                                    Value::Pattern(p) => p.to_str(globals),
+                                                    _ => unreachable!(),
+                                                },
+                                                pattern_area: area!(source.clone(), field_types[k].span),
+                                                type_area: globals.get(*v).def_area.clone(),
+                                            } ))
+                                        }
+                                    }
+                                    if id_map.len() != field_types.len() {
+                                        let mut missing = vec![];
+                                        for (k, _) in field_types {
+                                            if !id_map.contains_key(k) { missing.push(k.clone()) }
+                                        }
+                                        ret!(Err( RuntimeError::MissingStructVariantFields {
+                                            fields: missing,
+                                            variant_name: variant_name.clone(),
+                                            area: area!(source.clone(), start_node.span),
+                                            variant_def: enum_type.variant_areas[variant_name].clone(),
+                                        } ))
+                                    }
+                                    Ok( globals.insert_value(
+                                        Value::EnumInstance {
+                                            enum_id: *id,
+                                            variant_name: variant_name.clone(),
+                                            variant: InstanceVariant::Struct{ fields: id_map },
+                                        },
+                                        area!(source.clone(), start_node.span)
+                                    ) )
+                                },
+                            }
+                        },
+                    }
+                },
+                _ => ret!(Err( RuntimeError::InstanceNonEnum {
                     area: area!(source.clone(), base.span),
                 } ))
             }
@@ -2184,7 +2380,6 @@ pub fn execute(
             };
             Ok( val_id )
         },
-        _ => todo!(),
     };
 
     globals.pop_protected();

@@ -3,18 +3,20 @@
 
 
 enum Test {
-    UnitType,
-    StructType {a: number, bruh: string},
-    TupleType (number, any),
+    It,
+    Fucking { a: number, bruh: string },
+    WorksOmg (number, any),
 }
 
-impl Test {
-    thing: () => print("aaa"),
-}
 
-print(Test(3));
+let a = Test:It;
+let b = Test:Fucking { a: 3, bruh: "shit" };
+let c = Test:WorksOmg (3, true);
 
 
-match bruh {
-    case [a, b, c] -> 
-}
+print(a);
+print(b);
+print(c);
+
+
+
