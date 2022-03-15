@@ -296,7 +296,7 @@ builtins!{
     }
     [Impls]: impls(@Any => poopie) {
         println!("builtin impls: {:#?}", globals.builtin_impls);
-        println!("impls: {:#?}", globals.impls);
+        println!("impls: {:#?}", globals.struct_impls);
         Value::Null
 
     }

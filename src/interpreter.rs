@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io};
 use convert_case::{Case, Casing};
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector}, parser::{ASTNode, NodeType, BlockType, MatchArm}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -30,10 +30,21 @@ pub struct StoredValue {
 #[derive(Debug, Clone)]
 pub struct CustomStruct {
     pub name: String,
-    pub fields: HashMap<String, (ValuePos, Option<ValuePos>)>,
+    pub fields: HashMap<String, (ASTNode, Option<ASTNode>)>,
     pub field_areas: HashMap<String, CodeArea>,
     pub def_area: CodeArea,
+    pub def_scope: ScopePos,
 }
+
+
+pub struct CustomEnum {
+    pub name: String,
+    pub variants: HashMap<String, VariantType>,
+    pub variant_areas: HashMap<String, CodeArea>,
+    pub def_area: CodeArea,
+    pub def_scope: ScopePos,
+}
+
 
 
 #[derive(Debug, Clone)]
@@ -105,15 +116,18 @@ pub struct Register<K, V> {
 pub struct Globals {
     pub values: Register<ValuePos, StoredValue>,
     pub scopes: Register<ScopePos, Scope>,
+
     pub custom_structs: Register<TypePos, CustomStruct>,
+    pub custom_enums: Register<TypePos, CustomEnum>,
 
 
 
     pub last_amount: usize,
     pub protected: Vec<Protector>,
 
-    pub impls: HashMap<TypePos, ImplData>,
     pub builtin_impls: HashMap<BuiltinType, ImplData>,
+    pub struct_impls: HashMap<TypePos, ImplData>,
+    pub enum_impls: HashMap<TypePos, ImplData>,
 
     
     pub exits: Vec<Exit>,
@@ -156,10 +170,15 @@ impl Globals {
                 map: HashMap::new(),
                 counter: 0,
             },
+            custom_enums: Register {
+                map: HashMap::new(),
+                counter: 0,
+            },
             last_amount: 0,
             protected: vec![],
             // custom_types: vec![],
-            impls: HashMap::new(),
+            struct_impls: HashMap::new(),
+            enum_impls: HashMap::new(),
             builtin_impls: HashMap::new(),
             exits: vec![],
             trace: vec![],
@@ -222,6 +241,15 @@ impl Globals {
         self.custom_structs.counter += 1;
         self.custom_structs.map.insert( self.custom_structs.counter, typ );
         self.custom_structs.counter
+    }
+
+    pub fn new_enum(
+        &mut self,
+        typ: CustomEnum,
+    ) -> ValuePos {
+        self.custom_enums.counter += 1;
+        self.custom_enums.map.insert( self.custom_enums.counter, typ );
+        self.custom_enums.counter
     }
 
 
@@ -396,15 +424,23 @@ impl Globals {
         }
 
         for (_, s) in &self.custom_structs.map {
-            for (_, (t, d)) in &s.fields {
-                self.mark_value(*t, &mut collector);
-                if let Some(d) = d {
-                    self.mark_value(*d, &mut collector);
-                }
+            // for (_, (t, d)) in &s.fields {
+            //     self.mark_value(*t, &mut collector);
+            //     if let Some(d) = d {
+            //         self.mark_value(*d, &mut collector);
+            //     }
+            // }
+            if collector.marked_scopes.contains(&s.def_scope) {
+                self.mark_scope(s.def_scope, &mut collector);
             }
         }
 
-        for (_, ImplData { members, .. }) in &self.impls {
+        for (_, ImplData { members, .. }) in &self.struct_impls {
+            for (_, v) in members {
+                self.mark_value(*v, &mut collector);
+            }
+        }
+        for (_, ImplData { members, .. }) in &self.enum_impls {
             for (_, v) in members {
                 self.mark_value(*v, &mut collector);
             }
@@ -476,7 +512,8 @@ impl Globals {
     pub fn get_impl_data(&self, id: ValuePos) -> Option<&ImplData> {
         match self.get(id).value.typ() {
             ValueType::Builtin(b) => self.builtin_impls.get(&b),
-            ValueType::CustomStruct(id) => self.impls.get(&id),
+            ValueType::CustomStruct(id) => self.struct_impls.get(&id),
+            ValueType::CustomEnum(id) => self.enum_impls.get(&id),
         }
     }
 
@@ -1556,7 +1593,8 @@ pub fn execute(
             let typ = globals.get(base_id).value.typ();
             if let Some(data) = match typ {
                 ValueType::Builtin(b) => globals.builtin_impls.get(&b),
-                ValueType::CustomStruct(id) => globals.impls.get(&id),
+                ValueType::CustomStruct(id) => globals.struct_impls.get(&id),
+                ValueType::CustomEnum(id) => globals.enum_impls.get(&id),
             } {
                 if data.methods.contains(member) {
                     let func = *data.members.get(member).unwrap();
@@ -1638,32 +1676,38 @@ pub fn execute(
             Ok( clone!(ret_value => @) )
         }
         NodeType::StructDef { struct_name, fields, field_areas, def_area } => {
-            let mut fields_exec = HashMap::new();
-
-            for (k, (t, d)) in fields {
-                let _t = protecute!(t => scope_id);
-                let t = proteclone!( _t => area!(source.clone(), t.span) );
-                let d = if let Some(n) = d {
-                    let temp = protecute!(n => scope_id);
-                    Some(temp)
-                } else { None };
-                fields_exec.insert(
-                    k.clone(),
-                    (t, d)
-                );
-            }
-
             let type_id = globals.new_struct( CustomStruct {
                 name: struct_name.clone(),
-                fields: fields_exec,
+                fields: fields.clone(),
                 def_area: def_area.clone(),
                 field_areas: field_areas.clone(),
+                def_scope: scope_id,
             });
             let value_id = globals.insert_value(
                 Value::Type(ValueType::CustomStruct(type_id)),
                 area!(source.clone(), start_node.span)
             );
             globals.set_var(scope_id, struct_name.to_string(), value_id);
+            Ok( value_id )
+        }
+        NodeType::EnumDef {
+            enum_name,
+            variants,
+            variant_areas,
+            def_area,
+        } => {
+            let type_id = globals.new_enum( CustomEnum {
+                name: enum_name.clone(),
+                variants: variants.clone(),
+                def_area: def_area.clone(),
+                variant_areas: variant_areas.clone(),
+                def_scope: scope_id,
+            });
+            let value_id = globals.insert_value(
+                Value::Type(ValueType::CustomEnum(type_id)),
+                area!(source.clone(), start_node.span)
+            );
+            globals.set_var(scope_id, enum_name.to_string(), value_id);
             Ok( value_id )
         }
         NodeType::StructInstance { fields, base, field_areas } => {
@@ -1676,7 +1720,7 @@ pub fn execute(
 
                     for (f, (_, d)) in struct_type.fields.clone() {
                         match d {
-                            Some(v) => { id_map.insert(f.clone(), v); },
+                            Some(v) => { id_map.insert(f.clone(), protecute!(&v => struct_type.def_scope)); },
                             None => (),
                         }
                     }
@@ -1692,7 +1736,7 @@ pub fn execute(
                         id_map.insert( k.clone(), id );
                     }
                     for (k, v) in &id_map {
-                        let typ = struct_type.fields[k].0;
+                        let typ = protecute!(&struct_type.fields[k].0 => struct_type.def_scope);
                         let result = value_ops::is_op_raw(&globals.get(*v).clone(), &globals.get(typ).clone(), area!(source.clone(), node.span), globals)?;
                         if !result {
                             ret!(Err( RuntimeError::PatternMismatch {
@@ -1702,7 +1746,7 @@ pub fn execute(
                                     Value::Pattern(p) => p.to_str(globals),
                                     _ => unreachable!(),
                                 },
-                                pattern_area: globals.get(typ).def_area.clone(),
+                                pattern_area: area!(source.clone(), struct_type.fields[k].0.span),
                                 type_area: globals.get(*v).def_area.clone(),
                             } ))
                         }
@@ -1744,14 +1788,6 @@ pub fn execute(
                                         for (k, v) in fields {
                                             let temp = protecute!(v => scope_id);
                                             globals.builtin_impls.get_mut(b).unwrap().members.insert( k.clone(), temp );
-                                            // if let ASTNode {
-                                            //     node: NodeType::Lambda { args, .. },
-                                            //     ..
-                                            // } = v.clone() {
-                                            //     if let Some((s, _, _)) = args.get(0) {
-                                            //         if s == "self" { globals.builtin_impls.get_mut(b).unwrap().methods.push(k.clone()) }
-                                            //     }
-                                            // }
                                             if let Value::Function(
                                                 Function { args, .. }
                                             ) = globals.get(temp).value.clone() {
@@ -1763,17 +1799,34 @@ pub fn execute(
                                         // globals.builtin_impls.get_mut(b).unwrap().members.insert(k, v)
                                     },
                                     ValueType::CustomStruct(id) => {
-                                        if !globals.impls.contains_key(id) {
-                                            globals.impls.insert(*id, ImplData::new());
+                                        if !globals.struct_impls.contains_key(id) {
+                                            globals.struct_impls.insert(*id, ImplData::new());
                                         }
                                         for (k, v) in fields {
                                             let temp = protecute!(v => scope_id);
-                                            globals.impls.get_mut(id).unwrap().members.insert( k.clone(), temp );
+                                            globals.struct_impls.get_mut(id).unwrap().members.insert( k.clone(), temp );
                                             if let Value::Function(
                                                 Function { args, .. }
                                             ) = globals.get(temp).value.clone() {
                                                 if let Some((s, _, _)) = args.get(0) {
-                                                    if s == "self" { globals.impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                    if s == "self" { globals.struct_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                }
+                                            }
+                                        }
+                                        // globals.builtin_impls.get_mut(b).unwrap().members.insert(k, v)
+                                    },
+                                    ValueType::CustomEnum(id) => {
+                                        if !globals.enum_impls.contains_key(id) {
+                                            globals.enum_impls.insert(*id, ImplData::new());
+                                        }
+                                        for (k, v) in fields {
+                                            let temp = protecute!(v => scope_id);
+                                            globals.enum_impls.get_mut(id).unwrap().members.insert( k.clone(), temp );
+                                            if let Value::Function(
+                                                Function { args, .. }
+                                            ) = globals.get(temp).value.clone() {
+                                                if let Some((s, _, _)) = args.get(0) {
+                                                    if s == "self" { globals.enum_impls.get_mut(id).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -1815,7 +1868,8 @@ pub fn execute(
                 Value::Type(t) => {
                     let impld = match t {
                         ValueType::Builtin(b) => globals.builtin_impls.get(b).clone(),
-                        ValueType::CustomStruct(id) => globals.impls.get(id).clone(),
+                        ValueType::CustomStruct(id) => globals.struct_impls.get(id).clone(),
+                        ValueType::CustomEnum(id) => globals.enum_impls.get(id).clone(),
                     };
                     match impld {
                         None => Err( RuntimeError::NoAssociatedMember {
@@ -2130,6 +2184,7 @@ pub fn execute(
             };
             Ok( val_id )
         },
+        _ => todo!(),
     };
 
     globals.pop_protected();

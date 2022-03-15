@@ -49,12 +49,26 @@ pub enum NodeType {
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
     Continue,
-    StructDef { struct_name: String, fields: HashMap<String, (ASTNode, Option<Box<ASTNode>>)>, field_areas: HashMap<String, CodeArea>, def_area: CodeArea },
+
+    StructDef {
+        struct_name: String,
+        fields: HashMap<String, (ASTNode, Option<ASTNode>)>,
+        field_areas: HashMap<String, CodeArea>,
+        def_area: CodeArea
+    },
     StructInstance { base: Box<ASTNode>, field_areas: HashMap<String, CodeArea>, fields: HashMap<String, ASTNode> },
+
     Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
     Associated { base: Box<ASTNode>, assoc: String },
     
     Match {value: Box<ASTNode>, arms: Vec<(MatchArm, ASTNode)>},
+
+    EnumDef {
+        enum_name: String,
+        variants: HashMap<String, VariantType>,
+        variant_areas: HashMap<String, CodeArea>,
+        def_area: CodeArea,
+    },
 
     Export { name: String, value: Box<ASTNode> },
     Import { path: String },
@@ -71,6 +85,14 @@ pub enum MatchArm {
     Pattern(ASTNode),
     Structure(ASTNode),
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VariantType {
+    Unit,
+    Tuple(Vec<ASTNode>),
+    Struct { fields: HashMap<String, ASTNode>, field_areas: HashMap<String, CodeArea> }
+}
+
 
 
 // #[derive(Debug, Clone, PartialEq)]
@@ -425,10 +447,11 @@ pub fn parse_unit(
         Token::LParen => {
             pos += 1;
 
-            if_tok!(== RParen: {
+
+            if matches!(tok!(0), Token::RParen) && !matches!(tok!(1), Token::FatArrow) {
                 pos += 1;
                 ret!( NodeType::Tuple { elements: vec![] } => start.0, span!(-1).1 );
-            });
+            }
 
             let mut i = 0;
             let mut depth = 1;
@@ -829,7 +852,7 @@ pub fn parse_unit(
                 parse!(parse_expr(true) => let field_type);
                 if_tok!(== Assign: {
                     pos += 1;
-                    parse!(parse_expr(true) => let temp); default = Some(Box::new(temp));
+                    parse!(parse_expr(true) => let temp); default = Some(temp);
                 });
 
                 fields.insert(field, (field_type, default));
@@ -845,6 +868,91 @@ pub fn parse_unit(
             };
             // println!("{}: {:#?}", struct_name, fields);
             ret!( NodeType::StructDef { struct_name, fields, field_areas, def_area } => start.0, span!(-1).1 );
+        },
+        Token::Enum => {
+            pos += 1;
+            check_tok!(Ident(enum_name) else "enum name");
+            check_tok!(LBracket else "{");
+
+            let mut variants = HashMap::new();
+            let mut variant_areas: HashMap<String, CodeArea> = HashMap::new();
+
+            while_tok!(!= RBracket: {
+                check_tok!(Ident(name) else "variant name");
+                let last_area = CodeArea {
+                    source: info.source.clone(),
+                    range: span!(-1),
+                };
+                if variants.contains_key(&name) {
+                    return Err( SyntaxError::DuplicateEnumVariant {
+                        first_used: variant_areas[&name].clone(),
+                        variant_name: name,
+                        used_again: last_area,
+                    } )
+                }
+                variant_areas.insert(name.clone(), last_area);
+
+                match tok!(0) {
+                    Token::Comma => {
+                        variants.insert(name, VariantType::Unit);
+                    }
+                    Token::LParen => {
+                        pos += 1;
+                        let mut elements = vec![];
+                        while_tok!(!= RParen: {
+                            parse!(parse_expr(false) => let elem);
+                            elements.push( elem );
+                            if !matches!(tok!(0), Token::RParen | Token::Comma) {
+                                expected_err!(") or ,", tok!(0), span!(0), info )
+                            }
+                            skip_tok!(Comma);
+                        });
+                        variants.insert(name, VariantType::Tuple(elements));
+                    }
+                    Token::LBracket => {
+                        pos += 1;
+                        let mut fields = HashMap::new();
+                        let mut field_areas: HashMap<String, CodeArea> = HashMap::new();
+                        while_tok!(!= RBracket: {
+                            check_tok!(Ident(field) else "field name");
+                            let last_area = CodeArea {
+                                source: info.source.clone(),
+                                range: span!(-1),
+                            };
+                            if fields.contains_key(&field) {
+                                return Err( SyntaxError::DuplicateFieldStructVariant {
+                                    first_used: field_areas[&field].clone(),
+                                    field_name: field,
+                                    used_again: last_area,
+                                } )
+                            }
+                            field_areas.insert(field.clone(), last_area);
+                            check_tok!(Colon else ":");
+                            
+                            parse!(parse_expr(true) => let field_type);
+
+                            fields.insert(field, field_type);
+                            if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                                expected_err!("b } or ,", tok!(0), span!(0), info )
+                            }
+                            skip_tok!(Comma);
+                        });
+                        variants.insert(name, VariantType::Struct{ fields, field_areas } );
+                    }
+                    _ => (),
+                }
+                if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                    expected_err!("{, (, }, or ,", tok!(0), span!(0), info )
+                }
+                skip_tok!(Comma);
+            });
+
+            let def_area = CodeArea {
+                source: info.source.clone(),
+                range: (start.0, span!(-1).1),
+            };
+            // println!("{}: {:#?}", struct_name, fields);
+            ret!( NodeType::EnumDef { enum_name, variants, variant_areas, def_area } => start.0, span!(-1).1 );
         },
         Token::Import => {
             pos += 1;

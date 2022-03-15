@@ -31,6 +31,11 @@ pub enum SyntaxError {
         first_used: CodeArea,
         used_again: CodeArea,
     },
+    DuplicateFieldStructVariant {
+        field_name: String,
+        first_used: CodeArea,
+        used_again: CodeArea,
+    },
     DuplicateKey {
         key_name: String,
         first_used: CodeArea,
@@ -42,6 +47,11 @@ pub enum SyntaxError {
     VectorMismatch {
         in_rot: bool,
         area: CodeArea,
+    },
+    DuplicateEnumVariant {
+        variant_name: String,
+        first_used: CodeArea,
+        used_again: CodeArea,
     },
 }
 
@@ -335,6 +345,19 @@ impl ToReport for SyntaxError {
                 ],
                 note: None,
             },
+            SyntaxError::DuplicateFieldStructVariant {
+                field_name,
+                first_used,
+                used_again,
+            } => ErrorReport {
+                source: used_again.clone(),
+                message: format!("Duplicate field name '{}' in struct variant", field_name),
+                labels: vec![
+                    (first_used.clone(), format!("Field name first used here")),
+                    (used_again.clone(), format!("Used again here")),
+                ],
+                note: None,
+            },
             SyntaxError::DuplicateKey {
                 key_name,
                 first_used,
@@ -366,6 +389,19 @@ impl ToReport for SyntaxError {
                 message: (if *in_rot {"Cannot use caret coords in rotation"} else {"Cannot mix caret coords and relative/absolute coords"}).to_string(),
                 labels: vec![
                     (area.clone(), format!("Coord used here"))
+                ],
+                note: None,
+            },
+            SyntaxError::DuplicateEnumVariant {
+                variant_name,
+                first_used,
+                used_again,
+            } => ErrorReport {
+                source: used_again.clone(),
+                message: format!("Duplicate variant name '{}' in enum definition", variant_name),
+                labels: vec![
+                    (first_used.clone(), format!("Variant name first used here")),
+                    (used_again.clone(), format!("Used again here")),
                 ],
                 note: None,
             },

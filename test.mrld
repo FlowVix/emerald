@@ -1,21 +1,20 @@
 
 
 
-let thing = true;
-let other = 3;
 
-match [thing, other] {
-    case [false, a] -> print("the ", a),
-    case [true, a] -> print("wow ", a),
+enum Test {
+    UnitType,
+    StructType {a: number, bruh: string},
+    TupleType (number, any),
 }
 
-
-let thing = false;
-let other = 2;
-
-match [thing, other] {
-    case [false, a] -> print("the ", a),
-    case [true, a] -> print("wow ", a),
+impl Test {
+    thing: () => print("aaa"),
 }
 
+print(Test(3));
 
+
+match bruh {
+    case [a, b, c] -> 
+}

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
+use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
 
 
 
@@ -18,6 +18,7 @@ pub struct Function {
 pub enum ValueType {
     Builtin(BuiltinType),
     CustomStruct(TypePos),
+    CustomEnum(TypePos),
 }
 
 impl ValueType {
@@ -26,6 +27,9 @@ impl ValueType {
             ValueType::Builtin(b) => builtin_type_str(b.clone()),
             ValueType::CustomStruct(id) => match &globals.custom_structs.map[id] {
                 CustomStruct { name, .. } => name.to_string()
+            },
+            ValueType::CustomEnum(id) => match &globals.custom_enums.map[id] {
+                CustomEnum { name, .. } => name.to_string()
             },
         }
     }
@@ -192,6 +196,9 @@ impl Value {
                 ValueType::CustomStruct(pos) => match &globals.custom_structs.map[pos] {
                     CustomStruct { name, .. } => format!("<struct: {}>", name)
                 },
+                ValueType::CustomEnum(pos) => match &globals.custom_enums.map[pos] {
+                    CustomEnum { name, .. } => format!("<enum: {}>", name)
+                },
             },
             Value::StructInstance { struct_id, fields } => {
 
@@ -353,6 +360,7 @@ pub mod value_ops {
     pub fn convert(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n), Value::Type(ValueType::Builtin(BuiltinType::String))) => Ok(Value::String(n.to_string())),
+            (v, Value::Type(ValueType::Builtin(BuiltinType::Type))) => Ok(Value::Type(v.typ())),
 
             (value, Value::Type(t)) => {
                 if value.type_str(globals) == t.to_str(globals) {
