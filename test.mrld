@@ -9,14 +9,27 @@ enum Test {
 }
 
 
+func shit(v) {
+    match v {
+        case Test:It -> {
+            print("its the it thing");
+        },
+        case Test:WorksOmg (a, b) -> {
+            print("brooo works ", a, " ", b);
+        },
+        case Test:Fucking {a, bruh: lol} -> {
+            print("fucking ", a, " ", lol);
+        }
+    }
+}
+
 let a = Test:It;
-let b = Test:Fucking { a: 3, bruh: "shit" };
-let c = Test:WorksOmg (3, true);
+let b = Test:Fucking {a: 56, bruh: "ass"};
+let c = Test:WorksOmg (3, string);
 
-
-print(a);
-print(b);
-print(c);
+shit(a);
+shit(b);
+shit(c);
 
 
 

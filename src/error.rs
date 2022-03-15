@@ -209,6 +209,18 @@ pub enum RuntimeError {
         area: CodeArea,
         variant_def: CodeArea,
     },
+    DestructureVariantMismatch {
+        tried: String,
+        found: String,
+        area1: CodeArea,
+        area2: CodeArea,
+    },
+    DestructureIncorrectVariantType {
+        expected: String,
+        found: String,
+        expected_area: CodeArea,
+        found_area: CodeArea,
+    },
 }
 
 
@@ -853,6 +865,34 @@ impl ToReport for RuntimeError {
                 ],
                 note: None,
             },
+            RuntimeError::DestructureVariantMismatch {
+                tried,
+                found,
+                area1,
+                area2,
+            } => ErrorReport {
+                source: area2.clone(),
+                message: format!("Cannot destructure enum variant {} into variant {}", found, tried),
+                labels: vec![
+                    (area1.clone(), format!("Tried to destructure enum variant {} here", tried.fg(a))),
+                    (area2.clone(), format!("Found variant {} here", found.fg(b))),
+                ],
+                note: None,
+            },
+            RuntimeError::DestructureIncorrectVariantType {
+                expected,
+                found,
+                expected_area,
+                found_area,
+            } => ErrorReport {
+                source: found_area.clone(),
+                message: format!("Wrong enum variant type to destructure"),
+                labels: vec![
+                    (expected_area.clone(), format!("Tried to destructure into {} variant here", expected.fg(a))),
+                    (found_area.clone(), format!("Found {} variant here", found.fg(b))),
+                ],
+                note: None,
+            },
         }
     }
 }
@@ -863,7 +903,9 @@ impl RuntimeError {
         match self {
             RuntimeError::EqualAssertionFailed { .. } |
             RuntimeError::DestructureTypeMismatch { .. } |
+            RuntimeError::DestructureVariantMismatch { .. } |
             RuntimeError::DestructureLengthMismatch { .. } |
+            RuntimeError::DestructureIncorrectVariantType { .. } |
             RuntimeError::DestructureNonExistentKeyField { .. } => true,
             _ => false,
         }

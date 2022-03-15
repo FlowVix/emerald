@@ -801,32 +801,135 @@ pub fn do_assign(
                     area: area!(source.clone(), base.span),
                 } ))
             }
+        }
+        NodeType::EnumInstance {
+            base,
+            variant_name,
+            variant_area,
+            variant,
+        } => {
+            let base_id = protecute!(base => scope_id);
+            match &globals.get(base_id).value.clone() {
+                Value::Type(ValueType::CustomEnum(id)) => {
+                    match &globals.get(right).value.clone() {
+                        Value::EnumInstance {
+                            enum_id,
+                            variant_name: value_variant_name,
+                            variant: value_variant
+                        } => {
+                            if enum_id != id {
+                                return Err( RuntimeError::DestructureTypeMismatch {
+                                    tried: globals.custom_structs.map[id].name.clone(),
+                                    found: globals.custom_structs.map[enum_id].name.clone(),
+                                    area1: area!(source.clone(), left.span),
+                                    area2: globals.get(right).def_area.clone(),
+                                } )
+                            }
+                            if variant_name != value_variant_name {
+                                return Err( RuntimeError::DestructureVariantMismatch {
+                                    tried: variant_name.clone(),
+                                    found: value_variant_name.clone(),
+                                    area1: area!(source.clone(), left.span),
+                                    area2: globals.get(right).def_area.clone(),
+                                } )
+                            }
 
-            // match &globals.get(right).value.clone() {
-            //     Value::Dictionary(value_map) => {
+                            match variant {
+                                VariantType::Unit => {
+                                    match value_variant {
+                                        InstanceVariant::Tuple(_) => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
+                                            expected: format!("unit"),
+                                            found: format!("tuple"),
+                                            expected_area: area!(source.clone(), left.span),
+                                            found_area: globals.get(right).def_area.clone(),
+                                        } )),
+                                        InstanceVariant::Struct { .. } => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
+                                            expected: format!("unit"),
+                                            found: format!("struct"),
+                                            expected_area: area!(source.clone(), left.span),
+                                            found_area: globals.get(right).def_area.clone(),
+                                        } )),
+                                        InstanceVariant::Unit => (), // not much to destructure lol
+                                    }
+                                },
+                                VariantType::Tuple(arr) => {
+                                    match value_variant {
+                                        InstanceVariant::Unit => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
+                                            expected: format!("tuple"),
+                                            found: format!("unit"),
+                                            expected_area: area!(source.clone(), left.span),
+                                            found_area: globals.get(right).def_area.clone(),
+                                        } )),
+                                        InstanceVariant::Struct { .. } => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
+                                            expected: format!("tuple"),
+                                            found: format!("struct"),
+                                            expected_area: area!(source.clone(), left.span),
+                                            found_area: globals.get(right).def_area.clone(),
+                                        } )),
+                                        InstanceVariant::Tuple(value_arr) => {
+                                            if arr.len() != value_arr.len() {
+                                                return Err( RuntimeError::DestructureLengthMismatch {
+                                                    for_type: "tuple variant".to_string(),
+                                                    expected: arr.len(),
+                                                    found: value_arr.len(),
+                                                    area1: area!(source.clone(), left.span),
+                                                    area2: globals.get(right).def_area.clone(),
+                                                } )
+                                            } else {
+                                                for (l, r) in arr.iter().zip(value_arr) {
+                                                    do_assign(l, *r, scope_id, globals, source.clone(), list, is_declaration)?;
+                                                }
+                                            }
+                                        },
+                                    }
+                                },
+                                VariantType::Struct { fields, .. } => {
+                                    match value_variant {
+                                        InstanceVariant::Unit => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
+                                            expected: format!("struct"),
+                                            found: format!("unit"),
+                                            expected_area: area!(source.clone(), left.span),
+                                            found_area: globals.get(right).def_area.clone(),
+                                        } )),
+                                        InstanceVariant::Tuple(_) => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
+                                            expected: format!("struct"),
+                                            found: format!("tuple"),
+                                            expected_area: area!(source.clone(), left.span),
+                                            found_area: globals.get(right).def_area.clone(),
+                                        } )),
+                                        InstanceVariant::Struct { fields: value_fields } => {
+                                            for (k, v) in fields {
+                                                if !value_fields.contains_key(k) {
+                                                    return Err( RuntimeError::DestructureNonExistentKeyField {
+                                                        for_type: globals.custom_enums.map[id].name.clone(),
+                                                        what: "struct variant field".to_string(),
+                                                        name: k.clone(),
+                                                        area1: area!(source.clone(), left.span),
+                                                        area2: globals.get(right).def_area.clone(),
+                                                    } )
+                                                }
+                                                do_assign(v, value_fields[k], scope_id, globals, source.clone(), list, is_declaration)?;
+                                            }
+                                        },
+                                    }
+                                },
+                            }
 
-            //         for (k, v) in map {
-            //             if !value_map.contains_key(k) {
-            //                 return Err( RuntimeError::DestructureNonExistentKeyField {
-            //                     for_type: "dict".to_string(),
-            //                     what: "key".to_string(),
-            //                     name: k.clone(),
-            //                     area1: area!(source.clone(), left.span),
-            //                     area2: globals.get(right).def_area.clone(),
-            //                 } )
-            //             }
-            //             do_assign(v, value_map[k], scope_id, globals, source.clone(), list, is_declaration)?;
-            //         }
-            //     },
-            //     other => {
-            //         return Err( RuntimeError::DestructureTypeMismatch {
-            //             tried: "dict".to_string(),
-            //             found: format!("{}", other.type_str(globals)),
-            //             area1: area!(source.clone(), left.span),
-            //             area2: globals.get(right).def_area.clone(),
-            //         } )
-            //     }
-            // }
+                        },
+                        other => {
+                            return Err( RuntimeError::DestructureTypeMismatch {
+                                tried: globals.custom_enums.map[id].name.clone(),
+                                found: format!("{}", other.type_str(globals)),
+                                area1: area!(source.clone(), left.span),
+                                area2: globals.get(right).def_area.clone(),
+                            } )
+                        }
+                    }
+                },
+                _ => ret!(Err( RuntimeError::InstanceNonEnum {
+                    area: area!(source.clone(), base.span),
+                } ))
+            }
         }
         _ => {
             let left_id = protecute!(left => scope_id);
@@ -1791,7 +1894,6 @@ pub fn execute(
                             enum_def: enum_type.def_area.clone(),
                         } ))
                     }
-                    
 
                     match variant {
                         VariantType::Unit => {
