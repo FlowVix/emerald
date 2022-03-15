@@ -1,35 +1,52 @@
 
 
 
-
-enum Test {
-    It(),
-    Fucking { a: number, bruh: string },
-    WorksOmg (number, any),
+enum Op {
+    Plus,
+    Minus,
+    Mult,
+    Div,
 }
 
+enum ASTNode {
+    Number (number),
+    Operation {left: ASTNode, op: Op, right: ASTNode},
+    Unary {op: Op, value: ASTNode},
+}
 
-func shit(v) {
-    match v {
-        case Test:It() -> {
-            print("its the it thing");
-        },
-        case Test:WorksOmg (a, b) -> {
-            print("brooo works ", a, " ", b);
-        },
-        case Test:Fucking {a, bruh: lol} -> {
-            print("fucking ", a, " ", lol);
+impl ASTNode {
+    execute: (self) => {
+        match self {
+            case ASTNode:Number (n) -> n,
+            case ASTNode:Operation {
+                left, op, right
+            } -> {
+                match op {
+                    case Op:Plus -> left.execute() + right.execute(),
+                    case Op:Minus -> left.execute() - right.execute(),
+                    case Op:Mult -> left.execute() * right.execute(),
+                    case Op:Div -> left.execute() / right.execute(),
+                }
+            },
+            case ASTNode:Unary {op, value} -> {
+                match op {
+                    case Op:Plus -> + value.execute(),
+                    case Op:Minus -> - value.execute(),
+                }
+            }
         }
     }
 }
 
-let a = Test:It();
-let b = Test:Fucking {c: 56, bruh: "ass"};
-let c = Test:WorksOmg (3, string);
+let calc = ASTNode:Operation {
+    left: ASTNode:Unary {op: Op:Minus, value: ASTNode:Number(2) },
+    op: Op:Mult,
+    right: ASTNode:Operation {
+        left: ASTNode:Number(18),
+        op: Op:Div,
+        right: ASTNode:Number(3),
+    },
+}
 
-shit(a);
-shit(b);
-shit(c);
-
-
+print(calc.execute());
 

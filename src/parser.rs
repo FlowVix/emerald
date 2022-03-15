@@ -1410,7 +1410,7 @@ fn parse_statement(
         pos += 1;
         let export_name;
         match tok!(0) {
-            Token::Let | Token::Func | Token::Struct => {
+            Token::Let | Token::Func | Token::Struct | Token::Enum => {
                 match tok!(1) {
                     Token::Ident(name) => {
                         export_name = name.clone();
@@ -1431,7 +1431,7 @@ fn parse_statement(
                     _ => { parse!(parse_expr(false) => let _value); panic!() },
                 }
             }
-            _ => expected_err!("let, func, or struct", tok!(0), span!(0), info ),
+            _ => expected_err!("let, func, struct, or enum", tok!(0), span!(0), info ),
         }
     } else {
         parse!(parse_expr(false) => let value);
