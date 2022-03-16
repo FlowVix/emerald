@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
+use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
 
 
 
@@ -19,6 +19,7 @@ pub enum ValueType {
     Builtin(BuiltinType),
     CustomStruct(TypePos),
     CustomEnum(TypePos),
+    Module(TypePos),
 }
 
 impl ValueType {
@@ -30,6 +31,9 @@ impl ValueType {
             },
             ValueType::CustomEnum(id) => match &globals.custom_enums.map[id] {
                 CustomEnum { name, .. } => name.to_string()
+            },
+            ValueType::Module(id) => match &globals.modules.map[id] {
+                Module { name, .. } => name.to_string()
             },
         }
     }
@@ -93,10 +97,10 @@ pub enum McVector {
 
 
 #[derive(Debug, Clone, PartialEq)]
-struct Range {
-    start: isize,
-    end: isize,
-    step: isize,
+pub struct Range {
+    pub start: isize,
+    pub end: isize,
+    pub step: isize,
 }
 
 
@@ -211,10 +215,13 @@ impl Value {
             Value::Type(v) => match v {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
                 ValueType::CustomStruct(pos) => match &globals.custom_structs.map[pos] {
-                    CustomStruct { name, .. } => format!("<struct {}: {}>", pos, name)
+                    CustomStruct { name, .. } => format!("<struct: {}>", name)
                 },
                 ValueType::CustomEnum(pos) => match &globals.custom_enums.map[pos] {
-                    CustomEnum { name, .. } => format!("<enum {}: {}>", pos, name)
+                    CustomEnum { name, .. } => format!("<enum: {}>", name)
+                },
+                ValueType::Module(pos) => match &globals.modules.map[pos] {
+                    Module { name, .. } => format!("<mod: {}>", name)
                 },
             },
             Value::StructInstance { struct_id, fields } => {
@@ -747,10 +754,15 @@ pub mod value_ops {
                 end: n2.floor() as isize,
                 step: 1isize,
             })),
+            (Value::Range(Range{start, end, step: 1}), Value::Number(n)) => Ok(Value::Range(Range{
+                start: *start,
+                end: n.floor() as isize,
+                step: *end,
+            })),
             
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "number and number".to_string(),
+                    expected: "number and number or range and number".to_string(),
                     found: format!("{} and {}", value1.type_str(globals), value2.type_str(globals)),
                     area,
                     defs: vec![(value1.type_str(globals), a.def_area.clone()), (value2.type_str(globals), b.def_area.clone())],

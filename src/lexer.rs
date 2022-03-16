@@ -154,6 +154,8 @@ pub enum Token {
     Struct,
     #[token("enum")]
     Enum,
+    #[token("mod")]
+    Module,
 
     #[token("return")]
     Return,
@@ -278,6 +280,7 @@ impl Token {
             Token::Continue => "continue",
             Token::Struct => "struct",
             Token::Enum => "enum",
+            Token::Module => "mod",
             Token::Export => "export",
             Token::Import => "export",
             Token::Extract => "extract",

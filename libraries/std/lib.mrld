@@ -1,10 +1,17 @@
 
 
-extract import "score.mrld";
-extract import "runtime_condition.mrld";
+extract import? "score.mrld";
+extract import? "runtime_condition.mrld";
+extract import? "control_flow.mrld";
+extract import? "world.mrld";
 
 
 
 export let Score = Score;
 export let RuntimeCondition = RuntimeCondition;
+
+export let World = World;
+
+export let mc_while = mc_while;
+export let after = after;
 

@@ -35,8 +35,41 @@ impl RuntimeCondition {
                         }
                     }
                 }
-                command("execute if score " + left.str() + " " + cond + " run " + func_str(f));
-            }
+                command("execute if score " + left.str() + " " + cond + " run " + f.str);
+            },
+            case RuntimeCondition:And (left, right) -> {
+                left.then(!{
+                    right.then(f);
+                });
+            },
+            case RuntimeCondition:Or (left, right) -> {
+                let cond_check = Score::new(0);
+                let add = !{
+                    cond_check += 1;
+                }
+                left.then(add);
+                right.then(add);
+                (cond_check > 0).then(f);
+            },
+            case RuntimeCondition:IsBlock { pos, id } -> {
+                command("execute if block " + string(pos.x) + " " + string(pos.y) + " " + string(pos.z) + " " + id + " run " + f.str);
+            },
         }
     },
+    then_else: (self, f: mc_func, otherwise: mc_func) => {
+        let is_true = Score::new(0);
+        self.then(!{is_true += 1;});
+
+        (is_true == 1).then(f);
+        (is_true == 0).then(otherwise);
+    },
+
+    _and_: (self, other: RuntimeCondition) => {
+        return RuntimeCondition:And (self, other);
+    },
+    _or_: (self, other: RuntimeCondition) => {
+        return RuntimeCondition:Or (self, other);
+    }
+
+
 }

@@ -307,10 +307,6 @@ builtins!{
         globals.insert_command(id, n);
         Value::Null
     }
-    [FuncStr]: func_str(f_id: McFunc) {
-        Value::String( format!("function mrld:gen{}", f_id) )
-    }
-
 
 
 

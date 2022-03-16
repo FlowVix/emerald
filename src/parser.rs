@@ -80,6 +80,11 @@ pub enum NodeType {
         variant: VariantType,
     },
 
+    ModuleDef {
+        module_name: String,
+        def_area: CodeArea
+    },
+
     Export { name: String, value: Box<ASTNode> },
     Import { path: String, cached: bool },
     MCCall { base: Box<ASTNode> },
@@ -964,6 +969,17 @@ pub fn parse_unit(
             // println!("{}: {:#?}", struct_name, fields);
             ret!( NodeType::EnumDef { enum_name, variants, variant_areas, def_area } => start.0, span!(-1).1 );
         },
+        Token::Module => {
+            pos += 1;
+            check_tok!(Ident(module_name) else "module name");
+            
+            let def_area = CodeArea {
+                source: info.source.clone(),
+                range: (start.0, span!(-1).1),
+            };
+
+            ret!( NodeType::ModuleDef { module_name, def_area } => start.0, span!(-1).1 );
+        },
         Token::Import => {
             pos += 1;
             let mut cached = false;
@@ -1415,7 +1431,7 @@ fn parse_statement(
         pos += 1;
         let export_name;
         match tok!(0) {
-            Token::Let | Token::Func | Token::Struct | Token::Enum => {
+            Token::Let | Token::Func | Token::Struct | Token::Enum | Token::Module => {
                 match tok!(1) {
                     Token::Ident(name) => {
                         export_name = name.clone();
@@ -1436,7 +1452,7 @@ fn parse_statement(
                     _ => { parse!(parse_expr(false) => let _value); panic!() },
                 }
             }
-            _ => expected_err!("let, func, struct, or enum", tok!(0), span!(0), info ),
+            _ => expected_err!("let, func, struct, mod, or enum", tok!(0), span!(0), info ),
         }
     } else {
         parse!(parse_expr(false) => let value);

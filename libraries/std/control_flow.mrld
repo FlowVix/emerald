@@ -1,0 +1,22 @@
+
+
+let {
+    RuntimeCondition,
+    Score,
+} = import? "types.mrld";
+
+
+
+export func mc_while(cond: RuntimeCondition, f: mc_func) {
+    !{
+        f!;
+        cond.then($);
+    }!;
+}
+
+
+export func after(time: number, f: mc_func) {
+    command("schedule " + f.str + " " + string(time) + "s");
+}
+
+

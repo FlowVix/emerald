@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io::{self, Write}}
 use convert_case::{Case, Casing};
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -44,6 +44,13 @@ pub struct CustomEnum {
     pub variant_areas: HashMap<String, CodeArea>,
     pub def_area: CodeArea,
     pub def_scope: ScopePos,
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Module {
+    pub name: String,
+    pub def_area: CodeArea,
 }
 
 
@@ -120,6 +127,7 @@ pub struct Globals {
 
     pub custom_structs: Register<TypePos, CustomStruct>,
     pub custom_enums: Register<TypePos, CustomEnum>,
+    pub modules: Register<TypePos, Module>,
 
 
 
@@ -131,6 +139,7 @@ pub struct Globals {
     pub builtin_impls: HashMap<BuiltinType, ImplData>,
     pub struct_impls: HashMap<TypePos, ImplData>,
     pub enum_impls: HashMap<TypePos, ImplData>,
+    pub module_impls: HashMap<TypePos, ImplData>,
 
     
     pub exits: Vec<Exit>,
@@ -178,6 +187,10 @@ impl Globals {
                 map: HashMap::new(),
                 counter: 0,
             },
+            modules: Register {
+                map: HashMap::new(),
+                counter: 0,
+            },
             last_amount: 0,
             protected: vec![],
             backup_protector: None,
@@ -185,6 +198,7 @@ impl Globals {
             struct_impls: HashMap::new(),
             enum_impls: HashMap::new(),
             builtin_impls: HashMap::new(),
+            module_impls: HashMap::new(),
             exits: vec![],
             trace: vec![],
             import_trace: vec![],
@@ -256,6 +270,15 @@ impl Globals {
         self.custom_enums.counter += 1;
         self.custom_enums.map.insert( self.custom_enums.counter, typ );
         self.custom_enums.counter
+    }
+
+    pub fn new_module(
+        &mut self,
+        typ: Module,
+    ) -> ValuePos {
+        self.modules.counter += 1;
+        self.modules.map.insert( self.modules.counter, typ );
+        self.modules.counter
     }
 
 
@@ -455,6 +478,11 @@ impl Globals {
                 self.mark_value(*v, &mut collector);
             }
         }
+        for (_, ImplData { members, .. }) in &self.module_impls {
+            for (_, v) in members {
+                self.mark_value(*v, &mut collector);
+            }
+        }
         for e in &self.exports {
             for (_, v) in e {
                 self.mark_value(*v, &mut collector);
@@ -525,6 +553,7 @@ impl Globals {
             ValueType::Builtin(b) => self.builtin_impls.get(&b),
             ValueType::CustomStruct(id) => self.struct_impls.get(&id),
             ValueType::CustomEnum(id) => self.enum_impls.get(&id),
+            ValueType::Module(id) => self.module_impls.get(&id),
         }
     }
 
@@ -1126,8 +1155,8 @@ pub fn execute(
         }
     }
     
-    // if globals.values.map.len() > 50000 + globals.last_amount {
-    if true {
+    if globals.values.map.len() > 50000 + globals.last_amount {
+    // if true {
         // println!("{}", globals.values.map.len());
         globals.collect(scope_id);
         // println!("{} {}\n", globals.values.map.len(), globals.last_amount);
@@ -1773,6 +1802,7 @@ pub fn execute(
                 ValueType::Builtin(b) => globals.builtin_impls.get(&b),
                 ValueType::CustomStruct(id) => globals.struct_impls.get(&id),
                 ValueType::CustomEnum(id) => globals.enum_impls.get(&id),
+                ValueType::Module(id) => globals.module_impls.get(&id),
             } {
                 if data.methods.contains(member) {
                     let func = *data.members.get(member).unwrap();
@@ -1795,30 +1825,81 @@ pub fn execute(
                     }
                 }
             }
-            match &globals.get(base_id).value.clone() {
-                Value::Dictionary(map) => {
+            match (&globals.get(base_id).value.clone(), &member[..]) {
+                (Value::Dictionary(map), member) => {
                     match map.get(member) {
-                        Some(i) => Ok(*i),
+                        Some(i) => ret!( Ok(*i) ),
                         None => ret!(Err( RuntimeError::NonexistentKey {
-                            key: member.clone(),
+                            key: member.to_string(),
                             area: area!(source.clone(), start_node.span),
                         } ))
                     }
                 }
-                Value::StructInstance { fields, .. } => {
+                (Value::StructInstance { fields, .. }, member) => {
                     match fields.get(member) {
-                        Some(i) => Ok(*i),
+                        Some(i) => ret!( Ok(*i) ),
                         None => ret!(Err( RuntimeError::NonexistentField {
-                            field: member.clone(),
+                            field: member.to_string(),
                             area: area!(source.clone(), start_node.span),
                         } ))
                     }
                 }
-                _ => ret!(Err( RuntimeError::NonexistentField {
-                    field: member.clone(),
-                    area: area!(source.clone(), start_node.span),
-                } ))
+                _ => (),
             }
+
+            Ok( globals.insert_value(
+                match (&globals.get(base_id).value.clone(), &member[..]) {
+                    (Value::String(s), "length") =>
+                        Value::Number(s.len() as f64),
+    
+                    (Value::Range(Range{ start, .. }), "start") =>
+                        Value::Number(*start as f64),
+                    (Value::Range(Range{ step, .. }), "step") =>
+                        Value::Number(*step as f64),
+                    (Value::Range(Range{ end, .. }), "end") =>
+                        Value::Number(*end as f64),
+
+                    (Value::McFunc(id), "str") => if globals.mcfuncs.map[id].len() != 1 {
+                        Value::String( format!("function mrld:gen{}", id) )
+                    } else {
+                        Value::String( globals.mcfuncs.map[id][0].clone() )
+                    }
+                    
+                    (Value::McVector(
+                        McVector::Pos(x, ..) |
+                        McVector::WithRot(x, ..)
+                    ), "x") =>
+                        Value::String( format!("{}{}", x.prefix(), x.get_inner().to_str(globals, &mut vec![])) ),
+                    (Value::McVector(
+                        McVector::Pos(_, y, _) |
+                        McVector::WithRot(_, y, _, _, _)
+                    ), "y") =>
+                        Value::String( format!("{}{}", y.prefix(), y.get_inner().to_str(globals, &mut vec![])) ),
+                    (Value::McVector(
+                        McVector::Pos(_, _, z) |
+                        McVector::WithRot(_, _, z, _, _)
+                    ), "z") =>
+                        Value::String( format!("{}{}", z.prefix(), z.get_inner().to_str(globals, &mut vec![])) ),
+
+                        
+                    (Value::McVector(
+                        McVector::WithRot(_, _, _, h, _)
+                    ), "h_rot") =>
+                        Value::String( format!("{}{}", h.prefix(), h.get_inner().to_str(globals, &mut vec![])) ),
+                    (Value::McVector(
+                        McVector::WithRot(_, _, _, _, v)
+                    ), "v_rot") =>
+                        Value::String( format!("{}{}", v.prefix(), v.get_inner().to_str(globals, &mut vec![])) ),
+
+
+                    
+                    _ => ret!(Err( RuntimeError::NonexistentField {
+                        field: member.clone(),
+                        area: area!(source.clone(), start_node.span),
+                    } )),
+                },
+                area!(source.clone(), start_node.span)
+            ) )
         }
         NodeType::Return { node: ret } => {
             // println!("{:?}", info);
@@ -1886,6 +1967,18 @@ pub fn execute(
                 area!(source.clone(), start_node.span)
             );
             globals.set_var(scope_id, enum_name.to_string(), value_id);
+            Ok( value_id )
+        }
+        NodeType::ModuleDef { module_name, def_area } => {
+            let type_id = globals.new_module( Module {
+                name: module_name.clone(),
+                def_area: def_area.clone(),
+            });
+            let value_id = globals.insert_value(
+                Value::Type(ValueType::Module(type_id)),
+                area!(source.clone(), start_node.span)
+            );
+            globals.set_var(scope_id, module_name.to_string(), value_id);
             Ok( value_id )
         }
         NodeType::StructInstance { fields, base, field_areas } => {
@@ -2204,6 +2297,23 @@ pub fn execute(
                                         }
                                         // globals.builtin_impls.get_mut(b).unwrap().members.insert(k, v)
                                     },
+                                    ValueType::Module(id) => {
+                                        if !globals.module_impls.contains_key(id) {
+                                            globals.module_impls.insert(*id, ImplData::new());
+                                        }
+                                        for (k, v) in fields {
+                                            let temp = protecute!(v => scope_id);
+                                            globals.module_impls.get_mut(id).unwrap().members.insert( k.clone(), temp );
+                                            if let Value::Function(
+                                                Function { args, .. }
+                                            ) = globals.get(temp).value.clone() {
+                                                if let Some((s, _, _)) = args.get(0) {
+                                                    if s == "self" { globals.module_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                }
+                                            }
+                                        }
+                                        // globals.builtin_impls.get_mut(b).unwrap().members.insert(k, v)
+                                    },
                                 };
                                 ret!(Ok(globals.insert_value(
                                     Value::Null,
@@ -2242,6 +2352,7 @@ pub fn execute(
                         ValueType::Builtin(b) => globals.builtin_impls.get(b).clone(),
                         ValueType::CustomStruct(id) => globals.struct_impls.get(id).clone(),
                         ValueType::CustomEnum(id) => globals.enum_impls.get(id).clone(),
+                        ValueType::Module(id) => globals.module_impls.get(id).clone(),
                     };
                     match impld {
                         None => Err( RuntimeError::NoAssociatedMember {
@@ -2283,11 +2394,10 @@ pub fn execute(
             buf.push(path);
 
             if *cached {
+                // println!("{:?} {:#?}", buf, globals.import_caches);
                 match globals.import_caches.get(&buf) {
                     Some(cache) => {
                         let ret_value = Value::Dictionary( cache.clone() );
-
-                        globals.import_caches.insert(buf, globals.exports.pop().unwrap());
                         
                         ret!( Ok(globals.insert_value(
                             ret_value,
@@ -2469,7 +2579,13 @@ pub fn execute(
                 Value::McFunc(id) => {
 
                     let current_id = globals.get_scope(scope_id).func_id;
-                    globals.insert_command(current_id, format!("function mrld:gen{}", id));
+
+                    if globals.mcfuncs.map[id].len() == 1 {
+                        globals.insert_command(current_id, globals.mcfuncs.map[id][0].clone());
+                    } else {
+                        globals.insert_command(current_id, format!("function mrld:gen{}", id));
+                    }
+
                     
                     Ok(globals.insert_value(
                         Value::Null,

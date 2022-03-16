@@ -18,8 +18,13 @@ export enum CompType {
 
 export enum RuntimeCondition {
     Comparison { left: Score, comp: CompType, right: Score | number },
+
+    And (RuntimeCondition, RuntimeCondition),
+    Or (RuntimeCondition, RuntimeCondition),
+
+    IsBlock { pos: mc_vector, id: string },
 }
 
-
+export mod World;
 
 
