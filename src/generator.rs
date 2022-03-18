@@ -23,7 +23,7 @@ pub fn generate_datapack(globals: &Globals) {
     fs::write(BASE_DIR.to_string() + "emeraldgen/pack.mcmeta", MCMETA).unwrap();
 
     for (i, v) in &globals.mcfuncs.map {
-        if v.len() != 1 {
+        if (*i == 0) || v.len() != 1 {
 
             fs::write(BASE_DIR.to_string() + &format!("emeraldgen/data/mrld/functions/gen{}.mcfunction", i), v.join("\n")).unwrap();
         }

@@ -2,99 +2,12 @@
 
 extract import? "libraries/std/lib.mrld";
 
-let board = [
-    [0, 0, 1, 0, 0, 0, 0, 0, 0],
-    [1, 0, 1, 0, 0, 0, 0, 0, 0],
-    [0, 1, 1, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-];
-let width = len(board[0]);
-let height = len(board);
-
-impl array {
-    push: (self, v) => self += [v],
-}
-
-struct Cell {
-    pos: mc_vector,
-    neighbors: array,
-    scheduled: Score,
-}
-
-impl Cell {
-    new: (x, y) => {
-        let neighbors = [];
-        for i in 0..3 {
-            for j in 0..3 {
-                if i == 1 && j == 1
-                    continue;
-
-                
-                let n_x = (x - 1 + i + width) % width;
-                let n_y = (y - 1 + j + height) % height;
-                neighbors.push(v\n_x 1 n_y\);
-                
-            }
-        }
-        let pos = v\x 1 y\;
-        World::set_block(pos, if (board[y][x] == 1) "white_concrete" else "gray_concrete" );
-        return Cell::{neighbors, pos, scheduled: Score::new(0)}
-    },
-    check: (self) => {
-        
-        let neighbor_amount = Score::new(0); let increment = !{neighbor_amount += 1;};
-        for n_pos in self.neighbors
-            World::is_block(n_pos, "white_concrete").then(increment);
-
-        (World::is_block(self.pos, "white_concrete")).then_else(!{
-            self.scheduled = 1;
-            (neighbor_amount < 2 || neighbor_amount > 3).then(!{
-                self.scheduled = 0;
-            });
-        }, !{
-            self.scheduled = 0;
-            (neighbor_amount == 3).then(!{
-                self.scheduled = 1;
-            });
-        });
-
-    },
-    update: (self) => {
-        World::set_block(self.pos, "gray_concrete");
-
-        (self.scheduled == 1).then(!{
-            World::set_block(self.pos, "white_concrete");
-        });
-    }
-}
 
 
-let cells = [];
+let a = Score::new(3);
 
-for x in 0..width {
-    for y in 0..height {
-        cells.push(Cell::new(x, y));
-    }
-}
-
-let gol_loop = !{
-
-    for i in cells
-        i.check();
-
-    for i in cells
-        i.update();
-
-    after(0.1, $);
-
-};
-
-after(1, gol_loop);
-
+a.to_const(0..10, (i) => {
+    World::set_block(v\i 0 0\, "diamond_block");
+});
 
 

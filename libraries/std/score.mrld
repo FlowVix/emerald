@@ -96,6 +96,13 @@ impl Score {
         }
     },
 
+    to_const: (self, r: range, f: function) => {
+        let score = self.clone();
+        for i in r {
+            (score == i).then(!{f(i);});
+        }
+    },
+
     
     _plus_eq_: (self, v: number | Score) => {
         self.add(v);
