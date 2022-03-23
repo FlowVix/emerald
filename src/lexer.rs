@@ -16,7 +16,7 @@ pub enum Token {
     #[regex(r#"\d+(\.[\d]+)?"#, |lex| lex.slice().parse::<f64>())]
     Num(f64),
 
-    #[regex(r#""(?:\\.|[^\\"])*"|' + r"'(?:\\.|[^\\'])*'"#, 
+    #[regex(r#""(?:\\.|[^\\"])*"|'(?:\\.|[^\\'])*'"#, 
         |s| convert_string(&s.slice()[1..s.slice().len()-1])
     )]
     String(String),
@@ -107,6 +107,8 @@ pub enum Token {
 
     #[token(",")]
     Comma,
+    #[token("...")]
+    TripleDot,
     #[token("..")]
     DoubleDot,
     #[token(".")]
@@ -238,7 +240,7 @@ impl Token {
             Token::MultEq => "*=",
             Token::DivEq => "/=",
             Token::ModEq => "%=",
-            Token::PowEq => "^=",
+            Token::PowEq => "**=",
             Token::Greater => ">",
             Token::Lesser => "<",
             Token::GreaterEq => ">=",
@@ -293,6 +295,7 @@ impl Token {
             Token::Eof => "end of file",
             Token::Dot => ".",
             Token::DoubleDot => "..",
+            Token::TripleDot => "...",
             Token::Backslash => "\\",
             Token::VectorSpecial => "v\\",
             Token::IDSpecial => "id\\",

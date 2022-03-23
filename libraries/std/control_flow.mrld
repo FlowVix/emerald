@@ -2,21 +2,69 @@
 
 let {
     RuntimeCondition,
-    Score,
+    McInt,
+    ScoreRange,
 } = import? "types.mrld";
 
 
 
-export func mc_while(cond: RuntimeCondition, f: mc_func) {
-    !{
+export func mc_while(cond: function, f: mc_func) {
+    cond().then(!{
         f!;
-        cond.then($);
-    }!;
+        cond().then($);
+    });
+}
+
+export func mc_for(r: range | ScoreRange, f: function) {
+    let i = McInt::new(0);
+    i = r.start;
+    (i < r.end).then(!{
+        f(i);
+        i += r.step;
+        (i < r.end).then($);
+    });
+}
+export func mc_for_delay(r: range | ScoreRange, f: function, delay: number) {
+    let i = McInt::new(0);
+    i = r.start;
+    (i < r.end).then(!{
+        f(i);
+        i += r.step;
+        let this = $;
+        (i < r.end).then(!{
+            after(delay, this);
+        });
+    });
+}
+
+export func mc_for2(start: number | McInt, end: number | McInt, step: number | McInt, f: function) {
+    let i = McInt::new(0);
+    i = start;
+    (i < end).then(!{
+        f(i);
+        i += step;
+        (i < end).then($);
+    });
+}
+
+
+export func mc_for3(start: number | McInt, cond: function, inc: function, f: function) {
+    let i = McInt::new(0);
+    i = start;
+    cond(i).then(!{
+        f(i);
+        inc(i);
+        cond(i).then($);
+    });
 }
 
 
 export func after(time: number, f: mc_func) {
-    command("schedule " + f.str + " " + string(time) + "s");
+    if time == 0 {
+        f!;
+    } else {
+        command("schedule " + f.str + " " + string(time) + "s");
+    }
 }
 
 

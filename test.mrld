@@ -4,10 +4,8 @@ extract import? "libraries/std/lib.mrld";
 
 
 
-let a = Score::new(3);
+print("aaa");
+print('aaa');
 
-a.to_const(0..10, (i) => {
-    World::set_block(v\i 0 0\, "diamond_block");
-});
 
 

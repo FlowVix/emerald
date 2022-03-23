@@ -1,0 +1,25 @@
+
+
+let {
+    Marker,
+} = import? "types.mrld";
+
+export let Marker = Marker;
+
+let id_counter = 0;
+
+impl Marker {
+
+    new: (x: number, y: number, z: number) => {
+        command("kill @e[tag=mrld_" + string(id_counter) + ",limit=1]");
+        command("summon minecraft:marker " + string(x) + " " + string(y) + " " + string(z) + " {Tags:[\"mrld_" + string(id_counter) + "\"]}");
+        return Marker::{
+            id: (id_counter += 1) - 1,
+        }
+    },
+
+}
+
+
+
+

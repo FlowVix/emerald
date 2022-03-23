@@ -50,6 +50,8 @@ pub enum NodeType {
     Break { node: Option<Box<ASTNode>> },
     Continue,
 
+    UnboundedRange { base: Box<ASTNode> },
+
     StructDef {
         struct_name: String,
         fields: HashMap<String, (ASTNode, Option<ASTNode>)>,
@@ -384,6 +386,8 @@ operators!(
     Unary       <==  [ ExclMark ],
     LeftAssoc   <==  [ Is Eq NotEq Greater GreaterEq Lesser LesserEq ],
     LeftAssoc   <==  [ DoubleDot ],
+    Unary       <==  [ DoubleDot ],
+    Unary       <==  [ TripleDot ],
     LeftAssoc   <==  [ Plus Minus ],
     Unary       <==  [ Plus Minus ],
     LeftAssoc   <==  [ Mult Div Mod ],
@@ -1148,7 +1152,7 @@ fn parse_value(
     parse!(parse_unit => let mut value);
     let start = value.span;
 
-    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon | Token::ExclMark | Token::Colon) {
+    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon | Token::ExclMark | Token::Colon | Token::TripleDot) {
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
@@ -1193,6 +1197,15 @@ fn parse_value(
                     span: ( start.0, span!(-1).1 )
                 }
             },
+            Token::TripleDot => {
+                pos += 1;
+                value = ASTNode {
+                    node: NodeType::UnboundedRange {
+                        base: Box::new(value),
+                    },
+                    span: ( start.0, span!(-1).1 )
+                }
+            }
             Token::DoubleColon => {
                 pos += 1;
                 if matches!(tok!(0), Token::LBracket) {

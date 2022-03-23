@@ -221,6 +221,12 @@ pub enum RuntimeError {
         expected_area: CodeArea,
         found_area: CodeArea,
     },
+    CannotIter {
+        typ: String,
+        area: CodeArea,
+        reason: String,
+        // area2: CodeArea,
+    },
 }
 
 
@@ -297,18 +303,18 @@ impl ErrorReport {
         let mut report: ReportBuilder<CodeArea> = Report::build(ReportKind::Error, self.source.clone(), self.source.range.0)
         .with_message(self.message.clone() + "\n");
 
-        for (i, t) in globals.import_trace.iter().enumerate() {
-            report = report.with_label( Label::new(t.clone()).with_message(format!("Error when running this import")).with_color(colors.next()).with_order(-(i as i32) - 1) )
-        }
+        // for (i, t) in globals.import_trace.iter().enumerate() {
+        //     report = report.with_label( Label::new(t.clone()).with_message(format!("Error when running this import")).with_color(colors.next()).with_order(-(i as i32) - 1) )
+        // }
 
         for (c, s) in &self.labels {
             report = report.with_label( Label::new(c.clone()).with_message(s).with_color(colors.next()) )
         }
         
-        let mut colors = RainbowColorGenerator::new(270.0, 1.0, 0.75);
-        for (i, t) in globals.trace.iter().enumerate() {
-            report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
-        }
+        // let mut colors = RainbowColorGenerator::new(270.0, 1.0, 0.75);
+        // for (i, t) in globals.trace.iter().enumerate() {
+        //     report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
+        // }
 
 
         if let Some(m) = &self.note {
@@ -890,6 +896,18 @@ impl ToReport for RuntimeError {
                 labels: vec![
                     (expected_area.clone(), format!("Tried to destructure into {} variant here", expected.fg(a))),
                     (found_area.clone(), format!("Found {} variant here", found.fg(b))),
+                ],
+                note: None,
+            },
+            RuntimeError::CannotIter {
+                typ,
+                area,
+                reason,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("Cannot iterate over this {}", typ),
+                labels: vec![
+                    (area.clone(), reason.to_string()),
                 ],
                 note: None,
             },

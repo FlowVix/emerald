@@ -2,26 +2,27 @@
 
 
 let {
-    Score,
+    McInt,
+    ScoreRange,
     CompType,
     RuntimeCondition,
 } = import? "types.mrld";
 
-export let Score = Score;
+export let McInt = McInt;
 
 let id_counter = 0;
 
-impl Score {
+impl McInt {
 
     new: (default: number) => {
         command("scoreboard players set mrld_" + string(id_counter) + " mrld_store " + string(floor(default)));
-        return Score::{
+        return McInt::{
             id: (id_counter += 1) - 1,
         }
     },
     str: (self) => "mrld_" + string(self.id) + " mrld_store",
     clone: (self) => {
-        let c = Score::new(0);
+        let c = McInt::new(0);
         c.set(self);
         return c;
     },
@@ -33,7 +34,7 @@ impl Score {
         );
     },
 
-    add: (self, other: number | Score) => {
+    add: (self, other: number | McInt) => {
         if other is number {
             let other = floor(other);
             if other < 0 {
@@ -45,7 +46,7 @@ impl Score {
             command("scoreboard players operation " + self.str() + " += " + other.str());
         }
     },
-    subtract: (self, other: number | Score) => {
+    subtract: (self, other: number | McInt) => {
         if other is number {
             let other = floor(other);
             if other < 0 {
@@ -57,7 +58,7 @@ impl Score {
             command("scoreboard players operation " + self.str() + " -= " + other.str());
         }
     },
-    multiply: (self, other: number | Score) => {
+    multiply: (self, other: number | McInt) => {
         if other is number {
             let other = floor(other);
             let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
@@ -67,7 +68,7 @@ impl Score {
             command("scoreboard players operation " + self.str() + " *= " + other.str());
         }
     },
-    divide: (self, other: number | Score) => {
+    divide: (self, other: number | McInt) => {
         if other is number {
             let other = floor(other);
             let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
@@ -77,7 +78,7 @@ impl Score {
             command("scoreboard players operation " + self.str() + " /= " + other.str());
         }
     },
-    modulo: (self, other: number | Score) => {
+    modulo: (self, other: number | McInt) => {
         if other is number {
             let other = floor(other);
             let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
@@ -87,7 +88,7 @@ impl Score {
             command("scoreboard players operation " + self.str() + " %= " + other.str());
         }
     },
-    set: (self, other: number | Score) => {
+    set: (self, other: number | McInt) => {
         if other is number {
             let other = floor(other);
             command("scoreboard players set " + self.str() + " " + string(other));
@@ -102,91 +103,122 @@ impl Score {
             (score == i).then(!{f(i);});
         }
     },
+    abs: (self) => {
+        let r = self.clone();
+        (self < 0).then(!{
+            r *= -1;
+        });
+        return r;
+    },
 
     
-    _plus_eq_: (self, v: number | Score) => {
+    _plus_eq_: (self, v: number | McInt) => {
         self.add(v);
     },
-    _minus_eq_: (self, v: number | Score) => {
+    _minus_eq_: (self, v: number | McInt) => {
         self.subtract(v);
     },
-    _mult_eq_: (self, v: number | Score) => {
+    _mult_eq_: (self, v: number | McInt) => {
         self.multiply(v);
     },
-    _div_eq_: (self, v: number | Score) => {
+    _div_eq_: (self, v: number | McInt) => {
         self.divide(v);
     },
-    _mod_eq_: (self, v: number | Score) => {
+    _mod_eq_: (self, v: number | McInt) => {
         self.modulo(v);
     },
-    _assign_: (self, v: number | Score) => {
+    _assign_: (self, v: number | McInt) => {
         self.set(v);
     },
 
-    _plus_: (self, v: number | Score) => {
+    _plus_: (self, v: number | McInt) => {
         let c = self.clone();
         c.add(v);
         return c;
     },
-    _minus_: (self, v: number | Score) => {
+    _minus_: (self, v: number | McInt) => {
         let c = self.clone();
         c.subtract(v);
         return c;
     },
-    _mult_: (self, v: number | Score) => {
+    _mult_: (self, v: number | McInt) => {
         let c = self.clone();
         c.multiply(v);
         return c;
     },
-    _div_: (self, v: number | Score) => {
+    _div_: (self, v: number | McInt) => {
         let c = self.clone();
         c.divide(v);
         return c;
     },
-    _mod_: (self, v: number | Score) => {
+    _mod_: (self, v: number | McInt) => {
         let c = self.clone();
         c.modulo(v);
         return c;
     },
 
-    _eq_: (self, v: number | Score) => {
+    _eq_: (self, v: number | McInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Equal,
             right: v,
         }
     },
-    _greater_: (self, v: number | Score) => {
+    _greater_: (self, v: number | McInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Greater,
             right: v,
         }
     },
-    _greater_eq_: (self, v: number | Score) => {
+    _greater_eq_: (self, v: number | McInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:GreaterEq,
             right: v,
         }
     },
-    _lesser_: (self, v: number | Score) => {
+    _lesser_: (self, v: number | McInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Lesser,
             right: v,
         }
     },
-    _lesser_eq_: (self, v: number | Score) => {
+    _lesser_eq_: (self, v: number | McInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:LesserEq,
             right: v,
         }
     },
+
+    _range_: (self, v: number | McInt) => {
+        return ScoreRange::{
+            start: self,
+            end: v,
+            step: 1,
+        }
+    },
+    _r_range_: (self, v: number | McInt) => {
+        return ScoreRange::{
+            start: v,
+            end: self,
+            step: 1,
+        }
+    },
+
 }
 
-
+impl ScoreRange {
+    _range_: (self, v: number | McInt) => {
+        return ScoreRange::{
+            start: self.start,
+            end: self.end,
+            step: v,
+        }
+    },
+}
 
 
 

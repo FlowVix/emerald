@@ -98,9 +98,9 @@ pub enum McVector {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Range {
-    pub start: isize,
-    pub end: isize,
-    pub step: isize,
+    pub start: Option<f64>,
+    pub end: Option<f64>,
+    pub step: f64,
 }
 
 
@@ -215,13 +215,13 @@ impl Value {
             Value::Type(v) => match v {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
                 ValueType::CustomStruct(pos) => match &globals.custom_structs.map[pos] {
-                    CustomStruct { name, .. } => format!("<struct: {}>", name)
+                    CustomStruct { name, .. } => format!("<struct {}: {}>", pos, name)
                 },
                 ValueType::CustomEnum(pos) => match &globals.custom_enums.map[pos] {
-                    CustomEnum { name, .. } => format!("<enum: {}>", name)
+                    CustomEnum { name, .. } => format!("<enum {}: {}>", pos, name)
                 },
                 ValueType::Module(pos) => match &globals.modules.map[pos] {
-                    Module { name, .. } => format!("<mod: {}>", name)
+                    Module { name, .. } => format!("<mod {}: {}>", pos, name)
                 },
             },
             Value::StructInstance { struct_id, fields } => {
@@ -278,7 +278,7 @@ impl Value {
             }
             Value::Pattern(p) => p.to_str(globals),
             Value::Range(Range { start, end, step }) => 
-                format!("{}..{}", start, end) + &(if *step != 1 {format!("..{}", step)} else {"".to_string() }),
+                format!("{}..{}", if let Some(n) = start {n.to_string()} else {"null".to_string()}, if let Some(n) = end {n.to_string()} else {"null".to_string()}) + &(if *step != 1.0 {format!("..{}", step)} else {"".to_string() }),
             Value::McFunc(_) => format!("!{{...}}"),
             Value::McVector(v) => {
                 match v {
@@ -385,13 +385,42 @@ impl Value {
 
 }
 
+pub struct RangeIter {
+    start: f64,
+    step: f64,
+    end: Option<f64>,
+    current: f64,
+}
+
+impl RangeIter {
+    pub fn new(start: f64, step: f64, end: Option<f64>) -> Self {
+        RangeIter { start, step, end, current: start }
+    }
+}
+
+impl Iterator for RangeIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.current;
+        self.current += self.step;
+        return if let Some(e) = self.end {
+            if ret < e { Some(Value::Number(ret)) } else {None}
+        } else {
+            Some(Value::Number(ret))
+        }
+    }
+}
+
+
+
 pub mod value_ops {
 
     use std::collections::HashMap;
 
     use crate::{interpreter::{StoredValue, Globals}, CodeArea, value::{Value, ValueType}, error::RuntimeError, builtins::BuiltinType};
 
-    use super::{Pattern, Range};
+    use super::{Pattern, Range, RangeIter};
 
     pub fn to_bool(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<bool, RuntimeError> {
         match &a.value {
@@ -409,19 +438,22 @@ pub mod value_ops {
         }
     }
 
-    pub fn iter(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<Vec<Value>, RuntimeError> {
-        match &a.value {
-            Value::Array(arr) => Ok( arr.iter().map(|e| globals.get(*e).value.clone() ).collect::<Vec<Value>>() ),
-            Value::Dictionary(map) => Ok( map.iter().map(|(s, _)| Value::String(s.clone()) ).collect::<Vec<Value>>() ),
+    pub fn iter(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<Box<dyn Iterator<Item = Value>>, RuntimeError> {
+        let val = a.value.clone();
+        match val {
+            Value::Array(arr) => Ok( Box::new(arr.iter().map(|e| globals.get(*e).value.clone() ).collect::<Vec<Value>>().into_iter()) ),
+            Value::Dictionary(map) => Ok( Box::new(map.iter().map(|(s, _)| Value::String(s.clone()) ).collect::<Vec<Value>>().into_iter()) ),
             Value::Range(Range { start, end, step }) => Ok(
                 {
-                    let mut v = vec![];
-                    let mut i = *start;
-                    while i < *end {
-                        v.push( Value::Number( i as f64 ) );
-                        i += *step;
+                    if let None = start {
+                        return Err( RuntimeError::CannotIter {
+                            typ: a.value.type_str(globals),
+                            area,
+                            reason: "This range has no lower bound".to_string()
+                        } );
                     }
-                    v
+                    let iter = RangeIter::new(start.unwrap(), step, end);
+                    Box::new(iter)
                 }
             ),
             
@@ -438,7 +470,11 @@ pub mod value_ops {
 
     pub fn convert(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
-            (Value::Number(n), Value::Type(ValueType::Builtin(BuiltinType::String))) => Ok(Value::String(n.to_string())),
+
+
+
+
+            (v, Value::Type(ValueType::Builtin(BuiltinType::String))) => Ok(Value::String( v.to_str(globals, &mut vec![]) )),
             (v, Value::Type(ValueType::Builtin(BuiltinType::Type))) => Ok(Value::Type(v.typ())),
 
             (value, Value::Type(t)) => {
@@ -468,6 +504,7 @@ pub mod value_ops {
 
     
     pub fn is_op_raw(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<bool, RuntimeError> {
+        // println!("aa {:?} {:?}", &a.value, &b.value);
         match (&a.value, &b.value) {
             (v, Value::Type(t)) => Ok( v.typ() == t.clone() ),
 
@@ -660,6 +697,52 @@ pub mod value_ops {
     }
 
 
+    pub fn unary_range(a: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        match &a.value {
+            Value::Number(n) => Ok(Value::Range(Range{
+                start: Some(0.0),
+                end: Some(*n),
+                step: 1.0,
+            })),
+            Value::Null => Ok(Value::Range(Range{
+                start: Some(0.0),
+                end: None,
+                step: 1.0,
+            })),
+            
+            value => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "number".to_string(),
+                    found: format!("{}", value.type_str(globals)),
+                    area,
+                    defs: vec![(value.type_str(globals), a.def_area.clone())],
+                } )
+            }
+        }
+    }
+    pub fn unary_unbounded_range(a: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        match &a.value {
+            Value::Number(n) => Ok(Value::Range(Range{
+                start: None,
+                end: Some(*n),
+                step: 1.0,
+            })),
+            Value::Null => Ok(Value::Range(Range{
+                start: None,
+                end: None,
+                step: 1.0,
+            })),
+            
+            value => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "number".to_string(),
+                    found: format!("{}", value.type_str(globals)),
+                    area,
+                    defs: vec![(value.type_str(globals), a.def_area.clone())],
+                } )
+            }
+        }
+    }
 
     pub fn eq_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         Ok(Value::Boolean(eq(a, b, area, globals)?))
@@ -750,19 +833,30 @@ pub mod value_ops {
     pub fn range(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Range(Range{
-                start: n1.floor() as isize,
-                end: n2.floor() as isize,
-                step: 1isize,
+                start: Some(*n1),
+                end: Some(*n2),
+                step: 1.0,
             })),
-            (Value::Range(Range{start, end, step: 1}), Value::Number(n)) => Ok(Value::Range(Range{
+            (Value::Range(Range{start, end: Some(e), step: 1.0}), Value::Number(n)) => Ok(Value::Range(Range{
                 start: *start,
-                end: n.floor() as isize,
-                step: *end,
+                end: Some(*n),
+                step: *e,
+            })),
+
+            (Value::Null, Value::Number(n2)) => Ok(Value::Range(Range{
+                start: None,
+                end: Some(*n2),
+                step: 1.0,
+            })),
+            (Value::Number(n1), Value::Null) => Ok(Value::Range(Range{
+                start: Some(*n1),
+                end: None,
+                step: 1.0,
             })),
             
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "number and number or range and number".to_string(),
+                    expected: "number and number, range and number, null and number, or number and null".to_string(),
                     found: format!("{} and {}", value1.type_str(globals), value2.type_str(globals)),
                     area,
                     defs: vec![(value1.type_str(globals), a.def_area.clone()), (value2.type_str(globals), b.def_area.clone())],

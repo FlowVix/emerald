@@ -1,7 +1,8 @@
 
 
 let {
-    Score,
+    McInt,
+    McFloat,
     CompType,
     RuntimeCondition,
 } = import? "types.mrld";
@@ -13,29 +14,67 @@ impl RuntimeCondition {
 
         match self {
             case RuntimeCondition:Comparison { left, comp, right } -> {
-                let cond = "";
-                match right {
-                    number -> {
-                        let value = floor(right);
-                        cond = match comp {
-                            case CompType:Equal -> "matches " + string(value),
-                            case CompType:Greater -> "matches " + string(value+1) + "..",
-                            case CompType:GreaterEq -> "matches " + string(value) + "..",
-                            case CompType:Lesser -> "matches .." + string(value-1),
-                            case CompType:LesserEq -> "matches .." + string(value),
+                match left {
+                    McInt -> {
+                        let cond = "";
+                        match right {
+                            number -> {
+                                let whole = floor(right);
+
+                                if right == whole {
+                                    cond = match comp {
+                                        case CompType:Equal -> "matches " + string(whole),
+                                        case CompType:Greater -> "matches " + string(whole+1) + "..",
+                                        case CompType:GreaterEq -> "matches " + string(whole) + "..",
+                                        case CompType:Lesser -> "matches .." + string(whole-1),
+                                        case CompType:LesserEq -> "matches .." + string(whole),
+                                    }
+                                } else {
+                                    cond = match comp {
+                                        case CompType:Equal -> {return;},
+                                        case CompType:Greater -> "matches " + string(whole+1) + "..",
+                                        case CompType:GreaterEq -> "matches " + string(whole + 1) + "..",
+                                        case CompType:Lesser -> "matches .." + string(whole),
+                                        case CompType:LesserEq -> "matches .." + string(whole),
+                                    }
+                                }
+
+                                command("execute if score " + left.str() + " " + cond + " run " + f.str);
+                            },
+                            McInt -> {
+                                cond = match comp {
+                                    case CompType:Equal -> "= " + right.str(),
+                                    case CompType:Greater -> "> " + right.str(),
+                                    case CompType:GreaterEq -> ">= " + right.str(),
+                                    case CompType:Lesser -> "< " + right.str(),
+                                    case CompType:LesserEq -> "<= " + right.str(),
+                                }
+                                command("execute if score " + left.str() + " " + cond + " run " + f.str);
+                            },
+                            McFloat -> {
+                                let diff = right - left;
+                                match comp {
+                                    case CompType:Equal -> diff.is_0().then(f),
+                                    case CompType:Greater -> diff.is_negative().then(f),
+                                    case CompType:GreaterEq -> (diff.is_negative() || diff.is_0()).then(f),
+                                    case CompType:Lesser -> diff.is_over_0().then(f),
+                                    case CompType:LesserEq -> diff.is_positive().then(f),
+                                }
+                            },
                         }
                     },
-                    Score -> {
-                        cond = match comp {
-                            case CompType:Equal -> "= " + right.str(),
-                            case CompType:Greater -> "> " + right.str(),
-                            case CompType:GreaterEq -> ">= " + right.str(),
-                            case CompType:Lesser -> "< " + right.str(),
-                            case CompType:LesserEq -> "<= " + right.str(),
+                    McFloat -> {
+                        let diff = left - right;
+                        
+                        match comp {
+                            case CompType:Equal -> diff.is_0().then(f),
+                            case CompType:Greater -> diff.is_over_0().then(f),
+                            case CompType:GreaterEq -> diff.is_positive().then(f),
+                            case CompType:Lesser -> diff.is_negative().then(f),
+                            case CompType:LesserEq -> (diff.is_negative() || diff.is_0()).then(f),
                         }
                     }
                 }
-                command("execute if score " + left.str() + " " + cond + " run " + f.str);
             },
             case RuntimeCondition:And (left, right) -> {
                 left.then(!{
@@ -43,7 +82,7 @@ impl RuntimeCondition {
                 });
             },
             case RuntimeCondition:Or (left, right) -> {
-                let cond_check = Score::new(0);
+                let cond_check = McInt::new(0);
                 let add = !{
                     cond_check += 1;
                 }
@@ -57,7 +96,7 @@ impl RuntimeCondition {
         }
     },
     then_else: (self, f: mc_func, otherwise: mc_func) => {
-        let is_true = Score::new(0);
+        let is_true = McInt::new(0);
         self.then(!{is_true += 1;});
 
         (is_true == 1).then(f);

@@ -289,6 +289,9 @@ builtins!{
 
     [Sqrt]: sqrt(n: Number) { Value::Number(n.sqrt()) }
 
+    [Abs]: abs(n: Number) { Value::Number(n.abs()) }
+    [Signum]: signum(n: Number) { Value::Number(n.signum()) }
+
 
     [ID]: id(@Any => poopie) {
         println!("id: {:?}", globals.get_scope(scope_id).func_id);

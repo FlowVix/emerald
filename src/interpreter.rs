@@ -1435,9 +1435,48 @@ pub fn execute(
                         area!(source.clone(), node.span),
                     ))
                 },
+                Token::DoubleDot => {
+                    let result = value_ops::unary_range(&globals.get(value).clone(), area!(source.clone(), node.span), globals)?;
+                    Ok(globals.insert_value(
+                        result,
+                        area!(source.clone(), node.span),
+                    ))
+                },
+                Token::TripleDot => {
+                    let result = value_ops::unary_unbounded_range(&globals.get(value).clone(), area!(source.clone(), node.span), globals)?;
+                    Ok(globals.insert_value(
+                        result,
+                        area!(source.clone(), node.span),
+                    ))
+                },
                 _ => unreachable!()
             }
         },
+        NodeType::UnboundedRange { base } => {
+            let val = protecute!(base => scope_id);
+            let result = match &globals.get(val).value.clone() {
+                Value::Number(n1) => Value::Range(Range{
+                    start: Some(*n1),
+                    end: None,
+                    step: 1.0,
+                }),
+                Value::Range(Range{start, end: Some(e), step: 1.0}) => Value::Range(Range{
+                    start: *start,
+                    end: None,
+                    step: *e,
+                }),
+                other => ret!(Err( RuntimeError::TypeMismatch {
+                    expected: "number or range".to_string(),
+                    found: format!("{}", other.type_str(globals)),
+                    area: area!(source.clone(), base.span),
+                    defs: vec![(other.type_str(globals), area!(source.clone(), base.span))],
+                } ))
+            };
+            Ok(globals.insert_value(
+                result,
+                area!(source.clone(), node.span),
+            ))
+        }
         NodeType::Declaration { left, right } => {
 
             let right_id = protecute!(right => scope_id);
@@ -1568,6 +1607,7 @@ pub fn execute(
                         } else {
                             let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
                             ret_id = protecute!(then => derived);
+                            break;
                         }
                     },
                     MatchArm::Structure(structure) => {
@@ -1582,6 +1622,7 @@ pub fn execute(
                                     globals.set_var(derived, l.1.unwrap(), right_clone);
                                 }
                                 ret_id = protecute!(then => derived);
+                                break;
                             },
                             Err(e) => {
                                 if e.is_destructure_error() {
@@ -1853,17 +1894,17 @@ pub fn execute(
                         Value::Number(s.len() as f64),
     
                     (Value::Range(Range{ start, .. }), "start") =>
-                        Value::Number(*start as f64),
+                        if let Some(n) = start {Value::Number(*n)} else {Value::Null},
                     (Value::Range(Range{ step, .. }), "step") =>
                         Value::Number(*step as f64),
                     (Value::Range(Range{ end, .. }), "end") =>
-                        Value::Number(*end as f64),
+                        if let Some(n) = end {Value::Number(*n)} else {Value::Null},
 
-                    (Value::McFunc(id), "str") => if globals.mcfuncs.map[id].len() != 1 {
-                        Value::String( format!("function mrld:gen{}", id) )
-                    } else {
-                        Value::String( globals.mcfuncs.map[id][0].clone() )
-                    }
+                    (Value::McFunc(id), "str") => /* if globals.mcfuncs.map[id].len() != 1 { */
+                        Value::String( format!("function mrld:gen{}", id) ),
+                    // } else {
+                    //     Value::String( globals.mcfuncs.map[id][0].clone() )
+                    // }
                     
                     (Value::McVector(
                         McVector::Pos(x, ..) |
@@ -2572,7 +2613,6 @@ pub fn execute(
         },
         NodeType::MCCall { base } => {
             let base_id = protecute!(base => scope_id);
-            println!("aaa");
             
             match &globals.get(base_id).value.clone() {
 
@@ -2580,11 +2620,27 @@ pub fn execute(
 
                     let current_id = globals.get_scope(scope_id).func_id;
 
-                    if globals.mcfuncs.map[id].len() == 1 {
-                        globals.insert_command(current_id, globals.mcfuncs.map[id][0].clone());
-                    } else {
+                    // if globals.mcfuncs.map[id].len() == 1 {
+                    //     globals.insert_command(current_id, globals.mcfuncs.map[id][0].clone());
+                    // } else {
                         globals.insert_command(current_id, format!("function mrld:gen{}", id));
-                    }
+                    // }
+
+                    
+                    Ok(globals.insert_value(
+                        Value::Null,
+                        area!(source.clone(), node.span),
+                    ))
+                }
+                Value::String(s) => {
+
+                    let current_id = globals.get_scope(scope_id).func_id;
+
+                    // if globals.mcfuncs.map[id].len() == 1 {
+                    //     globals.insert_command(current_id, globals.mcfuncs.map[id][0].clone());
+                    // } else {
+                        globals.insert_command(current_id, s.to_string());
+                    // }
 
                     
                     Ok(globals.insert_value(
@@ -2593,7 +2649,7 @@ pub fn execute(
                     ))
                 }
                 other => ret!(Err( RuntimeError::TypeMismatch {
-                    expected: "mc_func".to_string(),
+                    expected: "mc_func or string".to_string(),
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],

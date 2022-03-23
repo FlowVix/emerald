@@ -2,8 +2,18 @@
 
 
 
-export struct Score {
+export struct McInt {
     id: number,
+}
+export struct McFloat {
+    whole: McInt,
+    decimals: McInt,
+}
+
+export struct ScoreRange {
+    start: McInt | number,
+    end: McInt | number,
+    step: McInt | number,
 }
 
 
@@ -17,7 +27,7 @@ export enum CompType {
 
 
 export enum RuntimeCondition {
-    Comparison { left: Score, comp: CompType, right: Score | number },
+    Comparison { left: McInt | McFloat, comp: CompType, right: number | McInt | McFloat },
 
     And (RuntimeCondition, RuntimeCondition),
     Or (RuntimeCondition, RuntimeCondition),
@@ -25,6 +35,25 @@ export enum RuntimeCondition {
     IsBlock { pos: mc_vector, id: string },
 }
 
+
 export mod World;
+export mod Mc;
+
+
+export struct Marker {
+    id: number,
+}
+
+// export enum ExecData {
+
+// }
+
+
+
+// export struct Exec {
+//     data:
+// }
+
+
 
 

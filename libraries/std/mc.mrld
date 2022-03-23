@@ -1,0 +1,39 @@
+
+
+
+let {
+    Mc,
+    McInt,
+    McFloat,
+} = import? "types.mrld";
+
+export let Mc = Mc;
+
+
+
+
+
+
+impl Mc {
+    print: (args: array) => {
+        let out = [];
+        for i in args {
+            out += match i {
+                McInt -> [ "{\"score\":{\"name\":\"" + "mrld_" + string(i.id) + "\",\"objective\":\"mrld_store\"}}" ],
+                McFloat -> [
+                    "{\"score\":{\"name\":\"" + "mrld_" + string(i.whole.id) + "\",\"objective\":\"mrld_store\"}}",
+                    "{\"text\":\".\"}",
+                    "{\"score\":{\"name\":\"" + "mrld_" + string(i.decimals.id) + "\",\"objective\":\"mrld_store\"}}",
+                ],
+                any -> [ "{\"text\":\"" + string(i) + "\"}" ],
+            }
+        }
+        command(
+            "tellraw @a [" + ",".join(out) + "]"
+        );
+    }
+    
+}
+
+
+
