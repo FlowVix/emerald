@@ -456,10 +456,11 @@ pub mod value_ops {
                     Box::new(iter)
                 }
             ),
+            Value::String(s) => Ok( Box::new(s.chars().map(|c| Value::String(c.to_string()) ).collect::<Vec<Value>>().into_iter()) ),
             
             value => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "array, range, or dict".to_string(),
+                    expected: "array, range, string, or dict".to_string(),
                     found: format!("{}", value.type_str(globals)),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],

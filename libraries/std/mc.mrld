@@ -2,36 +2,96 @@
 
 
 let {
-    Mc,
-    McInt,
-    McFloat,
+    MC,
+    MCInt,
+    MCFloat,
+    MCString,
+    ScoreRange
 } = import? "types.mrld";
 
-export let Mc = Mc;
+export let MC = MC;
+
+// func print_rec(args, i, arr) {
+//     let next = (arr) => {
+//         if i + 1 < len(args) print_rec(args, i + 1, arr)
+//         else command(
+//             "tellraw @a [" + ",".join(arr) + "]"
+//         );
+//     };
+//     match args[i] {
+//         MCInt -> {
+//             let arr = arr + [ '{"score":{"name":"' + string(args[i].name) + '","objective":"' + string(args[i].objective) + '"}}' ];
+//             next(arr);
+//         },
+//         MCFloat -> {
+//             let abs_value = args[i].abs();
+//             let decs = abs_value.decimals.trimmed();
+//             args[i].is_negative().then_else(!{
+//                 let arr = arr + ['{"text":"-"}'] + [ '{"score":{"name":"' + string(abs_value.whole.name) + '","objective":"' + string(abs_value.whole.objective) + '"}}' ] + ['{"text":"."}'];
+//                 abs_value.decimals.length().to_const(0..9, n => {
+//                     let rep = if (n == 0) 0 else 8 - n;
+//                     let arr = arr + ['{"text":"' + '0'*rep + '"}'] + [ '{"score":{"name":"' + string(decs.name) + '","objective":"' + string(decs.objective) + '"}}' ];
+//                     next(arr);
+//                 });
+//             }, !{
+//                 let arr = arr + [ '{"score":{"name":"' + string(abs_value.whole.name) + '","objective":"' + string(abs_value.whole.objective) + '"}}' ] + ['{"text":"."}'];
+//                 abs_value.decimals.length().to_const(0..9, n => {
+//                     let rep = if (n == 0) 0 else 8 - n;
+//                     let arr = arr + ['{"text":"' + '0'*rep + '"}'] + [ '{"score":{"name":"' + string(decs.name) + '","objective":"' + string(decs.objective) + '"}}' ];
+//                     next(arr);
+//                 });
+//             });
+//         },
+//         MCString -> {
+//             let arr = arr + [ '{"nbt":"str_' + string(args[i].id) + '","storage":"mrld","interpret":true}' ];
+//             next(arr);
+//         },
+//         any -> {
+//             let arr = arr + [ '{"text":"' + string(args[i]) + '"}' ];
+//             next(arr);
+//         },
+//     }
+// }
 
 
 
 
-
-
-impl Mc {
+impl MC {
     print: (args: array) => {
-        let out = [];
+        let out_str = MCString::new();
         for i in args {
-            out += match i {
-                McInt -> [ "{\"score\":{\"name\":\"" + "mrld_" + string(i.id) + "\",\"objective\":\"mrld_store\"}}" ],
-                McFloat -> [
-                    "{\"score\":{\"name\":\"" + "mrld_" + string(i.whole.id) + "\",\"objective\":\"mrld_store\"}}",
-                    "{\"text\":\".\"}",
-                    "{\"score\":{\"name\":\"" + "mrld_" + string(i.decimals.id) + "\",\"objective\":\"mrld_store\"}}",
-                ],
-                any -> [ "{\"text\":\"" + string(i) + "\"}" ],
-            }
+            out_str += MCString::from(i);
         }
-        command(
-            "tellraw @a [" + ",".join(out) + "]"
-        );
-    }
+        command('tellraw @a {"nbt":"str_' + string(out_str.id) + '","storage":"mrld","interpret":true}');
+    },
+    while_loop: (cond: function, f: mc_func) => {
+        cond().then(!{
+            f!;
+            cond().then($);
+        });
+    },
+    do_while_loop: (cond: function, f: mc_func) => {
+        !{
+            f!;
+            cond().then($);
+        }!;
+    },
+    for_loop: (r: range | ScoreRange, f: function) => {
+        let i = MCInt::new(0);
+        i = r.start;
+        (i < r.end).then(!{
+            f(i);
+            i += r.step;
+            (i < r.end).then($);
+        });
+    },
+    after: (time: number, f: mc_func) => {
+        if time == 0 {
+            f!;
+        } else {
+            command("schedule " + f.str + " " + string(time) + "s");
+        }
+    },
     
 }
 

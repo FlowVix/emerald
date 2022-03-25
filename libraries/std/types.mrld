@@ -2,18 +2,26 @@
 
 
 
-export struct McInt {
-    id: number,
+
+
+export struct MCInt {
+    name: string,
+    objective: string,
 }
-export struct McFloat {
-    whole: McInt,
-    decimals: McInt,
+
+export struct MCFloat {
+    whole: MCInt,
+    decimals: MCInt,
+}
+
+export struct MCString {
+    id: number,
 }
 
 export struct ScoreRange {
-    start: McInt | number,
-    end: McInt | number,
-    step: McInt | number,
+    start: MCInt | number,
+    end: MCInt | number,
+    step: MCInt | number,
 }
 
 
@@ -27,7 +35,7 @@ export enum CompType {
 
 
 export enum RuntimeCondition {
-    Comparison { left: McInt | McFloat, comp: CompType, right: number | McInt | McFloat },
+    Comparison { left: MCInt | MCFloat, comp: CompType, right: number | MCInt | MCFloat },
 
     And (RuntimeCondition, RuntimeCondition),
     Or (RuntimeCondition, RuntimeCondition),
@@ -37,7 +45,7 @@ export enum RuntimeCondition {
 
 
 export mod World;
-export mod Mc;
+export mod MC;
 
 
 export struct Marker {

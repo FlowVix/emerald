@@ -1,8 +1,8 @@
 
 
 let {
-    McInt,
-    McFloat,
+    MCInt,
+    MCFloat,
     CompType,
     RuntimeCondition,
 } = import? "types.mrld";
@@ -15,7 +15,7 @@ impl RuntimeCondition {
         match self {
             case RuntimeCondition:Comparison { left, comp, right } -> {
                 match left {
-                    McInt -> {
+                    MCInt -> {
                         let cond = "";
                         match right {
                             number -> {
@@ -41,7 +41,7 @@ impl RuntimeCondition {
 
                                 command("execute if score " + left.str() + " " + cond + " run " + f.str);
                             },
-                            McInt -> {
+                            MCInt -> {
                                 cond = match comp {
                                     case CompType:Equal -> "= " + right.str(),
                                     case CompType:Greater -> "> " + right.str(),
@@ -51,7 +51,7 @@ impl RuntimeCondition {
                                 }
                                 command("execute if score " + left.str() + " " + cond + " run " + f.str);
                             },
-                            McFloat -> {
+                            MCFloat -> {
                                 let diff = right - left;
                                 match comp {
                                     case CompType:Equal -> diff.is_0().then(f),
@@ -63,7 +63,7 @@ impl RuntimeCondition {
                             },
                         }
                     },
-                    McFloat -> {
+                    MCFloat -> {
                         let diff = left - right;
                         
                         match comp {
@@ -82,7 +82,7 @@ impl RuntimeCondition {
                 });
             },
             case RuntimeCondition:Or (left, right) -> {
-                let cond_check = McInt::new(0);
+                let cond_check = MCInt::new(0);
                 let add = !{
                     cond_check += 1;
                 }
@@ -96,7 +96,7 @@ impl RuntimeCondition {
         }
     },
     then_else: (self, f: mc_func, otherwise: mc_func) => {
-        let is_true = McInt::new(0);
+        let is_true = MCInt::new(0);
         self.then(!{is_true += 1;});
 
         (is_true == 1).then(f);

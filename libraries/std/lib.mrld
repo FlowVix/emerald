@@ -2,32 +2,28 @@
 
 extract import? "mc_int.mrld";
 extract import? "mc_float.mrld";
+extract import? "mc_string.mrld";
+
 extract import? "runtime_condition.mrld";
-extract import? "control_flow.mrld";
+
 extract import? "world.mrld";
 extract import? "mc.mrld";
+
 extract import? "marker.mrld";
 
 import? "string.mrld";
+import? "number.mrld";
 
 
 
-export let McInt = McInt;
-export let McFloat = McFloat;
+export let MCInt = MCInt;
+export let MCFloat = MCFloat;
+export let MCString = MCString;
 // export let ScoreRange = ScoreRange;
 export let RuntimeCondition = RuntimeCondition;
 
 export let World = World;
-export let Mc = Mc;
+export let MC = MC;
 
 
 export let Marker = Marker;
-
-
-export let mc_while = mc_while;
-export let mc_for = mc_for;
-export let mc_for_delay = mc_for_delay;
-export let mc_for2 = mc_for2;
-export let mc_for3 = mc_for3;
-export let after = after;
-

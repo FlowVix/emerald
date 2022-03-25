@@ -1,6 +1,5 @@
 
 
-extract import? "control_flow.mrld";
 
 let BOUND = 99999999;
 
@@ -8,16 +7,16 @@ let BOUND = 99999999;
 
 
 let {
-    McInt,
-    McFloat,
-    Mc,
+    MCInt,
+    MCFloat,
+    MC,
     RuntimeCondition,
     CompType,
 } = import? "types.mrld";
 
-export let McFloat = McFloat;
+export let MCFloat = MCFloat;
 
-func carry(w: McInt, d: McInt, mult: McInt | nulltype) {
+func carry(w: MCInt, d: MCInt, mult: MCInt | nulltype) {
     (d > BOUND).then(!{
         w += if (mult is nulltype) d / 100000000 else d / 100000000 * mult;
         d %= 100000000;
@@ -28,27 +27,25 @@ func carry(w: McInt, d: McInt, mult: McInt | nulltype) {
 
 let id_counter = 0;
 
-impl McFloat {
+impl MCFloat {
 
     new: (default: number) => {
-        let [whole, decimals] = McFloat::wd(default);
+        let [whole, decimals] = MCFloat::wd(default);
         // print(whole, " ", decimals);
-        return McFloat::{
-            whole: McInt::new( whole ),
-            decimals: McInt::new( decimals ),
+        return MCFloat::{
+            whole: MCInt::new( whole ),
+            decimals: MCInt::new( decimals ),
         }
     },
     wd: (n: number) => [floor(abs(n)) * signum(n) , floor((abs(n) % 1) * 100000000 * signum(n))],
 
 
     clone: (self) => {
-        let c = McFloat::new(0);
+        let c = MCFloat::new(0);
         c.set(self);
         return c;
     },
-    print: (self) => {
-        Mc::print([self.whole, ".", self.decimals]);
-    },
+    print: (self) => MC::print([self]),
 
     adjust: (self) => {
         (self.whole > 0 && self.decimals < 0).then(!{
@@ -76,7 +73,7 @@ impl McFloat {
         self.whole == 0 && self.decimals == 0;
     },
     is_positive: (self) => {
-        self.decimals >= 0;
+        self.whole >= 0 && self.decimals >= 0;
     },
     is_negative: (self) => {
         self.whole < 0 || self.decimals < 0;
@@ -88,49 +85,49 @@ impl McFloat {
         self.decimals += last_digit * 10000000;
     },
 
-    add: (self, other: number | McInt | McFloat) => {
+    add: (self, other: number | MCInt | MCFloat) => {
         match other {
             number -> {
-                let [whole, decimals] = McFloat::wd(other);
+                let [whole, decimals] = MCFloat::wd(other);
                 self.whole += whole;
                 self.decimals += decimals;
             },
-            McInt -> {
+            MCInt -> {
                 self.whole += other;
             },
-            McFloat -> {
+            MCFloat -> {
                 self.whole += other.whole;
                 self.decimals += other.decimals;
             }
         }
         self.adjust();
     },
-    subtract: (self, other: number | McInt | McFloat) => {
+    subtract: (self, other: number | MCInt | MCFloat) => {
         match other {
             number -> {
-                let [whole, decimals] = McFloat::wd(other);
+                let [whole, decimals] = MCFloat::wd(other);
                 self.whole -= whole;
                 self.decimals -= decimals;
             },
-            McInt -> {
+            MCInt -> {
                 self.whole -= other;
             },
-            McFloat -> {
+            MCFloat -> {
                 self.whole -= other.whole;
                 self.decimals -= other.decimals;
             }
         }
         self.adjust();
     },
-    multiply: (self, other: number | McInt | McFloat) => {
+    multiply: (self, other: number | MCInt | MCFloat) => {
         match other {
-            number -> self.multiply(McFloat::new(other)),
-            McInt -> {
-                let temp = McFloat::new(0);
+            number -> self.multiply(MCFloat::new(other)),
+            MCInt -> {
+                let temp = MCFloat::new(0);
                 temp = other;
                 self.multiply(temp);
             },
-            McFloat -> {
+            MCFloat -> {
                 let _self = self.clone(); _self.whole = _self.whole.abs(); _self.decimals = _self.decimals.abs();
                 let _other = other.clone(); _other.whole = _other.whole.abs(); _other.decimals = _other.decimals.abs();
 
@@ -139,18 +136,18 @@ impl McFloat {
                 let negate = (self.is_negative() && other.is_positive()) || (self.is_positive() && other.is_negative());
 
 
-                let result = McFloat::new(0);
+                let result = MCFloat::new(0);
                 result.whole = _self.whole * _other.whole;
 
-                func w_d_mult(w: McInt, d: McInt) {
+                func w_d_mult(w: MCInt, d: MCInt) {
                     let wh = w.clone();
-                    let exp = McInt::new(0);
-                    let pow10 = McInt::new(1);
-                    mc_while(=> wh > 0, !{
+                    let exp = MCInt::new(0);
+                    let pow10 = MCInt::new(1);
+                    MC::while_loop(=> wh > 0, !{
                         let last_digit = wh % 10;
                         let dec = d.clone();
                         let temp = pow10.clone();
-                        mc_for(0..exp, i => {
+                        MC::for_loop(0..exp, i => {
                             dec *= 10;
                             temp /= 10;
                             carry(result.whole, dec, last_digit * temp);
@@ -170,10 +167,10 @@ impl McFloat {
 
                 let d1 = _self.decimals.clone();
                 let d2 = _other.decimals.clone();
-                let pow = McInt::new(10000000);
-                mc_while(=> pow > 0, !{
+                let pow = MCInt::new(10000000);
+                MC::while_loop(=> pow > 0, !{
                     let last_digit = d1 / pow % 10;
-                    // Mc::print([": ", last_digit]);
+                    // MC::print([": ", last_digit]);
                     d2 /= 10;
                     result.decimals += d2 * last_digit;
                     carry(result.whole, result.decimals, null);
@@ -185,48 +182,54 @@ impl McFloat {
             }
         }
     },
-    divide: (self, other: number | McInt | McFloat) => {
+    divide: (self, other: number | MCInt | MCFloat) => {
         match other {
-            number -> self.divide(McFloat::new(other)),
-            McInt -> {
-                let temp = McFloat::new(0);
+            number -> self.divide(MCFloat::new(other)),
+            MCInt -> {
+                let temp = MCFloat::new(0);
                 temp = other;
                 self.divide(temp);
             },
-            McFloat -> {
+            MCFloat -> {
                 let _self = self.clone(); _self.whole = _self.whole.abs(); _self.decimals = _self.decimals.abs();
                 let _other = other.clone(); _other.whole = _other.whole.abs(); _other.decimals = _other.decimals.abs();
 
                 let negate = (self.is_negative() && other.is_positive()) || (self.is_positive() && other.is_negative());
                 
-                let result = McFloat::new(0);
-                let increment = McFloat::new(1);
-                mc_for(0..9, i => {
-                    mc_while(=> _self.is_positive(), !{
+                let result = MCFloat::new(0);
+                let increment = MCFloat::new(1);
+                let i = MCInt::new(0);
+                MC::while_loop(=> i < 9 && _other.is_over_0(), !{
+                    MC::while_loop(=> _self.is_positive(), !{
                         _self.subtract(_other);
                         result.add(increment);
                     });
                     _self.add(_other); result.subtract(increment);
                     _other.div10(); increment.div10();
+                    i += 1;
                 });
                 negate.then(!{ result.whole *= -1; result.decimals *= -1; });
                 self.set(result);
             }
         }
     },
+    inverse: (self) => {
+        let one = MCFloat::new(1);
+        return one / self;
+    },
 
-    set: (self, other: number | McInt | McFloat) => {
+    set: (self, other: number | MCInt | MCFloat) => {
         match other {
             number -> {
-                let [whole, decimals] = McFloat::wd(other);
+                let [whole, decimals] = MCFloat::wd(other);
                 self.whole = whole;
                 self.decimals = decimals;
             },
-            McInt -> {
+            MCInt -> {
                 self.whole = other;
                 self.decimals = 0;
             },
-            McFloat -> {
+            MCFloat -> {
                 self.whole = other.whole;
                 self.decimals = other.decimals;
             }
@@ -239,73 +242,73 @@ impl McFloat {
         return r;
     },
 
-    _plus_eq_: (self, v: number | McInt | McFloat) => {
+    _plus_eq_: (self, v: number | MCInt | MCFloat) => {
         self.add(v);
     },
-    _minus_eq_: (self, v: number | McInt | McFloat) => {
+    _minus_eq_: (self, v: number | MCInt | MCFloat) => {
         self.subtract(v);
     },
-    _mult_eq_: (self, v: number | McInt | McFloat) => {
+    _mult_eq_: (self, v: number | MCInt | MCFloat) => {
         self.multiply(v);
     },
-    _div_eq_: (self, v: number | McInt | McFloat) => {
+    _div_eq_: (self, v: number | MCInt | MCFloat) => {
         self.divide(v);
     },
 
-    _assign_: (self, v: number | McInt | McFloat) => {
+    _assign_: (self, v: number | MCInt | MCFloat) => {
         self.set(v);
     },
 
-    _plus_: (self, v: number | McInt | McFloat) => {
+    _plus_: (self, v: number | MCInt | MCFloat) => {
         let c = self.clone();
         c.add(v);
         return c;
     },
-    _minus_: (self, v: number | McInt | McFloat) => {
+    _minus_: (self, v: number | MCInt | MCFloat) => {
         let c = self.clone();
         c.subtract(v);
         return c;
     },
-    _mult_: (self, v: number | McInt | McFloat) => {
+    _mult_: (self, v: number | MCInt | MCFloat) => {
         let c = self.clone();
         c.multiply(v);
         return c;
     },
-    _div_: (self, v: number | McInt | McFloat) => {
+    _div_: (self, v: number | MCInt | MCFloat) => {
         let c = self.clone();
         c.divide(v);
         return c;
     },
 
-    _eq_: (self, v: number | McInt | McFloat) => {
+    _eq_: (self, v: number | MCInt | MCFloat) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Equal,
             right: v,
         }
     },
-    _greater_: (self, v: number | McInt | McFloat) => {
+    _greater_: (self, v: number | MCInt | MCFloat) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Greater,
             right: v,
         }
     },
-    _greater_eq_: (self, v: number | McInt | McFloat) => {
+    _greater_eq_: (self, v: number | MCInt | MCFloat) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:GreaterEq,
             right: v,
         }
     },
-    _lesser_: (self, v: number | McInt | McFloat) => {
+    _lesser_: (self, v: number | MCInt | MCFloat) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Lesser,
             right: v,
         }
     },
-    _lesser_eq_: (self, v: number | McInt | McFloat) => {
+    _lesser_eq_: (self, v: number | MCInt | MCFloat) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:LesserEq,

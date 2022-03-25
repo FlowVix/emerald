@@ -1,0 +1,142 @@
+
+
+let {
+    MCString,
+    MCInt,
+    MCFloat,
+    MC,
+} = import? "types.mrld";
+
+export let MCString = MCString;
+
+let id_counter = 0;
+
+impl MCString {
+    from: (v) => {
+        match v {
+            MCInt -> {
+                let s = MCString::new();
+                let _v = v.abs();
+                MC::do_while_loop(=> _v > 0, !{
+                    let d = _v % 10;
+                    d.to_const(0..10, i => {
+                        command("data modify storage mrld str_" + string(s.id) + " prepend value \"" + string(i) + "\"");
+                    });
+                    _v /= 10;
+                });
+                (v < 0).then(!{
+                    command("data modify storage mrld str_" + string(s.id) + " prepend value \"-\"");
+                });
+                return s;
+            },
+            MCFloat -> {
+                let s = MCString::from(v.whole.abs());
+                s.push(".");
+                let d_abs = v.decimals.abs();
+                let d = d_abs.trimmed();
+                let n = d_abs.length();
+                (n > 0).then(!{
+                    n *= -1; n += 8;
+                });
+                s.push(MCString::from("0").repeat(n));
+                s.push(MCString::from(d));
+                v.is_negative().then(!{
+                    command("data modify storage mrld str_" + string(s.id) + " prepend value \"-\"");
+                });
+                return s;
+            },
+            MCString -> {
+                return v.clone();
+            },
+            any -> {
+                let s = string(v);
+                let list = "[";
+                for i in s {
+                    list += '"' + i + '",';
+                }
+                list += "]";
+                command("data modify storage mrld str_" + string(id_counter) + " set value " + list);
+                return MCString::{
+                    id: (id_counter += 1) - 1,
+                }
+            }
+        }
+    },
+    new: () => {
+        return MCString::from("");
+    },
+
+    clone: (self) => {
+        command("data modify storage mrld str_" + string(id_counter) + " set from storage mrld str_" + string(self.id));
+        return MCString::{
+            id: (id_counter += 1) - 1,
+        }
+    },
+
+    push: (self, s: string | MCString) => {
+        match s {
+            string -> {
+                for i in s {
+                    command("data modify storage mrld str_" + string(self.id) + " append value " + '"' + i + '"');
+                }
+            },
+            MCString -> {
+                command("data modify storage mrld str_" + string(self.id) + " append from storage mrld str_" + string(s.id) + "[]");
+            }
+        }
+    },
+    repeat: (self, amount: number | MCInt) => {
+        match amount {
+            number -> {
+                let result = MCString::new();
+                for i in 0..amount {
+                    result.push(self);
+                }
+                return result;
+            },
+            MCInt -> {
+                let result = MCString::new();
+                MC::for_loop(0..amount, _ => {
+                    result.push(self);
+                });
+                return result;
+            },
+        }
+    },
+
+    get: (self, index: number | MCInt) => {
+        match index {
+            number -> {
+                let result = MCString::new();
+                command("data modify storage mrld str_" + string(result.id) + " append from storage mrld str_" + string(self.id) + "[" + string(floor(index)) + "]");
+                return result;
+            },
+            MCInt -> {
+                let c = self.clone();
+                MC::for_loop(0..index, _ => {
+                    command("data remove storage mrld str_" + string(c.id) + "[0]");
+                });
+                return c.get(0);
+            },
+        }
+    },
+
+    _plus_eq_: (self, v: string | MCString) => {
+        self.push(v);
+    },
+    _mult_eq_: (self, v: number | MCInt) => {
+        self = self.repeat(v);
+    },
+
+    _plus_: (self, v: string | MCString) => {
+        let c = self.clone();
+        c.push(v);
+        return c;
+    },
+    _mult_: (self, v: number | MCInt) => {
+        let c = self.clone();
+        c.repeat(v);
+        return c;
+    },
+
+}

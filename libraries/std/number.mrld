@@ -1,0 +1,10 @@
+
+
+impl number {
+    is_int: (self) => {
+        return self == floor(self);
+    }
+}
+
+
+

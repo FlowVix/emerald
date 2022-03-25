@@ -2,83 +2,139 @@
 
 
 let {
-    McInt,
+    MCInt,
+    MCFloat,
     ScoreRange,
     CompType,
     RuntimeCondition,
+    MC,
 } = import? "types.mrld";
 
-export let McInt = McInt;
+export let MCInt = MCInt;
 
 let id_counter = 0;
 
-impl McInt {
+impl MCInt {
 
     new: (default: number) => {
-        command("scoreboard players set mrld_" + string(id_counter) + " mrld_store " + string(floor(default)));
-        return McInt::{
-            id: (id_counter += 1) - 1,
+        let name = "mrld_" + string(id_counter);
+        let objective = "mrld_store";
+        id_counter += 1;
+        command("scoreboard players set " + name + " " + objective + " " + string(floor(default)));
+        return MCInt::{
+            name,
+            objective,
         }
     },
-    str: (self) => "mrld_" + string(self.id) + " mrld_store",
+    from_score: (name: string, objective: string) => {
+        return MCInt::{
+            name, objective,
+        }
+    },
+    str: (self) => self.name + " " + self.objective,
     clone: (self) => {
-        let c = McInt::new(0);
+        let c = MCInt::new(0);
         c.set(self);
         return c;
     },
-    print: (self) => {
-        command(
-            "tellraw @a {\"score\":{\"name\":\"" +
-            "mrld_" + string(self.id) +
-            "\",\"objective\":\"mrld_store\"}}"
-        );
+    print: (self) => MC::print([self]),
+    length: (self) => {
+        let s = self.clone();
+        let l = MCInt::new(0);
+        MC::while_loop(=> s > 0, !{
+            l += 1;
+            s /= 10;
+        });
+        return l;
+    },
+    trimmed: (self) => {
+        let s = self.clone();
+        MC::while_loop(=> s > 0 && s % 10 == 0, !{
+            s /= 10;
+        });
+        return s;
+    },
+    to_float: (self) => {
+        let r = MCFloat::new(0);
+        r = self;
+        return r;
     },
 
-    add: (self, other: number | McInt) => {
-        if other is number {
-            let other = floor(other);
-            if other < 0 {
-                self.subtract(-other);
-            } else {
-                command("scoreboard players add " + self.str() + " " + string(other));
+    add: (self, other: number | MCInt | MCFloat) => {
+        match other {
+            number -> {
+                let other = floor(other);
+                if other < 0 {
+                    self.subtract(-other);
+                } else {
+                    command("scoreboard players add " + self.str() + " " + string(other));
+                }
+            },
+            MCInt -> {
+                command("scoreboard players operation " + self.str() + " += " + other.str());
+            },
+            MCFloat -> {
+                self.add(other.whole);
             }
-        } else {
-            command("scoreboard players operation " + self.str() + " += " + other.str());
         }
     },
-    subtract: (self, other: number | McInt) => {
-        if other is number {
-            let other = floor(other);
-            if other < 0 {
-                self.add(-other);
-            } else {
-                command("scoreboard players remove " + self.str() + " " + string(other));
+    subtract: (self, other: number | MCInt | MCFloat) => {
+        match other {
+            number -> {
+                let other = floor(other);
+                if other < 0 {
+                    self.add(-other);
+                } else {
+                    command("scoreboard players remove " + self.str() + " " + string(other));
+                }
+            },
+            MCInt -> {
+                command("scoreboard players operation " + self.str() + " -= " + other.str());
+            },
+            MCFloat -> {
+                self.subtract(other.whole);
             }
-        } else {
-            command("scoreboard players operation " + self.str() + " -= " + other.str());
         }
     },
-    multiply: (self, other: number | McInt) => {
-        if other is number {
-            let other = floor(other);
-            let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
-            command("scoreboard players set " + str + " " + string(other));
-            command("scoreboard players operation " + self.str() + " *= " + str);
-        } else {
-            command("scoreboard players operation " + self.str() + " *= " + other.str());
+    multiply: (self, other: number | MCInt | MCFloat) => {
+        match other {
+            number -> {
+                if other.is_int() {
+                    let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
+                    command("scoreboard players set " + str + " " + string(other));
+                    command("scoreboard players operation " + self.str() + " *= " + str);
+                } else {
+                    self = (self.to_float() * MCFloat::new(other)).whole;
+                }
+            },
+            MCInt -> {
+                command("scoreboard players operation " + self.str() + " *= " + other.str());
+            },
+            MCFloat -> {
+                self = (self.to_float() * other).whole;
+            }
         }
     },
-    divide: (self, other: number | McInt) => {
-        if other is number {
-            let other = floor(other);
-            let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
-            command("scoreboard players set " + str + " " + string(other));
-            command("scoreboard players operation " + self.str() + " /= " + str);
-        } else {
-            command("scoreboard players operation " + self.str() + " /= " + other.str());
+    divide: (self, other: number | MCInt | MCFloat) => {
+        match other {
+            number -> {
+                if other.is_int() {
+                    let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
+                    command("scoreboard players set " + str + " " + string(other));
+                    command("scoreboard players operation " + self.str() + " /= " + str);
+                } else {
+                    self = (self.to_float() / MCFloat::new(other)).whole;
+                }
+            },
+            MCInt -> {
+                command("scoreboard players operation " + self.str() + " /= " + other.str());
+            },
+            MCFloat -> {
+                self = (self.to_float() / other).whole;
+            }
         }
     },
-    modulo: (self, other: number | McInt) => {
+    modulo: (self, other: number | MCInt) => {
         if other is number {
             let other = floor(other);
             let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
@@ -88,12 +144,18 @@ impl McInt {
             command("scoreboard players operation " + self.str() + " %= " + other.str());
         }
     },
-    set: (self, other: number | McInt) => {
-        if other is number {
-            let other = floor(other);
-            command("scoreboard players set " + self.str() + " " + string(other));
-        } else {
-            command("scoreboard players operation " + self.str() + " = " + other.str());
+    set: (self, other: number | MCInt | MCFloat) => {
+        match other {
+            number -> {
+                let other = floor(other);
+                command("scoreboard players set " + self.str() + " " + string(other));
+            },
+            MCInt -> {
+                command("scoreboard players operation " + self.str() + " = " + other.str());
+            },
+            MCFloat -> {
+                self = other.whole;
+            }
         }
     },
 
@@ -112,80 +174,80 @@ impl McInt {
     },
 
     
-    _plus_eq_: (self, v: number | McInt) => {
+    _plus_eq_: (self, v: number | MCInt) => {
         self.add(v);
     },
-    _minus_eq_: (self, v: number | McInt) => {
+    _minus_eq_: (self, v: number | MCInt) => {
         self.subtract(v);
     },
-    _mult_eq_: (self, v: number | McInt) => {
+    _mult_eq_: (self, v: number | MCInt) => {
         self.multiply(v);
     },
-    _div_eq_: (self, v: number | McInt) => {
+    _div_eq_: (self, v: number | MCInt) => {
         self.divide(v);
     },
-    _mod_eq_: (self, v: number | McInt) => {
+    _mod_eq_: (self, v: number | MCInt) => {
         self.modulo(v);
     },
-    _assign_: (self, v: number | McInt) => {
+    _assign_: (self, v: number | MCInt) => {
         self.set(v);
     },
 
-    _plus_: (self, v: number | McInt) => {
+    _plus_: (self, v: number | MCInt) => {
         let c = self.clone();
         c.add(v);
         return c;
     },
-    _minus_: (self, v: number | McInt) => {
+    _minus_: (self, v: number | MCInt) => {
         let c = self.clone();
         c.subtract(v);
         return c;
     },
-    _mult_: (self, v: number | McInt) => {
+    _mult_: (self, v: number | MCInt) => {
         let c = self.clone();
         c.multiply(v);
         return c;
     },
-    _div_: (self, v: number | McInt) => {
+    _div_: (self, v: number | MCInt) => {
         let c = self.clone();
         c.divide(v);
         return c;
     },
-    _mod_: (self, v: number | McInt) => {
+    _mod_: (self, v: number | MCInt) => {
         let c = self.clone();
         c.modulo(v);
         return c;
     },
 
-    _eq_: (self, v: number | McInt) => {
+    _eq_: (self, v: number | MCInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Equal,
             right: v,
         }
     },
-    _greater_: (self, v: number | McInt) => {
+    _greater_: (self, v: number | MCInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Greater,
             right: v,
         }
     },
-    _greater_eq_: (self, v: number | McInt) => {
+    _greater_eq_: (self, v: number | MCInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:GreaterEq,
             right: v,
         }
     },
-    _lesser_: (self, v: number | McInt) => {
+    _lesser_: (self, v: number | MCInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:Lesser,
             right: v,
         }
     },
-    _lesser_eq_: (self, v: number | McInt) => {
+    _lesser_eq_: (self, v: number | MCInt) => {
         return RuntimeCondition:Comparison {
             left: self,
             comp: CompType:LesserEq,
@@ -193,14 +255,14 @@ impl McInt {
         }
     },
 
-    _range_: (self, v: number | McInt) => {
+    _range_: (self, v: number | MCInt) => {
         return ScoreRange::{
             start: self,
             end: v,
             step: 1,
         }
     },
-    _r_range_: (self, v: number | McInt) => {
+    _r_range_: (self, v: number | MCInt) => {
         return ScoreRange::{
             start: v,
             end: self,
@@ -211,7 +273,7 @@ impl McInt {
 }
 
 impl ScoreRange {
-    _range_: (self, v: number | McInt) => {
+    _range_: (self, v: number | MCInt) => {
         return ScoreRange::{
             start: self.start,
             end: self.end,
