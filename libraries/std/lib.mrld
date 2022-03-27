@@ -11,8 +11,8 @@ extract import? "mc.mrld";
 
 extract import? "marker.mrld";
 
-import? "string.mrld";
-import? "number.mrld";
+import? "builtin_types/string.mrld";
+import? "builtin_types/number.mrld";
 
 
 

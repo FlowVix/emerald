@@ -381,7 +381,7 @@ macro_rules! operators {
 
 operators!(
     RightAssoc  <==  [ Assign ],
-    RightAssoc  <==  [ PlusEq MinusEq MultEq DivEq ModEq PowEq ],
+    RightAssoc  <==  [ PlusEq MinusEq MultEq DivEq ModEq PowEq EuclModEq ],
     LeftAssoc   <==  [ And Or ],
     Unary       <==  [ ExclMark ],
     LeftAssoc   <==  [ Is Eq NotEq Greater GreaterEq Lesser LesserEq ],
@@ -390,7 +390,7 @@ operators!(
     Unary       <==  [ TripleDot ],
     LeftAssoc   <==  [ Plus Minus ],
     Unary       <==  [ Plus Minus ],
-    LeftAssoc   <==  [ Mult Div Mod ],
+    LeftAssoc   <==  [ Mult Div Mod EuclMod ],
     RightAssoc  <==  [ Pow ],
     LeftAssoc   <==  [ Pipe ],
     LeftAssoc   <==  [ As ],

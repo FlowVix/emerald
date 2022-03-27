@@ -1,0 +1,20 @@
+
+
+impl number {
+
+    max: (a: number, b: number) => if (a > b) a else b,
+    min: (a: number, b: number) => if (a < b) a else b,
+
+    is_int: (self) => {
+        return self == floor(self);
+    },
+    clamp: (self, min: number, max: number) => {
+        return number::min(number::max(self, min), max);
+    },
+    wrap: (self, min: number, max: number) => {
+        return ((self - min) %% (max - min)) + min;
+    },
+}
+
+
+

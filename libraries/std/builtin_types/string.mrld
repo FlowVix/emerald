@@ -1,0 +1,27 @@
+
+
+
+
+impl string {
+    join: (self, arr: array) => {
+        let out = "";
+        for i in 0..(len(arr) - 1) {
+            out += string(arr[i]) + self;
+        }
+        out += string(arr[-1]);
+    },
+    substr: (self, start: number, end: number) => {
+		let start = start.clamp(0, self.length);
+		let end = end.clamp(0, self.length);
+		if start == end { return ''; }
+		if start > end {
+			return substr(self, end, start).reverse();
+		}
+		return substr(self, start, end);
+	},
+}
+
+
+
+
+

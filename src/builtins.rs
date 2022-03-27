@@ -292,6 +292,10 @@ builtins!{
     [Abs]: abs(n: Number) { Value::Number(n.abs()) }
     [Signum]: signum(n: Number) { Value::Number(n.signum()) }
 
+    [Substr]: substr(s: String, start: Number, end: Number) {
+        Value::String(s.as_str()[(start as usize)..(end as usize)].to_string())
+    }
+
 
     [ID]: id(@Any => poopie) {
         println!("id: {:?}", globals.get_scope(scope_id).func_id);

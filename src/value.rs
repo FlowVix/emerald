@@ -627,6 +627,20 @@ pub mod value_ops {
             }
         }
     }
+    pub fn eucl_modulo(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        match (&a.value, &b.value) {
+            (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1.rem_euclid(*n2))),
+            
+            (value1, value2) => {
+                Err( RuntimeError::TypeMismatch {
+                    expected: "number and number".to_string(),
+                    found: format!("{} and {}", value1.type_str(globals), value2.type_str(globals)),
+                    area,
+                    defs: vec![(value1.type_str(globals), a.def_area.clone()), (value2.type_str(globals), b.def_area.clone())],
+                } )
+            }
+        }
+    }
     pub fn pow(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1.powf(*n2))),

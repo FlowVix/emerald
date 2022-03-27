@@ -2,9 +2,7 @@
 
 extract import? "libraries/std/lib.mrld";
 
-let john = MCFloat::new(-2.012);
-let gaga = MCInt::new(56);
-let piss = MCString::from("shit fuck");
 
-MC::print([john, ", ", gaga, ", ", piss]);
+
+
 

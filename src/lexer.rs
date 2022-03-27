@@ -59,6 +59,8 @@ pub enum Token {
     DivEq,
     #[token("%=")]
     ModEq,
+    #[token("%%=")]
+    EuclModEq,
     #[token("**=")]
     PowEq,
     
@@ -84,6 +86,8 @@ pub enum Token {
     Div,
     #[token("%")]
     Mod,
+    #[token("%%")]
+    EuclMod,
 
     #[token("(")]
     LParen,
@@ -240,6 +244,7 @@ impl Token {
             Token::MultEq => "*=",
             Token::DivEq => "/=",
             Token::ModEq => "%=",
+            Token::EuclModEq => "%%=",
             Token::PowEq => "**=",
             Token::Greater => ">",
             Token::Lesser => "<",
@@ -251,6 +256,7 @@ impl Token {
             Token::Mult => "*",
             Token::Div => "/",
             Token::Mod => "%",
+            Token::EuclMod => "%%",
             Token::Caret => "^",
             Token::LParen => "(",
             Token::RParen => ")",

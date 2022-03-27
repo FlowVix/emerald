@@ -1230,6 +1230,7 @@ pub fn execute(
                         Mult: mult                  Overload: mult
                         Div: div                    Overload: div
                         Mod: modulo                 Overload: mod
+                        EuclMod: eucl_modulo        Overload: eucl_mod
                         Pow: pow                    Overload: pow
                         Eq: eq_op                   Overload: eq
                         NotEq: neq_op               Overload: neq
@@ -1299,6 +1300,7 @@ pub fn execute(
                         MultEq: mult                Overload: mult_eq
                         DivEq: div                  Overload: div_eq
                         ModEq: modulo               Overload: mod_eq
+                        EuclModEq: eucl_modulo      Overload: eucl_mod_eq
                         PowEq: pow                  Overload: pow_eq
                         // Assign: overwrite           Overload: assign
                     )
