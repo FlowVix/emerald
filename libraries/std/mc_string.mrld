@@ -5,6 +5,7 @@ let {
     MCInt,
     MCFloat,
     MC,
+    RuntimeCondition,
 } = import? "types.mrld";
 
 export let MCString = MCString;
@@ -47,6 +48,15 @@ impl MCString {
             },
             MCString -> {
                 return v.clone();
+            },
+            RuntimeCondition -> {
+                let s = MCString::new();
+                v.then_else(!{
+                    s += "true";
+                }, !{
+                    s += "false";
+                });
+                return s;
             },
             any -> {
                 let s = string(v);
