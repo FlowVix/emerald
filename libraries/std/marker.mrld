@@ -10,13 +10,34 @@ let id_counter = 0;
 
 impl Marker {
 
-    new: (x: number, y: number, z: number) => {
-        command("kill @e[tag=mrld_" + string(id_counter) + ",limit=1]");
-        command("summon minecraft:marker " + string(x) + " " + string(y) + " " + string(z) + " {Tags:[\"mrld_" + string(id_counter) + "\"]}");
+    new: (pos: mc_vector) => {
+        let entity = @e[tag = "mrld_" + string(id_counter), limit = 1];
+        entity.kill();
+        
+        command("summon minecraft:marker " + string(pos.x) + " " + string(pos.y) + " " + string(pos.z) + " {Tags:[\"mrld_" + string(id_counter) + "\",mrld_marker]}");
+        
         return Marker::{
-            id: (id_counter += 1) - 1,
+            entity,
         }
     },
+
+    move: (self, pos: mc_vector) => {
+        command(
+            "execute as " +
+            self.entity.cmd_str() +
+            " at @s run tp @s " +
+            string(pos.x) + " " + string(pos.y) + " " + string(pos.z)
+        );
+    },
+
+    here: (self, f: mc_func) => {
+        command(
+            "execute at " +
+            self.entity.cmd_str() +
+            " run " +
+            f.str
+        );
+    }
 
 }
 

@@ -1,1 +1,3 @@
 - add error for nonexistent variant in destructure
+- add operations for all the new types
+- fix code areas

@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io::{self, Write}}
 use convert_case::{Case, Casing};
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -1155,8 +1155,8 @@ pub fn execute(
         }
     }
     
-    if globals.values.map.len() > 50000 + globals.last_amount {
-    // if true {
+    // if globals.values.map.len() > 50000 + globals.last_amount {
+    if true {
         // println!("{}", globals.values.map.len());
         globals.collect(scope_id);
         // println!("{} {}\n", globals.values.map.len(), globals.last_amount);
@@ -1542,17 +1542,41 @@ pub fn execute(
             Ok( value )
         }
         NodeType::If { cond, code, else_branch } => {
-            let cond_value = execute!(cond => scope_id);
+            let cond_value = protecute!(cond => scope_id);
             let mut ret_id = globals.insert_value(
                 Value::Null,
                 area!(source.clone(), start_node.span)
             );
             globals.protect_value(ret_id);
-            if value_ops::to_bool(globals.get(cond_value), area!(source.clone(), cond.span), globals)? {
-                ret_id = execute!(code => scope_id)
-            } else if let Some(b) = else_branch {
-                ret_id = execute!(b => scope_id)
+
+            match globals.get_method(cond_value, "_if_") {
+                Some(f) => {
+                    let code_f = protecute!( &ASTNode {
+                        span: node.span,
+                        node: NodeType::Lambda { args: vec![], header_area: area!(source.clone(), node.span), code: code.clone() },
+                    } => scope_id);
+                    let else_f = match else_branch {
+                        Some(b) => protecute!( &ASTNode {
+                            span: node.span,
+                            node: NodeType::Lambda { args: vec![], header_area: area!(source.clone(), node.span), code: b.clone() },
+                        } => scope_id),
+                        None => globals.insert_value(
+                            Value::Null,
+                            area!(source.clone(), start_node.span)
+                        ),
+                    };
+                    ret_id = run_func!(vec![cond_value, code_f, else_f], f);
+                },
+                None => {
+                    if value_ops::to_bool(globals.get(cond_value), area!(source.clone(), cond.span), globals)? {
+                        ret_id = execute!(code => scope_id)
+                    } else if let Some(b) = else_branch {
+                        ret_id = execute!(b => scope_id)
+                    }
+                }
             }
+
+
             globals.redef_value(ret_id, area!(source.clone(), start_node.span));
             Ok( ret_id )
         }
@@ -1562,33 +1586,53 @@ pub fn execute(
                 area!(source.clone(), start_node.span)
             );
             globals.protect_value(ret_id);
-            loop {
-                let cond_value = execute!(cond => scope_id);
-                if !(value_ops::to_bool(globals.get(cond_value), area!(source.clone(), cond.span), globals)?) {
-                    break;
-                }
-                ret_id = execute!(code => scope_id);
-                match globals.exits.last() {
-                    Some(
-                        Exit::Break(v, _)
-                    ) => {
-                        ret_id = *v;
-                        globals.exits.pop();
-                        ret!(Ok( ret_id ));
-                    },
-                    Some(
-                        Exit::Return(_, _)
-                    ) => {
-                        ret!(Ok( ret_id ));
-                    },
-                    Some(
-                        Exit::Continue(_)
-                    ) => {
-                        globals.exits.pop();
-                    },
-                    None => (),
+
+            let cond_value = protecute!(cond => scope_id);
+            match globals.get_method(cond_value, "_while_") {
+                Some(f) => {
+                    let code_f = protecute!( &ASTNode {
+                        span: node.span,
+                        node: NodeType::Lambda { args: vec![], header_area: area!(source.clone(), node.span), code: code.clone() },
+                    } => scope_id);
+                    let cond_f = protecute!( &ASTNode {
+                        span: node.span,
+                        node: NodeType::Lambda { args: vec![], header_area: area!(source.clone(), node.span), code: cond.clone() },
+                    } => scope_id);
+                    ret_id = run_func!(vec![cond_value, code_f, cond_f], f);
+                },
+                None => {
+                    let mut calculated = true;
+                    loop {
+                        let cond_value = if calculated { cond_value } else { execute!(cond => scope_id) };
+                        calculated = false;
+                        if !(value_ops::to_bool(globals.get(cond_value), area!(source.clone(), cond.span), globals)?) {
+                            break;
+                        }
+                        ret_id = protecute!(code => scope_id);
+                        match globals.exits.last() {
+                            Some(
+                                Exit::Break(v, _)
+                            ) => {
+                                ret_id = *v;
+                                globals.exits.pop();
+                                ret!(Ok( ret_id ));
+                            },
+                            Some(
+                                Exit::Return(_, _)
+                            ) => {
+                                ret!(Ok( ret_id ));
+                            },
+                            Some(
+                                Exit::Continue(_)
+                            ) => {
+                                globals.exits.pop();
+                            },
+                            None => (),
+                        }
+                    }
                 }
             }
+
             globals.redef_value(ret_id, area!(source.clone(), start_node.span));
             Ok( ret_id )
         }
@@ -1641,21 +1685,30 @@ pub fn execute(
             globals.redef_value(ret_id, area!(source.clone(), start_node.span));
             Ok( ret_id )
         }
-        NodeType::For { var: (name, var_area), code, iter } => {
+        NodeType::For { left, code, iter } => {
             let mut ret_id = globals.insert_value(
                 Value::Null,
                 area!(source.clone(), start_node.span)
             );
             globals.protect_value(ret_id);
-            let iter_id = execute!(iter => scope_id);
+            let iter_id = protecute!(iter => scope_id);
             for i in value_ops::iter(&globals.get(iter_id), area!(source.clone(), iter.span), globals)? {
                 let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
                 {
                     let temp = globals.insert_value(
                         i,
-                        var_area.clone(),
+                        area!(source.clone(), left.span),
                     );
-                    globals.set_var(derived, name.clone(), temp);
+
+                    let mut list = HashMap::new();
+                    do_assign(left, temp, derived, globals, source.clone(), &mut list, true)?;
+
+                    for (l, r) in list {
+                        let right_clone = proteclone!(r => @);
+                        
+                        globals.set_var(derived, l.1.unwrap(), right_clone);
+                    }
+
                 }
                 ret_id = execute!(code => derived);
                 match globals.exits.last() {
@@ -1890,57 +1943,81 @@ pub fn execute(
                 _ => (),
             }
 
+            let val = match (&globals.get(base_id).value.clone(), &member[..]) {
+                (Value::String(s), "length") =>
+                    Value::Number(s.len() as f64),
+
+                (Value::Range(Range { start, .. }), "start") =>
+                    if let Some(n) = start {Value::Number(*n)} else {Value::Null},
+                (Value::Range(Range { step, .. }), "step") =>
+                    Value::Number(*step as f64),
+                (Value::Range(Range { end, .. }), "end") =>
+                    if let Some(n) = end {Value::Number(*n)} else {Value::Null},
+
+                (Value::McFunc(id), "str") => /* if globals.mcfuncs.map[id].len() != 1 { */
+                    Value::String( format!("function mrld:gen{}", id) ),
+                // } else {
+                //     Value::String( globals.mcfuncs.map[id][0].clone() )
+                // }
+                
+                (Value::McVector(
+                    McVector::Pos(x, ..) |
+                    McVector::WithRot(x, ..)
+                ), "x") =>
+                    Value::String( format!("{}{}", x.prefix(), x.get_inner().to_str(globals, &mut vec![])) ),
+                (Value::McVector(
+                    McVector::Pos(_, y, _) |
+                    McVector::WithRot(_, y, _, _, _)
+                ), "y") =>
+                    Value::String( format!("{}{}", y.prefix(), y.get_inner().to_str(globals, &mut vec![])) ),
+                (Value::McVector(
+                    McVector::Pos(_, _, z) |
+                    McVector::WithRot(_, _, z, _, _)
+                ), "z") =>
+                    Value::String( format!("{}{}", z.prefix(), z.get_inner().to_str(globals, &mut vec![])) ),
+
+                    
+                (Value::McVector(
+                    McVector::WithRot(_, _, _, h, _)
+                ), "h_rot") =>
+                    Value::String( format!("{}{}", h.prefix(), h.get_inner().to_str(globals, &mut vec![])) ),
+                (Value::McVector(
+                    McVector::WithRot(_, _, _, _, v)
+                ), "v_rot") =>
+                    Value::String( format!("{}{}", v.prefix(), v.get_inner().to_str(globals, &mut vec![])) ),
+
+
+                (Value::Selector(Selector { args, .. }), "args") => {
+                    let mut out = vec![];
+                    for (s, id) in args {
+                        let s = globals.insert_value(Value::String(s.clone()), area!(source.clone(), start_node.span));
+                        let v = globals.clone_value(*id, None);
+                        let item = vec![s, v];
+                        out.push( globals.insert_value(
+                            Value::Tuple(item),
+                            area!(source.clone(), start_node.span)
+                        ) );
+                    }
+                    Value::Array(out)
+                }
+
+                (Value::Selector( Selector { selector_type, .. }), "selector_type") =>
+                    Value::String( match selector_type {
+                        lexer::SelectorType::Players => "a",
+                        lexer::SelectorType::Entities => "e",
+                        lexer::SelectorType::Nearest => "p",
+                        lexer::SelectorType::Random => "r",
+                        lexer::SelectorType::Executor => "s",
+                    }.to_string() ),
+                
+                _ => ret!(Err( RuntimeError::NonexistentField {
+                    field: member.clone(),
+                    area: area!(source.clone(), start_node.span),
+                } )),
+            };
+
             Ok( globals.insert_value(
-                match (&globals.get(base_id).value.clone(), &member[..]) {
-                    (Value::String(s), "length") =>
-                        Value::Number(s.len() as f64),
-    
-                    (Value::Range(Range{ start, .. }), "start") =>
-                        if let Some(n) = start {Value::Number(*n)} else {Value::Null},
-                    (Value::Range(Range{ step, .. }), "step") =>
-                        Value::Number(*step as f64),
-                    (Value::Range(Range{ end, .. }), "end") =>
-                        if let Some(n) = end {Value::Number(*n)} else {Value::Null},
-
-                    (Value::McFunc(id), "str") => /* if globals.mcfuncs.map[id].len() != 1 { */
-                        Value::String( format!("function mrld:gen{}", id) ),
-                    // } else {
-                    //     Value::String( globals.mcfuncs.map[id][0].clone() )
-                    // }
-                    
-                    (Value::McVector(
-                        McVector::Pos(x, ..) |
-                        McVector::WithRot(x, ..)
-                    ), "x") =>
-                        Value::String( format!("{}{}", x.prefix(), x.get_inner().to_str(globals, &mut vec![])) ),
-                    (Value::McVector(
-                        McVector::Pos(_, y, _) |
-                        McVector::WithRot(_, y, _, _, _)
-                    ), "y") =>
-                        Value::String( format!("{}{}", y.prefix(), y.get_inner().to_str(globals, &mut vec![])) ),
-                    (Value::McVector(
-                        McVector::Pos(_, _, z) |
-                        McVector::WithRot(_, _, z, _, _)
-                    ), "z") =>
-                        Value::String( format!("{}{}", z.prefix(), z.get_inner().to_str(globals, &mut vec![])) ),
-
-                        
-                    (Value::McVector(
-                        McVector::WithRot(_, _, _, h, _)
-                    ), "h_rot") =>
-                        Value::String( format!("{}{}", h.prefix(), h.get_inner().to_str(globals, &mut vec![])) ),
-                    (Value::McVector(
-                        McVector::WithRot(_, _, _, _, v)
-                    ), "v_rot") =>
-                        Value::String( format!("{}{}", v.prefix(), v.get_inner().to_str(globals, &mut vec![])) ),
-
-
-                    
-                    _ => ret!(Err( RuntimeError::NonexistentField {
-                        field: member.clone(),
-                        area: area!(source.clone(), start_node.span),
-                    } )),
-                },
+                val,
                 area!(source.clone(), start_node.span)
             ) )
         }
@@ -2746,6 +2823,39 @@ pub fn execute(
             };
             Ok( val_id )
         },
+        NodeType::Selector { selector_type, args } => {
+            let mut arg_vec = vec![];
+            for (s, a, v) in args {
+                let id = protecute!(v => scope_id);
+                let val = globals.get(id).value.clone();
+                check_selector_type(s.clone(), globals, a.clone(), &val)?;
+                arg_vec.push((s.clone(), id));
+            }
+            Ok( globals.insert_value(
+                Value::Selector(Selector {
+                    selector_type: selector_type.clone(),
+                    args: arg_vec,
+                }),
+                area!(source.clone(), start_node.span)
+            ) )
+        },
+        NodeType::Throw { msg } => {
+            let msg_val_id = execute!(msg => scope_id);
+            let msg_val =  globals.get(msg_val_id).value.clone();
+            match msg_val {
+                Value::String(s) => ret!(Err( RuntimeError::Throw {
+                    area: area!(source.clone(), start_node.span),
+                    msg: s.clone(),
+                } )),
+                other => ret!(Err( RuntimeError::TypeMismatch {
+                    expected: "string".to_string(),
+                    found: format!("{}", other.type_str(globals)),
+                    area: area!(source.clone(), msg.span),
+                    defs: vec![(other.type_str(globals), globals.get(msg_val_id).def_area.clone())],
+                } )),
+            }
+        }
+        _ => todo!(),
     };
 
     globals.pop_protected();

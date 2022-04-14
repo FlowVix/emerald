@@ -61,7 +61,7 @@ impl MCString {
             any -> {
                 let s = string(v);
                 let list = "[";
-                for i in s {
+                for i of s {
                     list += '"' + i + '",';
                 }
                 list += "]";
@@ -86,7 +86,7 @@ impl MCString {
     push: (self, s: string | MCString) => {
         match s {
             string -> {
-                for i in s {
+                for i of s {
                     command("data modify storage mrld str_" + string(self.id) + " append value " + '"' + i + '"');
                 }
             },
@@ -99,7 +99,7 @@ impl MCString {
         match amount {
             number -> {
                 let result = MCString::new();
-                for i in 0..amount {
+                for i of 0..amount {
                     result.push(self);
                 }
                 return result;

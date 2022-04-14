@@ -1,0 +1,38 @@
+
+
+func mcify(v) {
+    match v {
+        range -> {
+            if v.start == null {
+                return ".." + string(v.end);
+            }
+            if v.end == null {
+                return string(v.start) + "..";
+            }
+            return string(v);
+        },
+        any -> return string(v),
+    }
+}
+
+
+impl selector {
+
+    cmd_str: (self) => {
+        let out = "@" + self.selector_type;
+        if len(self.args) > 0 {
+            let args = [];
+            for (s, v) of self.args {
+                args += [s + "=" + mcify(v)];
+            }
+            out += "[" + ",".join(args) + "]";
+        }
+        return out;
+    },
+
+    kill: (self) => {
+        command("kill " + self.cmd_str());
+    }
+
+}
+

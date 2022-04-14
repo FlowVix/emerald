@@ -5,7 +5,7 @@
 impl string {
     join: (self, arr: array) => {
         let out = "";
-        for i in 0..(len(arr) - 1) {
+        for i of 0..(len(arr) - 1) {
             out += string(arr[i]) + self;
         }
         out += string(arr[-1]);

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError};
+use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError, lexer::SelectorType};
 
 
 
@@ -95,6 +95,13 @@ pub enum McVector {
     WithRot(CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Selector {
+    pub selector_type: SelectorType,
+    pub args: Vec<(String, ValuePos)>,
+}
+
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Range {
@@ -122,6 +129,7 @@ pub enum Value {
     McFunc(McFuncID),
 
     McVector(McVector),
+    Selector(Selector),
 
     StructInstance {
         struct_id: TypePos,
@@ -161,6 +169,7 @@ impl Value {
 
             Value::McFunc(_) => ValueType::Builtin(BuiltinType::McFunc),
             Value::McVector(_) => ValueType::Builtin(BuiltinType::McVector),
+            Value::Selector(_) => ValueType::Builtin(BuiltinType::Selector),
 
             Value::StructInstance { struct_id, .. } => ValueType::CustomStruct(*struct_id),
             Value::EnumInstance { enum_id, .. } => ValueType::CustomEnum(*enum_id),
@@ -306,6 +315,26 @@ impl Value {
                     ),
                 }
             },
+            Value::Selector(s) => {
+                let mut out_str = "@".to_string() + match s.selector_type {
+                    SelectorType::Players => "a",
+                    SelectorType::Entities => "e",
+                    SelectorType::Nearest => "p",
+                    SelectorType::Random => "r",
+                    SelectorType::Executor => "s",
+                };
+                if visited.contains(&self) {
+                    return out_str + "[...]"
+                }
+                visited.push( self );
+                if s.args.len() > 0 {
+                    out_str += &("[".to_string() + &s.args.iter().map(
+                        |(s, v)| format!("{} = {}", s, globals.get(*v).value.to_str(globals, visited))
+                    ).collect::<Vec<String>>().join(", ") + "]")[..];
+                }
+                visited.pop();
+                out_str
+            },
         }
     }
 
@@ -314,6 +343,13 @@ impl Value {
             Pattern::Any => Ok( true ),
             Pattern::Type(t) => Ok( self.typ() == t.clone() ),
             Pattern::Either(a, b) => Ok( self.matches_pat(*a, globals)? || self.matches_pat(*b, globals)? )
+        }
+    }
+
+    pub fn is_integer(&self) -> bool {
+        match self {
+            Value::Number(n) => n.fract() == 0.0,
+            _ => false,
         }
     }
 
@@ -372,7 +408,13 @@ impl Value {
                         }
                     },
                 }
-            }
+            },
+            Value::Selector( Selector {args, .. }) => {
+                for (_, i) in args{
+                    values.insert(*i);
+                    globals.get(*i).value.get_references(globals, values, scopes);
+                }
+            },
             _ => (),
         }
     }
@@ -706,6 +748,8 @@ pub mod value_ops {
             (Value::Number(n1), Value::Number(n2)) => Ok(n1 == n2),
             (Value::String(s1), Value::String(s2)) => Ok(s1 == s2),
             (Value::Boolean(b1), Value::Boolean(b2)) => Ok(b1 == b2),
+
+            (Value::Null, Value::Null) => Ok(true),
 
             (_, _) => Ok(false),
         }

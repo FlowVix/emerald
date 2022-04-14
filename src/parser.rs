@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{CodeArea, lexer::Token, value::{Value, CoordType}, error::{SyntaxError}, EmeraldSource};
+use crate::{CodeArea, lexer::{Token, SelectorType}, value::{Value, CoordType, Range}, interpreter::{Globals}, error::{SyntaxError, RuntimeError}, EmeraldSource};
 
 
 
@@ -36,7 +36,7 @@ pub enum NodeType {
     Block { code: Box<ASTNode>, typ: BlockType },
     If {cond: Box<ASTNode>, code: Box<ASTNode>, else_branch: Option<Box<ASTNode>>},
     While {cond: Box<ASTNode>, code: Box<ASTNode> },
-    For { var: (String, CodeArea), iter: Box<ASTNode>, code: Box<ASTNode> },
+    For { left: Box<ASTNode>, iter: Box<ASTNode>, code: Box<ASTNode> },
     Loop { code: Box<ASTNode> },
     Call { base: Box<ASTNode>, args: Vec<ASTNode> },
     FuncDef { func_name: String, args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
@@ -48,6 +48,7 @@ pub enum NodeType {
     Member { base: Box<ASTNode>, member: String },
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
+    Throw { msg: Box<ASTNode> },
     Continue,
 
     UnboundedRange { base: Box<ASTNode> },
@@ -94,6 +95,8 @@ pub enum NodeType {
     McVector { x: CoordType<Box<ASTNode>>, y: CoordType<Box<ASTNode>>, z: CoordType<Box<ASTNode>>, rot: Option<(CoordType<Box<ASTNode>>, CoordType<Box<ASTNode>>)> },
     Extract { value: Box<ASTNode> },
     
+    Selector { selector_type: SelectorType, args: Vec<(String, CodeArea, ASTNode)> },
+
 }
 
 
@@ -110,6 +113,99 @@ pub enum VariantType {
     Struct { fields: HashMap<String, ASTNode>, field_areas: HashMap<String, CodeArea> }
 }
 
+macro_rules! selector_args {
+    {
+
+        ($value:ident, $globals:ident)
+
+        $(
+            $name:ident => $value_check:block else $expected:literal, Unique: $unique:expr;
+        )+
+
+    } => {
+        pub fn valid_selector_arg(arg: String) -> bool {
+            match &arg[..] {
+                $(
+                    stringify!($name) => true,
+                )+
+                _ => false,
+            }
+        }
+        pub fn selector_arg_unique(arg: String) -> bool {
+            match &arg[..] {
+                $(
+                    stringify!($name) => $unique,
+                )+
+                _ => unreachable!(),
+            }
+        }
+        pub fn check_selector_type(arg: String, $globals: &Globals, value_area: CodeArea, $value: &Value) -> Result<(), RuntimeError> {
+            match &arg[..] {
+                $(
+                    stringify!($name) => if $value_check {Ok(())} else {
+                        Err( RuntimeError::IncorrectSelectorArgType {
+                            expected: $expected.to_string(),
+                            value_area,
+                            arg_name: arg,
+                        } )
+                    },
+                )+
+                _ => unreachable!(),
+            }
+        }
+        // pub fn selector_arg_unique
+    };
+}
+
+selector_args!{
+
+    (value, globals)
+
+    x => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    y => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    z => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    distance => {
+        match value {
+            Value::Range(Range {step, ..}) => *step == 1.0,
+            _ => false,
+        }
+    } else "range with step 1", Unique: true;
+    dx => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    dy => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    dz => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    scores => {
+        match value {
+            Value::Dictionary(map) => {
+                let mut valid = true;
+                for (_, id) in map {
+                    if !(matches!(globals.get(*id).value, Value::Range(_)) || matches!(globals.values.map[id].value, Value::Number(_))) {
+                        valid = false;
+                        break;
+                    }
+                }
+                valid
+            }
+            _ => false,
+        }
+    } else "range or number dictionary", Unique: true;
+    tag => { matches!(value, Value::String(_)) } else "string", Unique: false;
+    team => { matches!(value, Value::String(_)) } else "string", Unique: true;
+
+    name => { matches!(value, Value::String(_)) } else "string", Unique: true;
+    type => { matches!(value, Value::String(_)) } else "string", Unique: true;
+    predicate => { matches!(value, Value::String(_)) } else "string", Unique: true;
+
+    x_rotation => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    y_rotation => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    nbt => { matches!(value, Value::Dictionary(_)) /* unfinished */ } else "valid nbt dictionary", Unique: false;
+
+    level => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    gamemode => { matches!(value, Value::String(_)) } else "string", Unique: true;
+    advancements => { matches!(value, Value::Dictionary(_)) /* unfinished */ } else "idfk", Unique: true;
+
+    limit => { matches!(value, Value::Number(_)) } else "number", Unique: true;
+    sort => { matches!(value, Value::String(_)) } else "string", Unique: true;
+}
 
 
 // #[derive(Debug, Clone, PartialEq)]
@@ -765,15 +861,11 @@ pub fn parse_unit(
         }
         Token::For => {
             pos += 1;
-            check_tok!(Ident(var_name) else "variable name");
-            let area = CodeArea {
-                source: info.source.clone(),
-                range: span!(-1),
-            };
-            check_tok!(In else "in");
+            parse!(parse_expr(true) => let left);
+            check_tok!(Of else "of");
             parse!(parse_expr(false) => let iter);
             parse!(parse_expr(false) => let code);
-            ret!( NodeType::For { code: Box::new(code), iter: Box::new(iter), var: (var_name, area) } => start.0, span!(-1).1 );
+            ret!( NodeType::For { code: Box::new(code), iter: Box::new(iter), left: Box::new(left) } => start.0, span!(-1).1 );
         }
         Token::Func => {
             pos += 1;
@@ -1001,6 +1093,12 @@ pub fn parse_unit(
 
             ret!( NodeType::Extract { value: Box::new(value) } => start.0, span!(-1).1 );
         },
+        Token::Throw => {
+            pos += 1;
+            parse!(parse_expr(false) => let msg);
+
+            ret!( NodeType::Throw { msg: Box::new(msg) } => start.0, span!(-1).1 );
+        },
         Token::Dollar => {
             pos += 1;
 
@@ -1118,6 +1216,61 @@ pub fn parse_unit(
 
             ret!( NodeType::McVector { x, y, z, rot } => start.0, span!(-1).1 );
         },
+        Token::Selector(s) => {
+            pos += 1;
+
+            let mut args: Vec<(String, CodeArea, ASTNode)> = vec![];
+
+            if_tok!(== LSqBracket: {
+                pos += 1;
+
+                let type_allowed = matches!(s, SelectorType::Executor | SelectorType::Entities);
+
+                while_tok!(!= RSqBracket: {
+                    check_tok!(Ident(arg_name) else "selector argument name or ]");
+                    let arg_area = CodeArea {
+                        source: info.source.clone(),
+                        range: span!(-1),
+                    };
+
+                    if !valid_selector_arg(arg_name.clone()) {
+                        return Err( SyntaxError::NonexistentSelectorArg {
+                            arg_name,
+                            used: arg_area,
+                        } )
+                    }
+                    if !type_allowed && arg_name == "type" {
+                        return Err( SyntaxError::TypeSelectorArg {
+                            used: arg_area,
+                        } )
+                    };
+                    
+                    
+                    if selector_arg_unique(arg_name.clone()) {
+                        if let Some(id) = args.iter().position(|(e, _, _)| e == &arg_name) {
+                            return Err( SyntaxError::DuplicateSelectorArg {
+                                arg_name,
+                                first_used: args[id].1.clone(),
+                                used_again: arg_area,
+                            } )
+                        }
+                    }
+
+                    check_tok!(Assign else "=");
+                    parse!(parse_expr(true) => let val);
+
+                    args.push((arg_name, arg_area, val));
+
+                    if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                        expected_err!("] or ,", tok!(0), span!(0), info )
+                    }
+                    skip_tok!(Comma);
+                });
+            });
+
+            ret!( NodeType::Selector { selector_type: s.clone(), args } => start.0, span!(-1).1 );
+            
+        }
         unary_op if is_unary(unary_op) => {
             pos += 1;
             let prec = unary_prec(unary_op);
@@ -1151,7 +1304,8 @@ fn parse_value(
     
     parse!(parse_unit => let mut value);
     let start = value.span;
-
+    
+    // println!("{}", pos);
     while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon | Token::ExclMark | Token::Colon | Token::TripleDot) {
         match tok!(0) {
             Token::LParen => {

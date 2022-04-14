@@ -108,7 +108,28 @@ impl RuntimeCondition {
     },
     _or_: (self, other: RuntimeCondition) => {
         return RuntimeCondition:Or (self, other);
-    }
+    },
+
+    _if_: (self, if_code, else_code) => {
+        if else_code == null {
+            self.then(!{
+                if_code();
+            });
+        } else {
+            self.then_else(!{
+                if_code();
+            }, !{
+                else_code();
+            });
+        }
+    },
+
+    _while_: (self, code, cond) => {
+        self.then(!{
+            code();
+            cond().then($);
+        });
+    },
 
 
 }

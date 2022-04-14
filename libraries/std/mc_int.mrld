@@ -11,6 +11,7 @@ let {
 } = import? "types.mrld";
 
 export let MCInt = MCInt;
+export let ScoreRange = ScoreRange;
 
 let id_counter = 0;
 
@@ -161,7 +162,7 @@ impl MCInt {
 
     to_const: (self, r: range, f: function) => {
         let score = self.clone();
-        for i in r {
+        for i of r {
             (score == i).then(!{f(i);});
         }
     },
@@ -273,6 +274,18 @@ impl MCInt {
 }
 
 impl ScoreRange {
+
+    from: (r: range) => {
+        if r.start == null || r.end == null {
+            throw "Runtime ranges cannot have undefined ends";
+        }
+        return ScoreRange::{
+            start: r.start,
+            end: r.end,
+            step: r.step,
+        }
+    },
+
     _range_: (self, v: number | MCInt) => {
         return ScoreRange::{
             start: self.start,

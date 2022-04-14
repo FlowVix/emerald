@@ -6,7 +6,8 @@ let {
     MCInt,
     MCFloat,
     MCString,
-    ScoreRange
+    ScoreRange,
+    RuntimeCondition,
 } = import? "types.mrld";
 
 export let MC = MC;
@@ -59,7 +60,7 @@ export let MC = MC;
 impl MC {
     print: (args: array) => {
         let out_str = MCString::new();
-        for i in args {
+        for i of args {
             out_str += MCString::from(i);
         }
         command('tellraw @a {"nbt":"str_' + string(out_str.id) + '","storage":"mrld","interpret":true}');

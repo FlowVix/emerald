@@ -10,6 +10,15 @@ fn convert_string(s: &str) -> String {
         .replace("\\'", "'")
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum SelectorType {
+    Players,
+    Entities,
+    Nearest,
+    Random,
+    Executor
+}
+
 #[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token {
 
@@ -142,6 +151,8 @@ pub enum Token {
     Loop,
     #[token("for")]
     For,
+    #[token("of")]
+    Of,
     #[token("in")]
     In,
     #[token("as")]
@@ -177,8 +188,9 @@ pub enum Token {
     #[token("extract")]
     Extract,
 
-    // #[token("type")]
-    // Type,
+    #[token("throw")]
+    Throw,
+
     #[token("impl")]
     Impl,
 
@@ -202,6 +214,16 @@ pub enum Token {
 
     #[token("?")]
     QMark,
+
+    #[regex(r#"@[aespr]"#, |lex| match &lex.slice()[1..] {
+        "a" => SelectorType::Players,
+        "e" => SelectorType::Entities,
+        "s" => SelectorType::Executor,
+        "p" => SelectorType::Nearest,
+        "r" => SelectorType::Random,
+        _ => unreachable!(),
+    })]
+    Selector(SelectorType),
 
     // #[regex(r#"#[a-zA-Z_]\w*"#, |lex| lex.slice()[1..].to_string())]
     // TypeName(String),
@@ -280,6 +302,7 @@ impl Token {
             Token::While => "while",
             Token::Loop => "loop",
             Token::For => "for",
+            Token::Of => "of",
             Token::In => "in",
             Token::As => "as",
             Token::Is => "is",
@@ -292,10 +315,9 @@ impl Token {
             Token::Export => "export",
             Token::Import => "export",
             Token::Extract => "extract",
-            // Token::Type => "type",
+            Token::Throw => "throw",
             Token::Impl => "impl",
             Token::Eol => ";",
-            // Token::TypeName(_) => "type name",
             Token::Ident(_) => "identifier",
             Token::Error => "what the fuck is that",
             Token::Eof => "end of file",
@@ -307,6 +329,7 @@ impl Token {
             Token::IDSpecial => "id\\",
             Token::Tilde => "~",
             Token::QMark => "?",
+            Token::Selector(_) => "target selector",
             // Token::DoubleColon => "::",
         }
     }

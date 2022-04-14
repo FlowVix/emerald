@@ -241,6 +241,7 @@ builtin_types!(
 
     McFunc,
     McVector,
+    Selector,
 );
 
 

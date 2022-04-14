@@ -53,6 +53,18 @@ pub enum SyntaxError {
         first_used: CodeArea,
         used_again: CodeArea,
     },
+    DuplicateSelectorArg {
+        arg_name: String,
+        first_used: CodeArea,
+        used_again: CodeArea,
+    },
+    NonexistentSelectorArg {
+        arg_name: String,
+        used: CodeArea,
+    },
+    TypeSelectorArg {
+        used: CodeArea,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -226,6 +238,15 @@ pub enum RuntimeError {
         area: CodeArea,
         reason: String,
         // area2: CodeArea,
+    },
+    IncorrectSelectorArgType {
+        arg_name: String,
+        expected: String,
+        value_area: CodeArea,
+    },
+    Throw {
+        msg: String,
+        area: CodeArea,
     },
 }
 
@@ -454,6 +475,40 @@ impl ToReport for SyntaxError {
                 labels: vec![
                     (first_used.clone(), format!("Variant name first used here")),
                     (used_again.clone(), format!("Used again here")),
+                ],
+                note: None,
+            },
+            SyntaxError::DuplicateSelectorArg {
+                arg_name,
+                first_used,
+                used_again,
+            } => ErrorReport {
+                source: used_again.clone(),
+                message: format!("The target selector argument '{}' can only be used once", arg_name),
+                labels: vec![
+                    (first_used.clone(), format!("Argument first used here")),
+                    (used_again.clone(), format!("Used again here")),
+                ],
+                note: None,
+            },
+            SyntaxError::NonexistentSelectorArg {
+                arg_name,
+                used,
+            } => ErrorReport {
+                source: used.clone(),
+                message: format!("Target selector argument '{}' doesn't exist", arg_name),
+                labels: vec![
+                    (used.clone(), format!("Argument used here")),
+                ],
+                note: None,
+            },
+            SyntaxError::TypeSelectorArg {
+                used,
+            } => ErrorReport {
+                source: used.clone(),
+                message: format!("Target selector argument 'type' can only be used in @e and @s"),
+                labels: vec![
+                    (used.clone(), format!("Argument used here")),
                 ],
                 note: None,
             },
@@ -908,6 +963,29 @@ impl ToReport for RuntimeError {
                 message: format!("Cannot iterate over this {}", typ),
                 labels: vec![
                     (area.clone(), reason.to_string()),
+                ],
+                note: None,
+            },
+            RuntimeError::IncorrectSelectorArgType {
+                expected,
+                value_area,
+                arg_name,
+            } => ErrorReport {
+                source: value_area.clone(),
+                message: format!("Incorrect selector argument type"),
+                labels: vec![
+                    (value_area.clone(), format!("Selector argument {} takes a {}", arg_name.fg(a), expected.fg(b))),
+                ],
+                note: None,
+            },
+            RuntimeError::Throw {
+                msg,
+                area
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("{}", msg),
+                labels: vec![
+                    (area.clone(), format!("Thrown here")),
                 ],
                 note: None,
             },

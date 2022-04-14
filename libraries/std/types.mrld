@@ -49,7 +49,7 @@ export mod MC;
 
 
 export struct Marker {
-    id: number,
+    entity: selector,
 }
 
 // export enum ExecData {

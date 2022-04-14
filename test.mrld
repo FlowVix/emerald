@@ -1,16 +1,7 @@
 
 
-extract import? "libraries/std/lib.mrld";
+
+extract import "libraries/std/lib.mrld";
 
 
-let gaga = MCInt::new(3);
-
-
-let pupu = !{
-    MC::print([gaga, " ", gaga + 2 == 5, " ", gaga == gaga - 1]);
-}
-
-pupu!;
-gaga += 1;
-pupu!;
-
+let gaga = ScoreRange::from(45...);
