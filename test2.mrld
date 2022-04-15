@@ -1,0 +1,12 @@
+
+
+
+impl number {
+    gaga: (self, other) => {
+        match other {
+            number -> print(self, " ", other),
+            _ -> throw "gaga",
+        }
+    }
+}
+

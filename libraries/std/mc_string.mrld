@@ -58,7 +58,7 @@ impl MCString {
                 });
                 return s;
             },
-            any -> {
+            _ -> {
                 let s = string(v);
                 let list = "[";
                 for i of s {

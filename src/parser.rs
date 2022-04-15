@@ -479,8 +479,9 @@ operators!(
     RightAssoc  <==  [ Assign ],
     RightAssoc  <==  [ PlusEq MinusEq MultEq DivEq ModEq PowEq EuclModEq ],
     LeftAssoc   <==  [ And Or ],
+    LeftAssoc   <==  [ Pipe ],
     Unary       <==  [ ExclMark ],
-    LeftAssoc   <==  [ Is Eq NotEq Greater GreaterEq Lesser LesserEq ],
+    LeftAssoc   <==  [ Is Eq NotEq Greater GreaterEq Lesser LesserEq In ],
     LeftAssoc   <==  [ DoubleDot ],
     Unary       <==  [ DoubleDot ],
     Unary       <==  [ TripleDot ],
@@ -488,7 +489,6 @@ operators!(
     Unary       <==  [ Plus Minus ],
     LeftAssoc   <==  [ Mult Div Mod EuclMod ],
     RightAssoc  <==  [ Pow ],
-    LeftAssoc   <==  [ Pipe ],
     LeftAssoc   <==  [ As ],
 );
 

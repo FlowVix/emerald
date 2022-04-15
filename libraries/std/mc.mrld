@@ -47,7 +47,7 @@ export let MC = MC;
 //             let arr = arr + [ '{"nbt":"str_' + string(args[i].id) + '","storage":"mrld","interpret":true}' ];
 //             next(arr);
 //         },
-//         any -> {
+//         _ -> {
 //             let arr = arr + [ '{"text":"' + string(args[i]) + '"}' ];
 //             next(arr);
 //         },

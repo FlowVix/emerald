@@ -1,7 +1,2 @@
 
 
-
-extract import "libraries/std/lib.mrld";
-
-
-let gaga = ScoreRange::from(45...);

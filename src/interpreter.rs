@@ -233,16 +233,6 @@ impl Globals {
             );
             self.set_var(scope_id, i.to_case(Case::Snake).to_string(), id);
         }
-        {
-            let id = self.insert_value(
-                Value::Pattern(Pattern::Any),
-                CodeArea {
-                    source: source.clone(),
-                    range: (0, 0)
-                },
-            );
-            self.set_var(scope_id, "any".to_string(), id);
-        }
     }
 
 
@@ -1176,6 +1166,7 @@ pub fn execute(
                 Token::Mult |
                 Token::Div |
                 Token::Mod |
+                Token::EuclMod |
                 Token::Pow |
                 Token::Eq |
                 Token::NotEq |
@@ -1186,7 +1177,8 @@ pub fn execute(
                 Token::As |
                 Token::Is |
                 Token::Pipe |
-                Token::DoubleDot => {
+                Token::DoubleDot |
+                Token::In => {
                     let left_raw = protecute_raw!(left => scope_id);
                     let right_raw = protecute_raw!(right => scope_id);
 
@@ -1209,7 +1201,11 @@ pub fn execute(
                                             None => match globals.get_method(right_clone, &format!("_r_{}_", stringify!($overload_name))) {
                                                 Some(f) => Ok( run_func!(vec![right_raw, left_clone], f) ),
                                                 None => {
-                                                    let result = value_ops::$name(&globals.get(left_clone).clone(), &globals.get(right_clone).clone(), area!(source.clone(), node.span), globals)?;
+                                                    let result = value_ops::$name(
+                                                        &globals.get(left_clone).clone(),
+                                                        &globals.get(right_clone).clone(),
+                                                        area!(source.clone(), node.span), globals
+                                                    )?;
                                                     Ok(globals.insert_value(
                                                         result,
                                                         area!(source.clone(), node.span),
@@ -1242,6 +1238,7 @@ pub fn execute(
                         Is: is_op                   Overload: is
                         Pipe: either                Overload: either
                         DoubleDot: range            Overload: range
+                        In: in_op                   Overload: in
                     )
             
                 }
@@ -1250,6 +1247,7 @@ pub fn execute(
                 Token::MultEq |
                 Token::DivEq |
                 Token::ModEq |
+                Token::EuclModEq |
                 Token::PowEq => {
                     let left_raw = protecute_raw!(left => scope_id);
                     let right_raw = protecute_raw!(right => scope_id);
@@ -1496,14 +1494,21 @@ pub fn execute(
         }
         NodeType::Var { var_name } => {
             // println!("c: {:?} {}", globals.get_scope(scope_id).vars, var_name);
-            match globals.get_var(scope_id, var_name) {
-                Some(i) => Ok( i ),
-                None => Err(
-                    RuntimeError::UndefinedVar {
-                        var_name: var_name.to_string(),
-                        area: area!(source.clone(), start_node.span),
-                    }
-                ),
+            if var_name == "_" {
+                Ok( globals.insert_value(
+                    Value::Pattern(Pattern::Any),
+                    area!(source.clone(), start_node.span)
+                ) )
+            } else {
+                match globals.get_var(scope_id, var_name) {
+                    Some(i) => Ok( i ),
+                    None => Err(
+                        RuntimeError::UndefinedVar {
+                            var_name: var_name.to_string(),
+                            area: area!(source.clone(), start_node.span),
+                        }
+                    ),
+                }
             }
         }
         NodeType::StatementList { statements } => {
@@ -2513,6 +2518,7 @@ pub fn execute(
             buf.pop();
             buf.push(path);
 
+
             if *cached {
                 // println!("{:?} {:#?}", buf, globals.import_caches);
                 match globals.import_caches.get(&buf) {
@@ -2575,7 +2581,6 @@ pub fn execute(
                     globals.import_trace.push( area!(source.clone(), start_node.span) );
                     globals.exports.push( HashMap::new() );
                     globals.init_global(mod_scope_root, mod_source.clone());
-
 
                     execute(
                         &node,
@@ -2842,6 +2847,7 @@ pub fn execute(
         NodeType::Throw { msg } => {
             let msg_val_id = execute!(msg => scope_id);
             let msg_val =  globals.get(msg_val_id).value.clone();
+            println!("a{:#?}", source);
             match msg_val {
                 Value::String(s) => ret!(Err( RuntimeError::Throw {
                     area: area!(source.clone(), start_node.span),

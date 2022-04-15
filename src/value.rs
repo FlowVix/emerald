@@ -44,14 +44,16 @@ pub enum Pattern {
     Type(ValueType),
     Any,
     Either(Box<Pattern>, Box<Pattern>),
+    Not(Box<Pattern>),
 }
 
 impl Pattern {
     pub fn to_str(&self, globals: &Globals) -> String {
         match self {
-            Pattern::Any => format!("any"),
+            Pattern::Any => format!("_"),
             Pattern::Type(t) => t.to_str(globals),
             Pattern::Either(a, b) => format!("({} | {})", a.to_str(globals), b.to_str(globals)),
+            Pattern::Not(a) => format!("!{}", a.to_str(globals)),
         }
     }
 }
@@ -286,8 +288,22 @@ impl Value {
 
             }
             Value::Pattern(p) => p.to_str(globals),
-            Value::Range(Range { start, end, step }) => 
-                format!("{}..{}", if let Some(n) = start {n.to_string()} else {"null".to_string()}, if let Some(n) = end {n.to_string()} else {"null".to_string()}) + &(if *step != 1.0 {format!("..{}", step)} else {"".to_string() }),
+            Value::Range(Range { start, end, step }) => {
+                if *step != 1.0 {
+                    format!(
+                        "{}..{}..{}",
+                        if let Some(n) = start {n.to_string()} else {"null".to_string()},
+                        step,
+                        if let Some(n) = end {n.to_string()} else {"null".to_string()}
+                    )
+                } else {
+                    format!(
+                        "{}..{}",
+                        if let Some(n) = start {n.to_string()} else {"null".to_string()},
+                        if let Some(n) = end {n.to_string()} else {"null".to_string()}
+                    )
+                }
+            }
             Value::McFunc(_) => format!("!{{...}}"),
             Value::McVector(v) => {
                 match v {
@@ -342,7 +358,8 @@ impl Value {
         match p {
             Pattern::Any => Ok( true ),
             Pattern::Type(t) => Ok( self.typ() == t.clone() ),
-            Pattern::Either(a, b) => Ok( self.matches_pat(*a, globals)? || self.matches_pat(*b, globals)? )
+            Pattern::Either(a, b) => Ok( self.matches_pat(*a, globals)? || self.matches_pat(*b, globals)? ),
+            Pattern::Not(a) => Ok( !self.matches_pat(*a, globals)? )
         }
     }
 
@@ -447,7 +464,11 @@ impl Iterator for RangeIter {
         let ret = self.current;
         self.current += self.step;
         return if let Some(e) = self.end {
-            if ret < e { Some(Value::Number(ret)) } else {None}
+            if if self.start <= e {
+                ret < e
+            } else {
+                ret > e
+            } { Some(Value::Number(ret)) } else {None}
         } else {
             Some(Value::Number(ret))
         }
@@ -491,7 +512,7 @@ pub mod value_ops {
                         return Err( RuntimeError::CannotIter {
                             typ: a.value.type_str(globals),
                             area,
-                            reason: "This range has no lower bound".to_string()
+                            reason: "This range has no start".to_string()
                         } );
                     }
                     let iter = RangeIter::new(start.unwrap(), step, end);
@@ -589,6 +610,16 @@ pub mod value_ops {
                 }
                 Ok(Value::Array(new_vec))
             },
+            (Value::Tuple(a1), Value::Tuple(a2)) => {
+                let mut new_vec = vec![];
+                for i in a1 {
+                    new_vec.push( globals.clone_value(*i, Some(area.clone())) );
+                }
+                for i in a2 {
+                    new_vec.push( globals.clone_value(*i, Some(area.clone())) );
+                }
+                Ok(Value::Tuple(new_vec))
+            },
             (Value::Dictionary(m1), Value::Dictionary(m2)) => {
                 let mut new_map = HashMap::new();
                 for i in m1 {
@@ -627,9 +658,44 @@ pub mod value_ops {
     pub fn mult(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(n1 * n2)),
-            (Value::String(s), Value::Number(n)) => Ok(Value::String(s.repeat(
+            (Value::String(s), Value::Number(n)) |
+            (Value::Number(n), Value::String(s)) => Ok(Value::String(s.repeat(
                 if *n < 0.0 {0} else {*n as usize}
             ))),
+            (Value::Array(arr), Value::Number(n)) |
+            (Value::Number(n), Value::Array(arr)) => {
+                let mut new_vec = vec![];
+                if *n >= 0.0 {
+                    for _ in 0..(*n as usize) {
+                        for i in arr {
+                            new_vec.push( globals.clone_value(*i, Some(area.clone())) );
+                        }
+                    }
+                }
+                Ok(Value::Array(new_vec))
+            },
+            (Value::Tuple(arr), Value::Number(n)) |
+            (Value::Number(n), Value::Tuple(arr)) => {
+                let mut new_vec = vec![];
+                if *n >= 0.0 {
+                    for _ in 0..(*n as usize) {
+                        for i in arr {
+                            new_vec.push( globals.clone_value(*i, Some(area.clone())) );
+                        }
+                    }
+                }
+                Ok(Value::Tuple(new_vec))
+            },
+
+            (Value::Range(r), Value::Number(mult)) |
+            (Value::Number(mult), Value::Range(r)) => {
+                let new_range = Range {
+                    start: if let Some(n) = r.start {Some(n * mult)} else { None },
+                    end: if let Some(n) = r.end {Some(n * mult)} else { None },
+                    step: r.step * mult,
+                };
+                Ok(Value::Range(new_range))
+            },
             
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
@@ -714,7 +780,7 @@ pub mod value_ops {
     }
     pub fn negate(a: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match &a.value {
-            Value::Number(n1) => Ok(Value::Number(-n1)),
+            Value::Number(n) => Ok(Value::Number(-n)),
             
             value => {
                 Err( RuntimeError::TypeMismatch {
@@ -731,10 +797,12 @@ pub mod value_ops {
     pub fn not(a: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match &a.value {
             Value::Boolean(b) => Ok(Value::Boolean(!b)),
+            Value::Pattern(p) => Ok(Value::Pattern(Pattern::Not(Box::new(p.clone())))),
+            Value::Type(t) => Ok(Value::Pattern(Pattern::Not(Box::new(Pattern::Type(t.clone()))))),
             
             value => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "bool".to_string(),
+                    expected: "bool, pattern, or type".to_string(),
                     found: format!("{}", value.type_str(globals)),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
@@ -921,6 +989,42 @@ pub mod value_ops {
                     defs: vec![(value1.type_str(globals), a.def_area.clone()), (value2.type_str(globals), b.def_area.clone())],
                 } )
             }
+        }
+    }
+
+    pub fn in_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        match (&a.value, &b.value) {
+            (_, Value::Array(r)) => {
+                for i in r {
+                    let s = globals.get(*i).clone();
+                    if eq(a, &s, area.clone(), globals).unwrap() {
+                        return Ok(Value::Boolean(true));
+                    }
+                }
+                Ok(Value::Boolean(false))
+            },
+
+            (Value::String(s), Value::Dictionary(map)) => {
+                Ok(Value::Boolean(map.contains_key(s)))
+            },
+            (Value::String(s1), Value::String(s2)) => {
+                Ok(Value::Boolean( s2.contains(s1.as_str()) ))
+            },
+
+            (value, Value::Dictionary(_) | Value::String(_)) => Err( RuntimeError::TypeMismatch {
+                expected: "string".to_string(),
+                found: format!("{}", value.type_str(globals)),
+                area: a.def_area.clone(),
+                defs: vec![(value.type_str(globals), a.def_area.clone())],
+            } ),
+
+
+            (v1, v2) => Err( RuntimeError::TypeMismatch {
+                expected: "_ and array, string and dictionary, or string and string".to_string(),
+                found: format!("{} and {}", v1.type_str(globals), v2.type_str(globals)),
+                area,
+                defs: vec![(v1.type_str(globals), a.def_area.clone()), (v2.type_str(globals), b.def_area.clone())],
+            } ),
         }
     }
 

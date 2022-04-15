@@ -11,7 +11,7 @@ func mcify(v) {
             }
             return string(v);
         },
-        any -> return string(v),
+        _ -> return string(v),
     }
 }
 

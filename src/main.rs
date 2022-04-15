@@ -12,12 +12,11 @@ mod generator;
 use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
 use ansi_term;
-use ariadne::{Source};
-use builtins::{builtin_names, builtin_type_from_str, builtin_type_names};
+use ariadne::Source;
 use error::{ToReport, RuntimeError};
 use interpreter::{execute, Globals, Exit};
 use logos::Logos;
-use value::{Value, ValueType, Pattern};
+use value::Value;
 
 use crate::{parser::parse, generator::generate_datapack};
 
@@ -125,6 +124,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     // cache.fetch(&source).unwrap();
 
     let ast = parse(&tokens, &source);
+    
     let mut globals = Globals::new();
     globals.exports.push( HashMap::new() );
     match ast {
@@ -138,6 +138,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                 &mut globals,
                 source.clone(),
             );
+            
             if let Ok(_) = result {
                 result = match globals.exits.last() {
                     Some(
