@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io::{self, Write}}
 use convert_case::{Case, Casing};
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -1081,9 +1081,9 @@ pub fn execute(
 
 
                 let derived = globals.derive_scope($func.parent_scope, globals.get_scope(scope_id).func_id);
-                for (arg_id, (name, _, d)) in $arg_ids.iter().zip($func.args.clone()) {
+                for (arg_id, (Located {inner, ..}, t, d)) in $arg_ids.iter().zip($func.args.clone()) {
                     
-                    match d {
+                    match t {
                         Some(typ) => {
                             let result = value_ops::is_op_raw(&globals.get(*arg_id).clone(), &globals.get(typ).clone(), area!(source.clone(), node.span), globals)?;
                             if !result {
@@ -1101,7 +1101,7 @@ pub fn execute(
                         },
                         None => (),
                     }
-                    globals.set_var(derived, name.clone(), *arg_id);
+                    globals.set_var(derived, inner.clone(), *arg_id);
                 }
                 
                 globals.trace.push( area!(source.clone(), start_node.span) );
@@ -1767,14 +1767,22 @@ pub fn execute(
         }
         NodeType::FuncDef { func_name, args, code, header_area } => {
             let mut args_exec = vec![];
-            for (s, c, t) in args {
-                match t {
-                    Some(n) => args_exec.push( (s.clone(), c.clone(), {
+            for (s, t, d) in args {
+                let t = match t {
+                    Some(n) => {
                         let _n = execute!(n => scope_id);
                         Some( proteclone!( _n => area!(source.clone(), n.span) ) )
-                    }) ),
-                    None => args_exec.push( (s.clone(), c.clone(), None) ),
-                }
+                    }
+                    None => None,
+                };
+                let d = match d {
+                    Some(n) => {
+                        let _n = execute!(n => scope_id);
+                        Some( proteclone!( _n => area!(source.clone(), n.span) ) )
+                    }
+                    None => None,
+                };
+                args_exec.push( (s.clone(), t, d) );
             }
             let value_id = globals.insert_value(
                 Value::Function( Function {
@@ -1791,14 +1799,22 @@ pub fn execute(
         }
         NodeType::Lambda { args, code, header_area } => {
             let mut args_exec = vec![];
-            for (s, c, t) in args {
-                match t {
-                    Some(n) => args_exec.push( (s.clone(), c.clone(), {
+            for (s, t, d) in args {
+                let t = match t {
+                    Some(n) => {
                         let _n = execute!(n => scope_id);
                         Some( proteclone!( _n => area!(source.clone(), n.span) ) )
-                    }) ),
-                    None => args_exec.push( (s.clone(), c.clone(), None) ),
-                }
+                    }
+                    None => None,
+                };
+                let d = match d {
+                    Some(n) => {
+                        let _n = execute!(n => scope_id);
+                        Some( proteclone!( _n => area!(source.clone(), n.span) ) )
+                    }
+                    None => None,
+                };
+                args_exec.push( (s.clone(), t, d) );
             }
             Ok( globals.insert_value(
                 Value::Function( Function {
@@ -2381,8 +2397,8 @@ pub fn execute(
                                             if let Value::Function(
                                                 Function { args, .. }
                                             ) = globals.get(temp).value.clone() {
-                                                if let Some((s, _, _)) = args.get(0) {
-                                                    if s == "self" { globals.builtin_impls.get_mut(b).unwrap().methods.push(k.clone()) }
+                                                if let Some((Located {inner, ..}, ..)) = args.get(0) {
+                                                    if inner == "self" { globals.builtin_impls.get_mut(b).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2398,8 +2414,8 @@ pub fn execute(
                                             if let Value::Function(
                                                 Function { args, .. }
                                             ) = globals.get(temp).value.clone() {
-                                                if let Some((s, _, _)) = args.get(0) {
-                                                    if s == "self" { globals.struct_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                if let Some((Located {inner, ..}, ..)) = args.get(0) {
+                                                    if inner == "self" { globals.struct_impls.get_mut(id).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2415,8 +2431,8 @@ pub fn execute(
                                             if let Value::Function(
                                                 Function { args, .. }
                                             ) = globals.get(temp).value.clone() {
-                                                if let Some((s, _, _)) = args.get(0) {
-                                                    if s == "self" { globals.enum_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                if let Some((Located {inner, ..}, ..)) = args.get(0) {
+                                                    if inner == "self" { globals.enum_impls.get_mut(id).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2432,8 +2448,8 @@ pub fn execute(
                                             if let Value::Function(
                                                 Function { args, .. }
                                             ) = globals.get(temp).value.clone() {
-                                                if let Some((s, _, _)) = args.get(0) {
-                                                    if s == "self" { globals.module_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                if let Some((Located {inner, ..}, ..)) = args.get(0) {
+                                                    if inner == "self" { globals.module_impls.get_mut(id).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2652,19 +2668,60 @@ pub fn execute(
                     source,
                 ),
                 
-                Value::Function( f @ Function { args: func_args, code, parent_scope, header_area, self_arg} ) => {
+                Value::Function( f @ Function { args: params, self_arg, header_area, ..} ) => {
+                    // println!("1 {:?}", args);
+
+
                     let mut args = args.clone();
                     if let Some(n) = self_arg {
                         args.insert(0, *n.clone());
                     }
-                    let mut arg_ids = vec![];
-                    for (arg, (name, a, _)) in args.iter().zip(func_args) {
-                        let arg_id = if name == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
-                        // if name != "self" {
-                        //     arg_id = proteclone!(arg_id => a.clone());
-                        // }
-                        arg_ids.push( arg_id );
+
+                    if args.len() > params.len() {
+                        ret!(Err(
+                            RuntimeError::IncorrectArgumentCount {
+                                provided: args.len(),
+                                takes: params.len(),
+                                header_area: header_area.clone(),
+                                call_area: area!(source.clone(), start_node.span)
+                            }
+                        ))
                     }
+
+                    let mut counter = 0;
+
+                    let mut arg_ids = vec![];
+                    for (s, _, d) in params {
+                        let arg_id = if counter >= args.len() {
+                            if let Some(d) = d {
+                                globals.clone_value(*d, None)
+                            } else {
+                                ret!(Err(
+                                    RuntimeError::ArgumentNotProvided {
+                                        arg_area: s.area.clone(),
+                                        arg_name: s.inner.clone(),
+                                        call_area: area!(source.clone(), start_node.span)
+                                    }
+                                ))
+                            }
+                        } else {
+                            let arg = &args[counter];
+                            if s.inner == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) }
+                        };
+                        arg_ids.push( arg_id );
+                        counter += 1;
+                    }
+
+
+                    // let mut arg_ids = vec![];
+                    // for (arg, (Located {inner, ..}, ..)) in args.iter().zip(params) {
+                    //     let arg_id = if inner == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
+                    //     // if name != "self" {
+                    //     //     arg_id = proteclone!(arg_id => a.clone());
+                    //     // }
+                    //     arg_ids.push( arg_id );
+                    // }
+                    // println!("3 {:?}", arg_ids.iter().map(|id| globals.get(*id).value.clone()).collect::<Vec<Value>>());
                     
                     Ok( run_func!(arg_ids, f) )
                 },

@@ -24,6 +24,21 @@ pub enum BlockType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Located<T> {
+    pub inner: T,
+    pub area: CodeArea,
+}
+
+impl<T> Located<T> {
+    pub fn from(inner: T, area: CodeArea) -> Self {
+        Located {
+            inner, area
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
     Value { value: Value },
     Op { left: Box<ASTNode>, op: Token, right: Box<ASTNode> },
@@ -39,8 +54,8 @@ pub enum NodeType {
     For { left: Box<ASTNode>, iter: Box<ASTNode>, code: Box<ASTNode> },
     Loop { code: Box<ASTNode> },
     Call { base: Box<ASTNode>, args: Vec<ASTNode> },
-    FuncDef { func_name: String, args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
-    Lambda { args: Vec<(String, CodeArea, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
+    FuncDef { func_name: String, args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
+    Lambda { args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
     Array { elements: Vec<ASTNode> },
     Tuple { elements: Vec<ASTNode> },
     Index { base: Box<ASTNode>, index: Box<ASTNode> },
@@ -592,17 +607,17 @@ pub fn parse_unit(
                 Token::FatArrow => {
                     let header_start = span!(-1).0;
 
-                    let mut args: Vec<(String, CodeArea, Option<ASTNode>)> = vec![];
+                    let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)> = vec![];
                     while_tok!(!= RParen: {
                         check_tok!(Ident(arg_name) else "argument name");
                         let arg_area = CodeArea {
                             source: info.source.clone(),
                             range: span!(-1),
                         };
-                        if let Some(id) = args.iter().position(|(e, _, _)| e == &arg_name) {
+                        if let Some(id) = args.iter().position(|(Located {inner, ..}, ..)| inner == &arg_name) {
                             return Err( SyntaxError::DuplicateArg {
                                 arg_name,
-                                first_used: args[id].1.clone(),
+                                first_used: args[id].0.area.clone(),
                                 used_again: arg_area,
                             } )
                         }
@@ -616,7 +631,12 @@ pub fn parse_unit(
                             pos += 1;
                             parse!(parse_expr(true) => let temp); pat = Some(temp);
                         });
-                        args.push((arg_name, arg_area, pat));
+                        let mut default = None;
+                        if_tok!(== Colon: {
+                            pos += 1;
+                            parse!(parse_expr(true) => let temp); default = Some(temp);
+                        });
+                        args.push((Located::from(arg_name, arg_area), pat, default));
                         if !matches!(tok!(0), Token::RParen | Token::Comma) {
                             expected_err!(") or ,", tok!(0), span!(0), info )
                         }
@@ -677,7 +697,7 @@ pub fn parse_unit(
                         range: start,
                     };
                     parse!(parse_expr(false) => let code);
-                    ret!( NodeType::Lambda { args: vec![(name.to_string(), arg_area.clone(), None)], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
+                    ret!( NodeType::Lambda { args: vec![(Located::from(name.to_string(), arg_area.clone()), None, None)], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
                 }
                 _ => (),
             }
@@ -873,17 +893,17 @@ pub fn parse_unit(
             check_tok!(LParen else "(");
             let header_start = span!(-1).0;
 
-            let mut args: Vec<(String, CodeArea, Option<ASTNode>)> = vec![];
+            let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)> = vec![];
             while_tok!(!= RParen: {
                 check_tok!(Ident(arg_name) else "argument name");
                 let arg_area = CodeArea {
                     source: info.source.clone(),
                     range: span!(-1),
                 };
-                if let Some(id) = args.iter().position(|(e, _, _)| e == &arg_name) {
+                if let Some(id) = args.iter().position(|(Located {inner, ..}, ..)| inner == &arg_name) {
                     return Err( SyntaxError::DuplicateArg {
                         arg_name,
-                        first_used: args[id].1.clone(),
+                        first_used: args[id].0.area.clone(),
                         used_again: arg_area,
                     } )
                 }
@@ -897,7 +917,12 @@ pub fn parse_unit(
                     pos += 1;
                     parse!(parse_expr(true) => let temp); pat = Some(temp);
                 });
-                args.push((arg_name, arg_area, pat));
+                let mut default = None;
+                if_tok!(== Assign: {
+                    pos += 1;
+                    parse!(parse_expr(true) => let temp); default = Some(temp);
+                });
+                args.push(( Located::from(arg_name, arg_area), pat, default));
                 if !matches!(tok!(0), Token::RParen | Token::Comma) {
                     expected_err!(") or ,", tok!(0), span!(0), info )
                 }

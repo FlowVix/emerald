@@ -85,6 +85,11 @@ pub enum RuntimeError {
         header_area: CodeArea,
         call_area: CodeArea,
     },
+    ArgumentNotProvided {
+        arg_name: String,
+        arg_area: CodeArea,
+        call_area: CodeArea,
+    },
     IndexOutOfBounds {
         index: isize,
         length: usize,
@@ -270,55 +275,64 @@ impl Into<EmeraldSource> for CodeArea {
     }
 }
 
-
+#[derive(Debug)]
 pub struct RainbowColorGenerator {
     h: f64,
     s: f64,
-    b: f64,
+    v: f64,
+    shift: f64,
 }
 
 impl RainbowColorGenerator {
-    pub fn new(h: f64, s: f64, b: f64) -> Self {
-        Self { h, s, b }
+    pub fn new(h: f64, s: f64, v: f64, shift: f64) -> Self {
+        Self { h, s, v, shift }
     }
     pub fn next(&mut self) -> ariadne::Color {
-        self.h += 20.0;
-        self.h %= 360.0;
 
-        let hsl = self;
+        // thanks wikipedia
+        
+        self.h = self.h.rem_euclid(360.0);
 
-        let c = (1.0 - (hsl.b * 2.0 - 1.0).abs()) * hsl.s;
-        let h = hsl.h / 60.0;
-        let x = c * (1.0 - (h % 2.0 - 1.0).abs());
-        let m = hsl.b - c * 0.5;
+        let c = self.v * self.s;
+        let h1 = self.h / 60.0;
 
-        let (red, green, blue) = if h >= 0.0 && h < 0.0 {
-            (c, x, 0.0)
-        } else if (1.0..2.0).contains(&h) {
-            (x, c, 0.0)
-        } else if (2.0..3.0).contains(&h) {
-            (0.0, c, x)
-        } else if (3.0..4.0).contains(&h) {
-            (0.0, x, c)
-        } else if (4.0..5.0).contains(&h) {
-            (x, 0.0, c)
-        } else {
-            (c, 0.0, x)
-        };
+        let x = c * (1.0 - (h1.rem_euclid(2.0) - 1.0).abs());
+        
+        let (r, g, b) =
+            if 0.0 <= h1 && h1 < 1.0 {
+                (c, x, 0.0)
+            } else if 1.0 <= h1 && h1 < 2.0 {
+                (x, c, 0.0)
+            } else if 2.0 <= h1 && h1 < 3.0 {
+                (0.0, c, x)
+            } else if 3.0 <= h1 && h1 < 4.0 {
+                (0.0, x, c)
+            } else if 4.0 <= h1 && h1 < 5.0 {
+                (x, 0.0, c)
+            } else {
+                (c, 0.0, x)
+            };
+
+        let m = self.v - c;
+
+        self.h += self.shift;
 
         ariadne::Color::RGB(
-            ((red + m) * 255.0) as u8,
-            ((green + m) * 255.0) as u8,
-            ((blue + m) * 255.0) as u8,
+            ( (r + m) * 255.0) as u8,
+            ( (g + m) * 255.0) as u8,
+            ( (b + m) * 255.0) as u8,
         )
     }
 }
+
+const ERROR_S: f64 = 0.4;
+const ERROR_V: f64 = 1.0;
 
 
 impl ErrorReport {
     pub fn print_error(&self, cache: EmeraldCache, globals: &Globals) {
 
-        let mut colors = RainbowColorGenerator::new(0.0, 1.0, 0.75);
+        let mut colors = RainbowColorGenerator::new(0.0, ERROR_S, ERROR_V, 60.0);
 
 
         let mut report: ReportBuilder<CodeArea> = Report::build(ReportKind::Error, self.source.clone(), self.source.range.0)
@@ -333,9 +347,9 @@ impl ErrorReport {
         }
         
         // let mut colors = RainbowColorGenerator::new(270.0, 1.0, 0.75);
-        // for (i, t) in globals.trace.iter().enumerate() {
-        //     report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
-        // }
+        for (i, t) in globals.trace.iter().enumerate() {
+            report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
+        }
 
 
         if let Some(m) = &self.note {
@@ -349,10 +363,7 @@ impl ErrorReport {
 
 impl ToReport for SyntaxError {
     fn to_report(&self) -> ErrorReport {
-        let mut colors = RainbowColorGenerator::new(90.0, 1.0, 0.75);
-
-        let a = colors.next();
-        let b = colors.next();
+        let mut colors = RainbowColorGenerator::new(120.0, ERROR_S, ERROR_V, 20.0);
 
         match self {
             SyntaxError::Expected {
@@ -363,7 +374,7 @@ impl ToReport for SyntaxError {
                 source: area.clone(),
                 message: "Syntax error".to_string(),
                 labels: vec![
-                    (area.clone(), format!("Expected {}, found {}", expected.fg(a), found.fg(b)))
+                    (area.clone(), format!("Expected {}, found {}", expected.fg(colors.next()), found.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -388,7 +399,7 @@ impl ToReport for SyntaxError {
                 source: area.clone(),
                 message: format!("No matching '{}' found for this '{}'", not_found, for_char),
                 labels: vec![
-                    (area.clone(), format!("'{}' used here", for_char.fg(a)))
+                    (area.clone(), format!("'{}' used here", for_char.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -518,10 +529,7 @@ impl ToReport for SyntaxError {
 
 impl ToReport for RuntimeError {
     fn to_report(&self) -> ErrorReport {
-        let mut colors = RainbowColorGenerator::new(180.0, 1.0, 0.75);
-
-        let a = colors.next();
-        let b = colors.next();
+        let mut colors = RainbowColorGenerator::new(240.0, ERROR_S, ERROR_V, 20.0);
 
         match self {
             RuntimeError::TypeMismatch {
@@ -537,7 +545,7 @@ impl ToReport for RuntimeError {
                         |(t, def_a)|
                         (def_a.clone(), format!("Value defined as {} here", t.fg(colors.next())))
                     ).collect();
-                    new_vec.push( (area.clone(), format!("Expected {}, found {}", expected.fg(a), found.fg(b))) );
+                    new_vec.push( (area.clone(), format!("Expected {}, found {}", expected.fg(colors.next()), found.fg(colors.next()))) );
                     new_vec
                 },
                 note: None,
@@ -549,7 +557,7 @@ impl ToReport for RuntimeError {
                 source: area.clone(),
                 message: format!("Variable '{}' is not defined", var_name),
                 labels: vec![
-                    (area.clone(), format!("'{}' used here", var_name.fg(a)))
+                    (area.clone(), format!("'{}' used here", var_name.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -562,8 +570,21 @@ impl ToReport for RuntimeError {
                 source: call_area.clone(),
                 message: format!("{} arguments provided, but function takes {}", provided, takes),
                 labels: vec![
-                    (header_area.clone(), format!("Function defined to take {} arguments here", takes.fg(a))),
-                    (call_area.clone(), format!("{} arguments were provided here", provided.fg(b)))
+                    (header_area.clone(), format!("Function defined to take {} arguments here", takes.fg(colors.next()))),
+                    (call_area.clone(), format!("{} arguments were provided here", provided.fg(colors.next())))
+                ],
+                note: None,
+            },
+            RuntimeError::ArgumentNotProvided {
+                arg_area,
+                arg_name,
+                call_area,
+            } => ErrorReport {
+                source: call_area.clone(),
+                message: format!("Required argument '{}' was not provided", arg_name),
+                labels: vec![
+                    (arg_area.clone(), format!("Argument '{}' defined here", arg_name.fg(colors.next()))),
+                    (call_area.clone(), format!("Argument was not provided here"))
                 ],
                 note: None,
             },
@@ -575,7 +596,7 @@ impl ToReport for RuntimeError {
                 source: area.clone(),
                 message: format!("Index {} is out of bounds", index),
                 labels: vec![
-                    (area.clone(), format!("Index provided is {} but length is {}", index.fg(a), length.fg(b)))
+                    (area.clone(), format!("Index provided is {} but length is {}", index.fg(colors.next()), length.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -586,7 +607,7 @@ impl ToReport for RuntimeError {
                 source: area.clone(),
                 message: format!("Key '{}' does not exist", key),
                 labels: vec![
-                    (area.clone(), format!("Key '{}' was used here", key.fg(a)))
+                    (area.clone(), format!("Key '{}' was used here", key.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -654,7 +675,7 @@ impl ToReport for RuntimeError {
                 source: area.clone(),
                 message: format!("Cannot convert {} to {}", type1, type2),
                 labels: vec![
-                    (area.clone(), format!("Couldn't convert {} to {}", type1.fg(a), type2.fg(b))),
+                    (area.clone(), format!("Couldn't convert {} to {}", type1.fg(colors.next()), type2.fg(colors.next()))),
                     (area1.clone(), format!("Value defined as {} here", type1.fg(colors.next()))),
                     // (area2.clone(), format!("Conversion type {} here", type2.fg(colors.next()))),
                 ],
@@ -695,7 +716,7 @@ impl ToReport for RuntimeError {
                 source: area.clone(),
                 message: format!("Field '{}' does not exist", field),
                 labels: vec![
-                    (area.clone(), format!("Field '{}' was used here", field.fg(a)))
+                    (area.clone(), format!("Field '{}' was used here", field.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -726,7 +747,7 @@ impl ToReport for RuntimeError {
                 source: call_area.clone(),
                 message: format!("{} arguments provided, but type conversion takes 1", provided),
                 labels: vec![
-                    (call_area.clone(), format!("{} arguments were provided here", provided.fg(b)))
+                    (call_area.clone(), format!("{} arguments were provided here", provided.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -740,8 +761,8 @@ impl ToReport for RuntimeError {
                 source: type_area.clone(),
                 message: format!("Pattern mismatch"),
                 labels: vec![
-                    (pattern_area.clone(), format!("Pattern defined as {} here", pattern.fg(a))),
-                    (type_area.clone(), format!("Value defined as {} here", typ.fg(b))),
+                    (pattern_area.clone(), format!("Pattern defined as {} here", pattern.fg(colors.next()))),
+                    (type_area.clone(), format!("Value defined as {} here", typ.fg(colors.next()))),
                     // (area2.clone(), format!("Conversion type {} here", type2.fg(colors.next()))),
                 ],
                 note: None,
@@ -753,7 +774,7 @@ impl ToReport for RuntimeError {
                 source: area.clone(),
                 message: format!("Associated member '{}' does not exist", assoc),
                 labels: vec![
-                    (area.clone(), format!("Member '{}' was used here", assoc.fg(a)))
+                    (area.clone(), format!("Member '{}' was used here", assoc.fg(colors.next())))
                 ],
                 note: None,
             },
@@ -804,8 +825,8 @@ impl ToReport for RuntimeError {
                 source: area1.clone(),
                 message: format!("Equality assertion failed"),
                 labels: vec![
-                    (area1.clone(), format!("Found {} here", value1.fg(a))),
-                    (area2.clone(), format!("Found {} here", value2.fg(b))),
+                    (area1.clone(), format!("Found {} here", value1.fg(colors.next()))),
+                    (area2.clone(), format!("Found {} here", value2.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -818,8 +839,8 @@ impl ToReport for RuntimeError {
                 source: area2.clone(),
                 message: format!("Cannot destructure {} into {}", found, tried),
                 labels: vec![
-                    (area1.clone(), format!("Tried to destructure {} here", tried.fg(a))),
-                    (area2.clone(), format!("Found {} here", found.fg(b))),
+                    (area1.clone(), format!("Tried to destructure {} here", tried.fg(colors.next()))),
+                    (area2.clone(), format!("Found {} here", found.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -833,7 +854,7 @@ impl ToReport for RuntimeError {
                 source: area2.clone(),
                 message: format!("Unequal elements in {} destructure", for_type),
                 labels: vec![
-                    (area1.clone(), format!("Tried to destructure {} with {} elements here", for_type.fg(a), expected.fg(b))),
+                    (area1.clone(), format!("Tried to destructure {} with {} elements here", for_type.fg(colors.next()), expected.fg(colors.next()))),
                     (area2.clone(), format!("Found {} elements here", found.fg(colors.next()))),
                 ],
                 note: None,
@@ -848,8 +869,8 @@ impl ToReport for RuntimeError {
                 source: area2.clone(),
                 message: format!("Nonexistent {} in {} destructure", what, for_type),
                 labels: vec![
-                    (area1.clone(), format!("Tried to destructure into {} {} here", what, name.fg(a))),
-                    (area2.clone(), format!("{} {} not found here", what, name.fg(b))),
+                    (area1.clone(), format!("Tried to destructure into {} {} here", what, name.fg(colors.next()))),
+                    (area2.clone(), format!("{} {} not found here", what, name.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -876,7 +897,7 @@ impl ToReport for RuntimeError {
                 source: used.clone(),
                 message: format!("Wrong enum variant type"),
                 labels: vec![
-                    (used.clone(), format!("Expected {} variant, found {} variant", expected.fg(a), found.fg(b))),
+                    (used.clone(), format!("Expected {} variant, found {} variant", expected.fg(colors.next()), found.fg(colors.next()))),
                     (variant_def.clone(), format!("Variant {} defined as {} type here", variant_name.fg(colors.next()), expected.fg(colors.next()))),
                 ],
                 note: None,
@@ -891,8 +912,8 @@ impl ToReport for RuntimeError {
                 source: used.clone(),
                 message: format!("{} arguments provided, but tuple variant expects {}", found, expected),
                 labels: vec![
-                    (used.clone(), format!("Found {} arguments here", found.fg(a))),
-                    (variant_def.clone(), format!("Tuple variant {} defined as taking {} arguments here", variant_name.fg(b), expected.fg(colors.next()))),
+                    (used.clone(), format!("Found {} arguments here", found.fg(colors.next()))),
+                    (variant_def.clone(), format!("Tuple variant {} defined as taking {} arguments here", variant_name.fg(colors.next()), expected.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -906,7 +927,7 @@ impl ToReport for RuntimeError {
                 message: format!("Nonexistent struct variant field {}", field_name),
                 labels: vec![
                     (used.clone(), format!("Field name used here")),
-                    (variant_def.clone(), format!("Variant {} defined here", variant_name.fg(a))),
+                    (variant_def.clone(), format!("Variant {} defined here", variant_name.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -922,7 +943,7 @@ impl ToReport for RuntimeError {
                     (area.clone(), format!("Missing struct fields {} here", fields.iter().map(
                         |f| format!("{}", f.fg(colors.next()))
                     ).collect::<Vec<String>>().join(", "))),
-                    (variant_def.clone(), format!("Struct variant {} defined here", variant_name.fg(a))),
+                    (variant_def.clone(), format!("Struct variant {} defined here", variant_name.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -935,8 +956,8 @@ impl ToReport for RuntimeError {
                 source: area2.clone(),
                 message: format!("Cannot destructure enum variant {} into variant {}", found, tried),
                 labels: vec![
-                    (area1.clone(), format!("Tried to destructure enum variant {} here", tried.fg(a))),
-                    (area2.clone(), format!("Found variant {} here", found.fg(b))),
+                    (area1.clone(), format!("Tried to destructure enum variant {} here", tried.fg(colors.next()))),
+                    (area2.clone(), format!("Found variant {} here", found.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -949,8 +970,8 @@ impl ToReport for RuntimeError {
                 source: found_area.clone(),
                 message: format!("Wrong enum variant type to destructure"),
                 labels: vec![
-                    (expected_area.clone(), format!("Tried to destructure into {} variant here", expected.fg(a))),
-                    (found_area.clone(), format!("Found {} variant here", found.fg(b))),
+                    (expected_area.clone(), format!("Tried to destructure into {} variant here", expected.fg(colors.next()))),
+                    (found_area.clone(), format!("Found {} variant here", found.fg(colors.next()))),
                 ],
                 note: None,
             },
@@ -974,7 +995,7 @@ impl ToReport for RuntimeError {
                 source: value_area.clone(),
                 message: format!("Incorrect selector argument type"),
                 labels: vec![
-                    (value_area.clone(), format!("Selector argument {} takes a {}", arg_name.fg(a), expected.fg(b))),
+                    (value_area.clone(), format!("Selector argument {} takes a {}", arg_name.fg(colors.next()), expected.fg(colors.next()))),
                 ],
                 note: None,
             },

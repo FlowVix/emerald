@@ -1,2 +1,13 @@
 
 
+
+impl string {
+    _div_: (self, other) => {
+        print(self, ": ", other);
+    },
+    _r_div_: string::_div_,
+}
+
+
+5 / "gaga";
+

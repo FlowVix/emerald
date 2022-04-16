@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parser::ASTNode, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError, lexer::SelectorType};
+use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError, lexer::SelectorType};
 
 
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
-    pub args: Vec<(String, CodeArea, Option<ValuePos>)>,
+    pub args: Vec<(Located<String>, Option<ValuePos>, Option<ValuePos>)>,
     pub code: Box<ASTNode>,
     pub parent_scope: ScopePos,
     pub header_area: CodeArea,
@@ -189,7 +189,7 @@ impl Value {
             Value::String(s) => s.clone(),
             Value::Null => "null".to_string(),
             Value::Builtin(name) => format!("<builtin: {}>", name),
-            Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(e, _, _)| e.clone()).collect::<Vec<String>>().join(", ")),
+            Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(Located {inner, ..}, ..)| inner.clone()).collect::<Vec<String>>().join(", ")),
             Value::Array(arr) => {
                 if visited.contains(&self) {
                     return "[...]".to_string()
@@ -378,7 +378,11 @@ impl Value {
                 ..
             }) => {
                 scopes.insert(*parent_scope);
-                for (_, _, d) in args {
+                for (_, t, d) in args {
+                    if let Some(id) = t {
+                        values.insert(*id);
+                        globals.get(*id).value.get_references(globals, values, scopes);
+                    }
                     if let Some(id) = d {
                         values.insert(*id);
                         globals.get(*id).value.get_references(globals, values, scopes);
