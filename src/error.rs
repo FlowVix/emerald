@@ -135,6 +135,8 @@ pub enum RuntimeError {
     },
     NonexistentField {
         field: String,
+        type_str: String,
+        val_area: CodeArea,
         area: CodeArea,
     },
     InstanceNonStruct {
@@ -347,9 +349,9 @@ impl ErrorReport {
         }
         
         // let mut colors = RainbowColorGenerator::new(270.0, 1.0, 0.75);
-        for (i, t) in globals.trace.iter().enumerate() {
-            report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
-        }
+        // for (i, t) in globals.trace.iter().enumerate() {
+        //     report = report.with_label( Label::new(t.clone()).with_message(format!("{}: Error comes from this function call", i + 1)).with_color(colors.next()) )
+        // }
 
 
         if let Some(m) = &self.note {
@@ -711,12 +713,15 @@ impl ToReport for RuntimeError {
             },
             RuntimeError::NonexistentField {
                 field,
+                type_str,
+                val_area,
                 area,
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("Field '{}' does not exist", field),
+                message: format!("Field '{}' does not exist on type {}", field, type_str),
                 labels: vec![
-                    (area.clone(), format!("Field '{}' was used here", field.fg(colors.next())))
+                    (area.clone(), format!("Field '{}' was used here", field.fg(colors.next()))),
+                    (val_area.clone(), format!("This is of type {}", type_str.fg(colors.next())))
                 ],
                 note: None,
             },

@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, hash::Hash};
 
-use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str}, error::RuntimeError, lexer::SelectorType};
+use fnv::FnvHashMap;
+
+use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, error::RuntimeError, lexer::SelectorType};
 
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Function {
     pub args: Vec<(Located<String>, Option<ValuePos>, Option<ValuePos>)>,
     pub code: Box<ASTNode>,
@@ -14,7 +16,7 @@ pub struct Function {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum ValueType {
     Builtin(BuiltinType),
     CustomStruct(TypePos),
@@ -39,7 +41,7 @@ impl ValueType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Pattern {
     Type(ValueType),
     Any,
@@ -58,7 +60,7 @@ impl Pattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum CoordType<T> {
     Absolute(T),
     Tilde(T),
@@ -97,6 +99,35 @@ pub enum McVector {
     WithRot(CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>, CoordType<Box<Value>>),
 }
 
+impl McVector {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H, globals: &Globals) {
+        match self {
+            McVector::Pos(x, y, z) => {
+                core::mem::discriminant(x).hash(state);
+                x.get_inner().hash(state, Some(globals));
+                core::mem::discriminant(y).hash(state);
+                y.get_inner().hash(state, Some(globals));
+                core::mem::discriminant(z).hash(state);
+                z.get_inner().hash(state, Some(globals));
+            },
+            McVector::WithRot(x, y, z, h, v) => {
+                core::mem::discriminant(x).hash(state);
+                x.get_inner().hash(state, Some(globals));
+                core::mem::discriminant(y).hash(state);
+                y.get_inner().hash(state, Some(globals));
+                core::mem::discriminant(z).hash(state);
+                z.get_inner().hash(state, Some(globals));
+                core::mem::discriminant(h).hash(state);
+                h.get_inner().hash(state, Some(globals));
+                core::mem::discriminant(v).hash(state);
+                v.get_inner().hash(state, Some(globals));
+            },
+        }
+    }
+}
+
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selector {
     pub selector_type: SelectorType,
@@ -112,6 +143,14 @@ pub struct Range {
     pub step: f64,
 }
 
+impl Hash for Range {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.start.map(|v| v.to_bits()).hash(state);
+        self.end.map(|v| v.to_bits()).hash(state);
+        self.step.to_bits().hash(state);
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -119,11 +158,11 @@ pub enum Value {
     Boolean(bool),
     String(String),
     Null,
-    Builtin(String),
+    Builtin(Builtin),
     Function(Function),
     Array(Vec<ValuePos>),
     Tuple(Vec<ValuePos>),
-    Dictionary(HashMap<String, ValuePos>),
+    Dictionary(FnvHashMap<String, ValuePos>),
     Type(ValueType),
     Pattern(Pattern),
     Range(Range),
@@ -135,7 +174,7 @@ pub enum Value {
 
     StructInstance {
         struct_id: TypePos,
-        fields: HashMap<String, ValuePos>
+        fields: FnvHashMap<String, ValuePos>
     },
     EnumInstance {
         enum_id: TypePos,
@@ -148,7 +187,7 @@ pub enum Value {
 pub enum InstanceVariant {
     Unit,
     Tuple(Vec<ValuePos>),
-    Struct { fields: HashMap<String, ValuePos> }
+    Struct { fields: FnvHashMap<String, ValuePos> }
 }
 
 
@@ -188,7 +227,7 @@ impl Value {
             Value::Boolean(b) => b.to_string(),
             Value::String(s) => format!("\"{}\"", s),
             Value::Null => "null".to_string(),
-            Value::Builtin(name) => format!("<builtin: {}>", name),
+            Value::Builtin(b) => format!("<builtin: {}>", builtin_to_name(*b)),
             Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(Located {inner, ..}, ..)| inner.clone()).collect::<Vec<String>>().join(", ")),
             Value::Array(arr) => {
                 if visited.contains(&self) {
@@ -363,12 +402,6 @@ impl Value {
         }
     }
 
-    pub fn is_integer(&self) -> bool {
-        match self {
-            Value::Number(n) => n.fract() == 0.0,
-            _ => false,
-        }
-    }
 
     pub fn get_references(&self, globals: &Globals, values: &mut HashSet<ValuePos>, scopes: &mut HashSet<ScopePos>) {
         match self {
@@ -484,6 +517,8 @@ impl Iterator for RangeIter {
 pub mod value_ops {
 
     use std::collections::HashMap;
+
+    use fnv::FnvHashMap;
 
     use crate::{interpreter::{StoredValue, Globals}, CodeArea, value::{Value, ValueType}, error::RuntimeError, builtins::BuiltinType};
 
@@ -632,11 +667,11 @@ pub mod value_ops {
         Ok( Value::Boolean( is_op_raw(a, b, area, globals)? ) )
     }
 
-    pub fn overwrite(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
-        match (&a.value, &b.value) {
-            (_, b) => Ok( b.clone() )
-        }
-    }
+    // pub fn overwrite(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+    //     match (&a.value, &b.value) {
+    //         (_, b) => Ok( b.clone() )
+    //     }
+    // }
 
 
     pub fn plus(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
@@ -664,7 +699,7 @@ pub mod value_ops {
                 Ok(Value::Tuple(new_vec))
             },
             (Value::Dictionary(m1), Value::Dictionary(m2)) => {
-                let mut new_map = HashMap::new();
+                let mut new_map = FnvHashMap::default();
                 for i in m1 {
                     new_map.insert(i.0.clone(),  globals.clone_value(*i.1, Some(area.clone())) );
                 }
@@ -854,7 +889,7 @@ pub mod value_ops {
         }
     }
 
-    pub fn eq(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<bool, RuntimeError> {
+    pub fn eq(a: &StoredValue, b: &StoredValue, _area: CodeArea, _globals: &mut Globals) -> Result<bool, RuntimeError> {
         match (&a.value, &b.value) {
             (Value::Number(n1), Value::Number(n2)) => Ok(n1 == n2),
             (Value::String(s1), Value::String(s2)) => Ok(s1 == s2),
@@ -1007,7 +1042,7 @@ pub mod value_ops {
                 end: Some(*n2),
                 step: 1.0,
             })),
-            (Value::Range(Range{start, end: Some(e), step: 1.0}), Value::Number(n)) => Ok(Value::Range(Range{
+            (Value::Range(Range{start, end: Some(e), step}), Value::Number(n)) if *step == 1.0 => Ok(Value::Range(Range{
                 start: *start,
                 end: Some(*n),
                 step: *e,
@@ -1071,6 +1106,72 @@ pub mod value_ops {
         }
     }
 
+}
+
+impl Value {
+    pub fn hash<H: std::hash::Hasher>(&self, state: &mut H, globals: Option<&Globals>) {
+        match self {
+            Value::Number(v) => v.to_bits().hash(state),
+            Value::Boolean(v) => v.hash(state),
+            Value::String(v) => v.hash(state),
+            Value::Null => "null".hash(state),
+            Value::Builtin(v) => v.hash(state),
+            Value::Function(v) => v.hash(state),
+            Value::Array(v) => {
+                for i in v {
+                    globals.unwrap().get(*i).value.hash(state, globals)
+                }
+            },
+            Value::Tuple(v) => {
+                for i in v {
+                    globals.unwrap().get(*i).value.hash(state, globals)
+                }
+            },
+            Value::Dictionary(v) => {
+                for (k, v) in v {
+                    k.hash(state);
+                    globals.unwrap().get(*v).value.hash(state, globals)
+                }
+            },
+            Value::Type(v) => v.hash(state),
+            Value::Pattern(v) => v.hash(state),
+            Value::Range(v) => v.hash(state),
+            Value::McFunc(v) => v.hash(state),
+            Value::McVector(v) => v.hash(state, globals.unwrap()),
+            Value::Selector(v) => {
+                v.selector_type.hash(state);
+                for (k, v) in &v.args {
+                    k.hash(state);
+                    globals.unwrap().get(*v).value.hash(state, globals)
+                }
+            },
+            Value::StructInstance { struct_id, fields } => {
+                struct_id.hash(state);
+                for (k, v) in fields {
+                    k.hash(state);
+                    globals.unwrap().get(*v).value.hash(state, globals)
+                }
+            },
+            Value::EnumInstance { enum_id, variant_name, variant } => {
+                enum_id.hash(state);
+                variant_name.hash(state);
+                match variant {
+                    InstanceVariant::Unit => core::mem::discriminant(variant).hash(state),
+                    InstanceVariant::Tuple(v) => {
+                        for i in v {
+                            globals.unwrap().get(*i).value.hash(state, globals)
+                        }
+                    },
+                    InstanceVariant::Struct { fields } => {
+                        for (k, v) in fields {
+                            k.hash(state);
+                            globals.unwrap().get(*v).value.hash(state, globals)
+                        }
+                    },
+                }
+            },
+        }
+    }
 }
 
 

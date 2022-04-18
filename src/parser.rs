@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
+
+use fnv::FnvHashMap;
 
 use crate::{CodeArea, lexer::{Token, SelectorType}, value::{Value, CoordType, Range}, interpreter::{Globals}, error::{SyntaxError, RuntimeError}, EmeraldSource};
 
@@ -10,20 +12,20 @@ pub struct ParseInfo {
     source: EmeraldSource,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct ASTNode {
     pub span: (usize, usize),
     pub node: NodeType,
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum BlockType {
     Regular {not_safe: bool},
     McFunc,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Located<T> {
     pub inner: T,
     pub area: CodeArea,
@@ -36,6 +38,7 @@ impl<T> Located<T> {
         }
     }
 }
+
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,8 +62,8 @@ pub enum NodeType {
     Array { elements: Vec<ASTNode> },
     Tuple { elements: Vec<ASTNode> },
     Index { base: Box<ASTNode>, index: Box<ASTNode> },
-    Dictionary { map: HashMap<String, ASTNode> },
-    Member { base: Box<ASTNode>, member: String },
+    Dictionary { map: FnvHashMap<String, ASTNode> },
+    Member { base: Box<ASTNode>, member: Located<String> },
     Return { node: Option<Box<ASTNode>> },
     Break { node: Option<Box<ASTNode>> },
     Throw { msg: Box<ASTNode> },
@@ -70,14 +73,14 @@ pub enum NodeType {
 
     StructDef {
         struct_name: String,
-        fields: HashMap<String, (ASTNode, Option<ASTNode>)>,
-        field_areas: HashMap<String, CodeArea>,
+        fields: FnvHashMap<String, (ASTNode, Option<ASTNode>)>,
+        field_areas: FnvHashMap<String, CodeArea>,
         def_area: CodeArea
     },
     StructInstance {
         base: Box<ASTNode>,
-        field_areas: HashMap<String, CodeArea>,
-        fields: HashMap<String, ASTNode>
+        field_areas: FnvHashMap<String, CodeArea>,
+        fields: FnvHashMap<String, ASTNode>
     },
 
     Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
@@ -87,8 +90,8 @@ pub enum NodeType {
 
     EnumDef {
         enum_name: String,
-        variants: HashMap<String, VariantType>,
-        variant_areas: HashMap<String, CodeArea>,
+        variants: FnvHashMap<String, VariantType>,
+        variant_areas: FnvHashMap<String, CodeArea>,
         def_area: CodeArea,
     },
     EnumInstance {
@@ -115,7 +118,10 @@ pub enum NodeType {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+
+
+
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum MatchArm {
     Pattern(ASTNode),
     Structure(ASTNode),
@@ -125,7 +131,7 @@ pub enum MatchArm {
 pub enum VariantType {
     Unit,
     Tuple(Vec<ASTNode>),
-    Struct { fields: HashMap<String, ASTNode>, field_areas: HashMap<String, CodeArea> }
+    Struct { fields: FnvHashMap<String, ASTNode>, field_areas: FnvHashMap<String, CodeArea> }
 }
 
 macro_rules! selector_args {
@@ -718,12 +724,12 @@ pub fn parse_unit(
 
             if matches!(tok!(0), Token::RBracket) {
                 pos += 1;
-                ret!( NodeType::Dictionary {map: HashMap::new()} => start );
+                ret!( NodeType::Dictionary {map: FnvHashMap::default()} => start );
             }
 
             if matches!(tok!(0), Token::Ident(_)) && matches!(tok!(1), Token::Colon | Token::Comma | Token::RBracket) {
-                let mut map = HashMap::new();
-                let mut areas: HashMap<String, CodeArea> = HashMap::new();
+                let mut map = FnvHashMap::default();
+                let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
                 while_tok!(!= RBracket: {
                     check_tok!(Ident(key) else "key name");
                     let last_area = CodeArea {
@@ -780,7 +786,7 @@ pub fn parse_unit(
 
             let mut field_names = vec![];
             let mut fields = vec![];
-            let mut areas: HashMap<String, CodeArea> = HashMap::new();
+            let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
             while_tok!(!= RBracket: {
                 check_tok!(Ident(field) else "field name");
                 let last_area = CodeArea {
@@ -966,8 +972,8 @@ pub fn parse_unit(
             check_tok!(Ident(struct_name) else "struct name");
             check_tok!(LBracket else "{");
 
-            let mut fields = HashMap::new();
-            let mut field_areas: HashMap<String, CodeArea> = HashMap::new();
+            let mut fields = FnvHashMap::default();
+            let mut field_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
             while_tok!(!= RBracket: {
                 check_tok!(Ident(field) else "field name");
                 let last_area = CodeArea {
@@ -1010,8 +1016,8 @@ pub fn parse_unit(
             check_tok!(Ident(enum_name) else "enum name");
             check_tok!(LBracket else "{");
 
-            let mut variants = HashMap::new();
-            let mut variant_areas: HashMap<String, CodeArea> = HashMap::new();
+            let mut variants = FnvHashMap::default();
+            let mut variant_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
 
             while_tok!(!= RBracket: {
                 check_tok!(Ident(name) else "variant name");
@@ -1047,8 +1053,8 @@ pub fn parse_unit(
                     }
                     Token::LBracket => {
                         pos += 1;
-                        let mut fields = HashMap::new();
-                        let mut field_areas: HashMap<String, CodeArea> = HashMap::new();
+                        let mut fields = FnvHashMap::default();
+                        let mut field_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
                         while_tok!(!= RBracket: {
                             check_tok!(Ident(field) else "field name");
                             let last_area = CodeArea {
@@ -1369,7 +1375,13 @@ fn parse_value(
                 check_tok!(Ident(member_name) else "member name");
                 value = ASTNode {
                     node: NodeType::Member {
-                        member: member_name,
+                        member: Located {
+                            inner: member_name,
+                            area: CodeArea {
+                                source: info.source.clone(),
+                                range: span!(-1),
+                            },
+                        },
                         
                         base: Box::new(value),
                     },
@@ -1390,8 +1402,8 @@ fn parse_value(
                 if matches!(tok!(0), Token::LBracket) {
                     pos += 1;
 
-                    let mut fields = HashMap::new();
-                    let mut areas: HashMap<String, CodeArea> = HashMap::new();
+                    let mut fields = FnvHashMap::default();
+                    let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
                     while_tok!(!= RBracket: {
                         check_tok!(Ident(field) else "field name");
                         let last_area = CodeArea {
@@ -1485,8 +1497,8 @@ fn parse_value(
                     Token::LBracket => {
                         pos += 1;
 
-                        let mut fields = HashMap::new();
-                        let mut areas: HashMap<String, CodeArea> = HashMap::new();
+                        let mut fields = FnvHashMap::default();
+                        let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
                         while_tok!(!= RBracket: {
                             check_tok!(Ident(field) else "field name");
                             let last_area = CodeArea {
@@ -1699,4 +1711,201 @@ pub fn parse(
 
 
 
+impl Hash for VariantType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            VariantType::Unit => core::mem::discriminant(self).hash(state),
+            VariantType::Tuple(t) => t.hash(state),
+            VariantType::Struct { fields, field_areas } => {
+                for (k, v) in fields {
+                    k.hash(state);
+                    v.hash(state);
+                }
+                for (k, v) in field_areas {
+                    k.hash(state);
+                    v.hash(state);
+                }
+            },
+        }
+    }
+}
 
+
+impl Hash for NodeType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            NodeType::Value { value } => {
+                value.hash(state, None);
+            },
+            NodeType::Op { left, op, right } => {
+                left.hash(state);
+                op.hash(state);
+                right.hash(state);
+            },
+            NodeType::Unary { op, node } => {
+                op.hash(state);
+                node.hash(state);
+            },
+            NodeType::Declaration { left, right } => {
+                left.hash(state);
+                right.hash(state);
+            },
+            NodeType::Var { var_name } => {
+                var_name.hash(state);
+            },
+            NodeType::StatementList { statements } => {
+                statements.hash(state);
+            },
+            NodeType::Block { code, typ } => {
+                code.hash(state);
+                typ.hash(state);
+            },
+            NodeType::If { cond, code, else_branch } => {
+                cond.hash(state);
+                code.hash(state);
+                else_branch.hash(state);
+            },
+            NodeType::While { cond, code } => {
+                cond.hash(state);
+                code.hash(state);
+            },
+            NodeType::For { left, iter, code } => {
+                left.hash(state);
+                iter.hash(state);
+                code.hash(state);
+            },
+            NodeType::Loop { code } => {
+                code.hash(state);
+            },
+            NodeType::Call { base, args } => {
+                base.hash(state);
+                args.hash(state);
+            },
+            NodeType::FuncDef { func_name, args, header_area, code } => {
+                func_name.hash(state);
+                args.hash(state);
+                header_area.hash(state);
+                code.hash(state);
+            },
+            NodeType::Lambda { args, header_area, code } => {
+                args.hash(state);
+                header_area.hash(state);
+                code.hash(state);
+            },
+            NodeType::Array { elements } => {
+                elements.hash(state);
+            },
+            NodeType::Tuple { elements } => {
+                elements.hash(state);
+            },
+            NodeType::Index { base, index } => {
+                base.hash(state);
+                index.hash(state);
+            },
+            NodeType::Dictionary { map } => {
+                for (k, v) in map {
+                    k.hash(state);
+                    v.hash(state);
+                }
+            },
+            NodeType::Member { base, member } => {
+                base.hash(state);
+                member.hash(state);
+            },
+            NodeType::Return { node } => {
+                node.hash(state);
+            },
+            NodeType::Break { node } => {
+                node.hash(state);
+            },
+            NodeType::Throw { msg } => {
+                msg.hash(state);
+            },
+            NodeType::UnboundedRange { base } => {
+                base.hash(state);
+            },
+            NodeType::StructDef { struct_name, fields, field_areas, def_area } => {
+                struct_name.hash(state);
+                for (k, v) in fields {
+                    k.hash(state);
+                    v.hash(state);
+                }
+                for (k, v) in field_areas {
+                    k.hash(state);
+                    v.hash(state);
+                }
+                def_area.hash(state);
+            },
+            NodeType::StructInstance { base, field_areas, fields } => {
+                base.hash(state);
+                for (k, v) in fields {
+                    k.hash(state);
+                    v.hash(state);
+                }
+                for (k, v) in field_areas {
+                    k.hash(state);
+                    v.hash(state);
+                }
+            },
+            NodeType::Impl { type_var, fields } => {
+                type_var.hash(state);
+                fields.hash(state);
+            },
+            NodeType::Associated { base, assoc } => {
+                base.hash(state);
+                assoc.hash(state);
+            },
+            NodeType::Match { value, arms } => {
+                value.hash(state);
+                arms.hash(state);
+            },
+            NodeType::EnumDef { enum_name, variants, variant_areas, def_area } => {
+                enum_name.hash(state);
+                for (k, v) in variants {
+                    k.hash(state);
+                    v.hash(state);
+                }
+                for (k, v) in variant_areas {
+                    k.hash(state);
+                    v.hash(state);
+                }
+                def_area.hash(state);
+            },
+            NodeType::EnumInstance { base, variant_name, variant_area, variant } => {
+                base.hash(state);
+                variant_name.hash(state);
+                variant_area.hash(state);
+                variant.hash(state);
+            },
+            NodeType::ModuleDef { module_name, def_area } => {
+                module_name.hash(state);
+                def_area.hash(state);
+            },
+            NodeType::Export { name, value } => {
+                name.hash(state);
+                value.hash(state);
+            },
+            NodeType::Import { path, cached } => {
+                path.hash(state);
+                cached.hash(state);
+            },
+            NodeType::MCCall { base } => {
+                base.hash(state);
+            },
+            NodeType::McVector { x, y, z, rot } => {
+                x.hash(state);
+                y.hash(state);
+                z.hash(state);
+                rot.hash(state);
+            },
+            NodeType::Extract { value } => {
+                value.hash(state);
+            },
+            NodeType::Selector { selector_type, args } => {
+                selector_type.hash(state);
+                args.hash(state);
+            },
+            _ => core::mem::discriminant(self).hash(state),
+        }
+    }
+}

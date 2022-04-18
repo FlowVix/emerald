@@ -3,6 +3,7 @@
 use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io::{self, Write}};
 
 use convert_case::{Case, Casing};
+use fnv::FnvHashMap;
 use logos::Logos;
 
 use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
@@ -30,8 +31,8 @@ pub struct StoredValue {
 #[derive(Debug, Clone)]
 pub struct CustomStruct {
     pub name: String,
-    pub fields: HashMap<String, (ASTNode, Option<ASTNode>)>,
-    pub field_areas: HashMap<String, CodeArea>,
+    pub fields: FnvHashMap<String, (ASTNode, Option<ASTNode>)>,
+    pub field_areas: FnvHashMap<String, CodeArea>,
     pub def_area: CodeArea,
     pub def_scope: ScopePos,
 }
@@ -40,8 +41,8 @@ pub struct CustomStruct {
 #[derive(Debug, Clone)]
 pub struct CustomEnum {
     pub name: String,
-    pub variants: HashMap<String, VariantType>,
-    pub variant_areas: HashMap<String, CodeArea>,
+    pub variants: FnvHashMap<String, VariantType>,
+    pub variant_areas: FnvHashMap<String, CodeArea>,
     pub def_area: CodeArea,
     pub def_scope: ScopePos,
 }
@@ -57,14 +58,14 @@ pub struct Module {
 
 #[derive(Debug, Clone)]
 pub struct ImplData {
-    pub members: HashMap<String, ValuePos>,
+    pub members: FnvHashMap<String, ValuePos>,
     pub methods: Vec<String>,
 }
 
 impl ImplData {
     pub fn new() -> Self {
         ImplData {
-            members: HashMap::new(),
+            members: FnvHashMap::default(),
             methods: Vec::new(),
         }
     }
@@ -146,8 +147,8 @@ pub struct Globals {
     pub trace: Vec<CodeArea>,
     pub import_trace: Vec<CodeArea>,
 
-    pub exports: Vec<HashMap<String, ValuePos>>,
-    pub import_caches: HashMap<PathBuf, HashMap<String, ValuePos>>,
+    pub exports: Vec<FnvHashMap<String, ValuePos>>,
+    pub import_caches: HashMap<PathBuf, FnvHashMap<String, ValuePos>>,
 
     pub mcfuncs: Register<McFuncID, Vec<String>>,
 
@@ -214,7 +215,7 @@ impl Globals {
     pub fn init_global(&mut self, scope_id: ScopePos, source: EmeraldSource) {
         for i in builtin_names() {
             let id = self.insert_value(
-                Value::Builtin(i.clone()),
+                Value::Builtin(name_to_builtin(&i)),
                 CodeArea {
                     source: source.clone(),
                     range: (0, 0)
@@ -1859,7 +1860,7 @@ pub fn execute(
             ) )
         }
         NodeType::Dictionary { map } => {
-            let mut id_map = HashMap::new();
+            let mut id_map = FnvHashMap::default();
             for (k, v) in map {
                 let id = protecute!(v => scope_id);
                 id_map.insert( k.clone(), id );
@@ -1932,8 +1933,8 @@ pub fn execute(
                 ValueType::CustomEnum(id) => globals.enum_impls.get(&id),
                 ValueType::Module(id) => globals.module_impls.get(&id),
             } {
-                if data.methods.contains(member) {
-                    let func = *data.members.get(member).unwrap();
+                if data.methods.contains(&member.inner) {
+                    let func = *data.members.get(&member.inner).unwrap();
                     match &globals.get(func).value {
                         Value::Function(f) => {
                             let f_v = Value::Function( Function {
@@ -1953,7 +1954,7 @@ pub fn execute(
                     }
                 }
             }
-            match (&globals.get(base_id).value.clone(), &member[..]) {
+            match (&globals.get(base_id).value.clone(), &member.inner[..]) {
                 (Value::Dictionary(map), member) => {
                     match map.get(member) {
                         Some(i) => ret!( Ok(*i) ),
@@ -1963,11 +1964,13 @@ pub fn execute(
                         } ))
                     }
                 }
-                (Value::StructInstance { fields, .. }, member) => {
+                (s @Value::StructInstance { fields, .. }, member) => {
                     match fields.get(member) {
                         Some(i) => ret!( Ok(*i) ),
                         None => ret!(Err( RuntimeError::NonexistentField {
                             field: member.to_string(),
+                            type_str: s.type_str(globals),
+                            val_area: area!(source.clone(), base.span),
                             area: area!(source.clone(), start_node.span),
                         } ))
                     }
@@ -1975,7 +1978,7 @@ pub fn execute(
                 _ => (),
             }
 
-            let val = match (&globals.get(base_id).value.clone(), &member[..]) {
+            let val = match (&globals.get(base_id).value.clone(), &member.inner[..]) {
                 (Value::String(s), "length") =>
                     Value::Number(s.chars().count() as f64),
                 (Value::Array(arr), "length") =>
@@ -2044,9 +2047,11 @@ pub fn execute(
                         lexer::SelectorType::Executor => "s",
                     }.to_string() ),
                 
-                _ => ret!(Err( RuntimeError::NonexistentField {
-                    field: member.clone(),
-                    area: area!(source.clone(), start_node.span),
+                (other, _) => ret!(Err( RuntimeError::NonexistentField {
+                    field: member.inner.clone(),
+                    type_str: other.type_str(globals),
+                    val_area: area!(source.clone(), base.span),
+                    area: member.area.clone(),
                 } )),
             };
 
@@ -2141,7 +2146,7 @@ pub fn execute(
                 Value::Type(ValueType::CustomStruct(id)) => {
                     let struct_type = globals.custom_structs.map[id].clone();
 
-                    let mut id_map = HashMap::new();
+                    let mut id_map = FnvHashMap::default();
 
                     for (f, (_, d)) in struct_type.fields.clone() {
                         match d {
@@ -2330,7 +2335,7 @@ pub fn execute(
                                     fields: field_types,
                                     field_areas: field_type_areas,
                                 } => {
-                                    let mut id_map = HashMap::new();
+                                    let mut id_map = FnvHashMap::default();
 
                                     for (k, v) in fields {
                                         if !field_types.contains_key(k) {
@@ -2608,7 +2613,7 @@ pub fn execute(
                     globals.protect_scope(mod_scope_root);
 
                     globals.import_trace.push( area!(source.clone(), start_node.span) );
-                    globals.exports.push( HashMap::new() );
+                    globals.exports.push( FnvHashMap::default() );
                     globals.init_global(mod_scope_root, mod_source.clone());
 
                     execute(
@@ -2672,8 +2677,8 @@ pub fn execute(
             let base_id = protecute!(base => scope_id);
             
             match &globals.get(base_id).value.clone() {
-                Value::Builtin(name) => run_builtin(
-                    name_to_builtin(name),
+                Value::Builtin(b) => run_builtin(
+                    *b,
                     start_node,
                     args,
                     scope_id,

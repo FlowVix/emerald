@@ -10,12 +10,7 @@ impl array {
     ) => {
         let index = index %% self.length;
         let popped = self[index];
-        let result = [];
-        for i of ..index
-            result.push(self[i]);
-        for i of (index + 1)..self.length
-            result.push(self[i]);
-        self = result;
+        pop_index(self, index);
         return popped;
     },
     max: (
@@ -217,6 +212,9 @@ impl array {
             });
         }
         return array(0..self.length).map(i => (i, self[i]));
+    },
+    rand: (self) => {
+        return self[rand_int(0, self.length)];
     }
     
 }

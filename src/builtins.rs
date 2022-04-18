@@ -11,6 +11,8 @@ use crate::value::Value;
 use convert_case::{Case, Casing};
 
 use core::time;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
 use std::io;
 use std::io::Write;
 use std::{thread};
@@ -23,8 +25,6 @@ macro_rules! area {
         CodeArea {source: $source, range: ($start, $end)}
     };
 }
-
-
 macro_rules! builtin_types {
     (
         $(
@@ -105,7 +105,7 @@ macro_rules! builtins {
             ) $code:block
         )*
     } => {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug, PartialEq, Hash)]
         pub enum Builtin {
             $(
                 $builtin_name,
@@ -131,6 +131,13 @@ macro_rules! builtins {
                     stringify!($func_name) => Builtin::$builtin_name,  
                 )*
                 _ => unreachable!(),
+            }
+        }
+        pub fn builtin_to_name(b: Builtin) -> String {
+            match b {
+                $(
+                    Builtin::$builtin_name => stringify!($func_name).to_string(),  
+                )*
             }
         }
         pub fn arg_amount(b: Builtin) -> Option<usize> {
@@ -383,6 +390,21 @@ builtins!{
         Value::Null
     }
 
+    [PopIndex]: pop_index(&mut v: Array, i: Number) {
+        v.remove(i as usize);
+        Value::Null
+    }
+
+    [Hash]: hash(v) {
+        let mut s = DefaultHasher::new();
+        v.hash(&mut s, Some(globals));
+        Value::Number((s.finish() / 10000) as f64)
+    }
+
+    [Debug]: debug(v) {
+        println!("{:#?}", v);
+        Value::Null
+    }
 
     [ID]: id(#[Any] => poopie) {
         println!("id: {:?}", globals.get_scope(scope_id).func_id);

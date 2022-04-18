@@ -14,6 +14,7 @@ use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 use ansi_term;
 use ariadne::Source;
 use error::{ToReport, RuntimeError};
+use fnv::FnvHashMap;
 use interpreter::{execute, Globals, Exit};
 use logos::Logos;
 use value::Value;
@@ -31,7 +32,7 @@ pub enum EmeraldSource {
 
 
 #[derive(Debug, Clone)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Hash)]
 pub struct CodeArea {
     source: EmeraldSource,
     range: (usize, usize),
@@ -126,7 +127,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     let ast = parse(&tokens, &source);
     
     let mut globals = Globals::new();
-    globals.exports.push( HashMap::new() );
+    globals.exports.push( FnvHashMap::default() );
     match ast {
         Ok((node, _)) => {
             

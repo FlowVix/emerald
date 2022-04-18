@@ -10,7 +10,7 @@ fn convert_string(s: &str) -> String {
         .replace("\\'", "'")
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash)]
 pub enum SelectorType {
     Players,
     Entities,
@@ -335,3 +335,15 @@ impl Token {
     }
 }
 
+use std::hash::Hash;
+impl Hash for Token {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Token::Num(f) => f.to_bits().hash(state),
+            Token::String(s) => s.hash(state),
+            Token::Selector(s) => s.hash(state),
+            Token::Ident(i) => i.hash(state),
+            _ => core::mem::discriminant(self).hash(state),
+        }
+    }
+}
