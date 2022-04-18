@@ -1,13 +1,6 @@
 
 
 
-impl string {
-    _div_: (self, other) => {
-        print(self, ": ", other);
-    },
-    _r_div_: string::_div_,
-}
+extract import "libraries/std/lib.mrld";
 
-
-5 / "gaga";
 

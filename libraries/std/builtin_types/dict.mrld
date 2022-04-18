@@ -1,0 +1,60 @@
+
+
+
+impl dict {
+    is_empty: (self) => {
+        for k of self {
+            return false;
+        }
+        return true;
+    },
+    keys: (self) => {
+        let out = [];
+        for k of self
+            out.push(k);
+        return out;
+    },
+    values: (self) => {
+        let out = [];
+        for k of self
+            out.push(self[k]);
+        return out;
+    },
+    items: (self) => {
+        let out = [];
+        for k of self
+            out.push((k, self[k]));
+        return out;
+    },
+    set: (self, key: string, value) => {
+        set_item(self, key, value);
+    },
+    get: (self, key: string, default) => {
+        if key in self {
+            return self[key];
+        } else {
+            return default;
+        }
+    },
+    delete: (self, key: string) => {
+        delete_item(self, key);
+    },
+    clear: (self) => {
+        self = {};
+    },
+    has_key: (self, key: string) => {
+        for i of self {
+            if key == i
+                return true;
+        }
+        return false;
+    },
+    has_value: (self, value) => {
+        for i of self {
+            if value == self[i]
+                return true;
+        }
+        return false;
+    },
+}
+

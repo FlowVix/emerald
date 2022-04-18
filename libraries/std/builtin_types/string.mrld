@@ -3,14 +3,14 @@
 
 
 impl string {
-    join: (self, arr: array) => {
-        let out = "";
-        for i of 0..(len(arr) - 1) {
-            out += string(arr[i]) + self;
-        }
-        out += string(arr[-1]);
-    },
-    substr: (self, start: number, end: number) => {
+
+    is_empty: (self) => return self.length == 0,
+
+    substr: (
+        self,
+        start: number,
+        end: number
+    ) => {
 		let start = start.clamp(0, self.length);
 		let end = end.clamp(0, self.length);
 		if start == end { return ''; }
@@ -19,6 +19,74 @@ impl string {
 		}
 		return substr(self, start, end);
 	},
+    overwrite: (
+        self,
+        start: number,
+        end: number,
+        str: string,
+    ) => {
+        return self.substr(0, start) + str + self.substr(end, self.length);
+    },
+    join: (self, arr: array) => {
+        let out = "";
+        for i of 0..(len(arr) - 1) {
+            out += string(arr[i]) + self;
+        }
+        out += string(arr[-1]);
+        return out;
+    },
+    split: (
+        self,
+        split: string,
+    ) => {
+        if split.length == 0 {
+            return array(self);
+        } else {
+            return split_str(self, split);
+        }
+    },
+    starts_with: (
+        self,
+        substr: string,
+    ) => {
+        if substr == "" 
+            return true;
+        if substr.length > self.length 
+            return false;
+        return self.substr(0, substr.length) == substr;
+    },
+    ends_with: (
+        self,
+        substr: string,
+    ) => {
+        if substr == "" 
+            return true;
+        if substr.length > self.length 
+            return false;
+        return self.substr(self.length - substr.length, self.length) == substr;
+    },
+    index: (
+        self,
+        substr: string,
+    ) => {
+        if substr == '' 
+            return null;
+        if substr.length > self.length 
+            return null;
+        
+        let r = self.length - substr.length + 1;
+        for i of ..r {
+            if self.substr(i, i + substr.length) == substr {
+                return i;
+            }
+        }
+        return null;
+    },
+    contains: (
+        self,
+        substr: string,
+    ) => return substr in self,
+    reversed: (self) => reverse_str(self),
 }
 
 

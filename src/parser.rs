@@ -632,7 +632,7 @@ pub fn parse_unit(
                             parse!(parse_expr(true) => let temp); pat = Some(temp);
                         });
                         let mut default = None;
-                        if_tok!(== Colon: {
+                        if_tok!(== Assign: {
                             pos += 1;
                             parse!(parse_expr(true) => let temp); default = Some(temp);
                         });

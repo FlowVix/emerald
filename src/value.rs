@@ -186,7 +186,7 @@ impl Value {
         match self {
             Value::Number(n) => n.to_string(),
             Value::Boolean(b) => b.to_string(),
-            Value::String(s) => s.clone(),
+            Value::String(s) => format!("\"{}\"", s),
             Value::Null => "null".to_string(),
             Value::Builtin(name) => format!("<builtin: {}>", name),
             Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(Located {inner, ..}, ..)| inner.clone()).collect::<Vec<String>>().join(", ")),
@@ -544,6 +544,45 @@ pub mod value_ops {
 
             (v, Value::Type(ValueType::Builtin(BuiltinType::String))) => Ok(Value::String( v.to_str(globals, &mut vec![]) )),
             (v, Value::Type(ValueType::Builtin(BuiltinType::Type))) => Ok(Value::Type(v.typ())),
+
+            (Value::String(s), Value::Type(ValueType::Builtin(BuiltinType::Array))) => {
+                let mut v = vec![];
+                for i in s.chars() {
+                    v.push(globals.insert_value(
+                        Value::String(i.to_string()),
+                        area.clone(),
+                    ))
+                }
+                Ok(Value::Array(v))
+            },
+            (Value::Range(Range { start, end, step }), Value::Type(t @ ValueType::Builtin(BuiltinType::Array))) => {
+                match (start, end) {
+                    (_, None) | (None, _) => Err( RuntimeError::CannotConvert {
+                        type1: "range with undefined ends".to_string(),
+                        type2: t.to_str(globals),
+                        area,
+                        area1: a.def_area.clone(),
+                    } ),
+                    _ => {
+                        let mut v = vec![];
+                        let iter = RangeIter::new(start.unwrap(), *step, *end);
+                        for i in iter {
+                            v.push(globals.insert_value(
+                                i,
+                                area.clone(),
+                            ))
+                        }
+                        Ok(Value::Array(v))
+                    }
+                }
+            },
+
+            (Value::Tuple(v), Value::Type(ValueType::Builtin(BuiltinType::Array))) => {
+                Ok(Value::Array(v.clone()))
+            },
+            (Value::Array(v), Value::Type(ValueType::Builtin(BuiltinType::Tuple))) => {
+                Ok(Value::Tuple(v.clone()))
+            },
 
             (value, Value::Type(t)) => {
                 if value.type_str(globals) == t.to_str(globals) {

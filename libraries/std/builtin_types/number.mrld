@@ -14,6 +14,18 @@ impl number {
     wrap: (self, min: number, max: number) => {
         return ((self - min) %% (max - min)) + min;
     },
+    map: (
+        self, 
+        istart: number, 
+        istop: number, 
+        ostart: number, 
+        ostop: number,
+    ) => ostart + (ostop - ostart) * ((self - istart) / (istop - istart)),
+    lerp: (
+        self,
+        to: number,
+        t: number,
+    ) => self + (to - self) * t,
 }
 
 

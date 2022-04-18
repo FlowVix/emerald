@@ -1,0 +1,223 @@
+
+
+
+impl array {
+    is_empty: (self) => self.length == 0,
+    push: (self, el) => self += [el],
+    pop: (
+        self,
+        index: number = -1,
+    ) => {
+        let index = index %% self.length;
+        let popped = self[index];
+        let result = [];
+        for i of ..index
+            result.push(self[i]);
+        for i of (index + 1)..self.length
+            result.push(self[i]);
+        self = result;
+        return popped;
+    },
+    max: (
+        self,
+        f: function = x => x,
+    ) => {
+        let max = self[0];
+
+        for i of self {
+            if f(i) > f(max)
+                max = i;
+        }
+
+        return max;
+    },
+    min: (
+        self,
+        f: function = x => x,
+    ) => {
+        let max = self[0];
+
+        for i of self {
+            if f(i) < f(max)
+                max = i;
+        }
+
+        return max;
+    },
+    contains: (self, el) => el in self,
+    interlace: (
+        self,
+        s: string = "",
+    ) => s.join(self),
+    index: (
+        self,
+        el,
+        from: number = 0,
+    ) => {
+        for i of from..self.length {
+            if self[i] == el
+                return i;
+        }
+        return null;
+    },
+    index_last: (
+        self,
+        el,
+        until: number = 0,
+    ) => {
+        for i of (self.length - 1)..(-1)..until {
+            if self[i] == el
+                return i;
+        }
+        return null;
+    },
+    index_all: (
+        self,
+        el,
+    ) => {
+        let occurences = [];
+        for i of ..self.length {
+            if self[i] == el
+                occurences.push(i);
+        }
+        return occurences;
+    },
+    clear: (self) => self = [],
+    reversed: (self) => {
+        if self.length == 0
+            return [];
+        let ret = [];
+        for i of 1..(self.length + 1)
+            ret.push(self[-i]);
+        return ret;
+    },
+    map: (
+        self,
+        f: function,
+    ) => {
+        let out = [];
+        for i of self
+            out.push(f(i));
+        return out;
+    },
+    filter: (
+        self,
+        f: function,
+    ) => {
+        let out = [];
+        for i of self
+            if f(i)
+                out.push(i);
+        return out;
+    },
+    partition: (
+        self,
+        f: function,
+    ) => {
+        let a = [];
+        let b = [];
+        for i of self {
+            if f(i)
+                a.push(i)
+            else
+                b.push(i);
+        }
+        return (a, b);
+    },
+    unique: (
+        self,
+    ) => {
+        let appeared = [];
+        for i of self
+            if !(i in appeared)
+                appeared.push(i);
+        return appeared;
+    },
+    l_fold: (
+        self,
+        f: function,
+    ) => {
+        let acum = self[0];
+        for iter of 1..self.length {
+            acum = f(acum, self[iter]);
+        }
+        return acum;
+    },
+    r_fold: (
+        self,
+        f: function,
+    ) => {
+        let acum = self[-1];
+        for iter of (self.length - 1)..(-1)..0 {
+            acum = f(self[iter], acum);
+        }
+        return acum;
+    },
+    any: (
+        self,
+        f: function,
+    ) => {
+        let out = [];
+        for i of self
+            if f(i)
+                return true;
+        return false;
+    },
+    all: (
+        self,
+        f: function,
+    ) => {
+        let out = [];
+        for i of self
+            if !f(i)
+                return false;
+        return true;
+    },
+    sorted: (
+        self,
+        comp: function = (a, b) => a <= b,
+    ) => {
+        if self.length <= 1
+            return self;
+        let arr = self;
+        let pivot = arr.pop(rand_int(0, arr.length));
+        let (a, b) = arr.partition(i => comp(i, pivot));
+        return a.sorted(comp) + [pivot] + b.sorted(comp);
+    },
+    sort: (
+        self,
+        comp: function = (a, b) => a <= b,
+    ) => {
+        self = self.sorted(comp);
+    },
+    flatten: (
+        self
+    ) => {
+        let output = [];
+
+        for i of self {
+            match i {
+                array -> for j of i.flatten() {
+                    output.push(j);
+                },
+                _ -> output.push(i),
+            }
+        }
+
+        return output;
+    },
+    enumerate: (
+        self,
+        dict_form: bool = false,
+    ) => {
+        if dict_form {
+            return array(0..self.length).map(i => {
+                index: i,
+                value: self[i],
+            });
+        }
+        return array(0..self.length).map(i => (i, self[i]));
+    }
+    
+}
+

@@ -327,6 +327,12 @@ impl Globals {
             None => panic!("bad value fuck you"),
         }
     }
+    pub fn get_mut(&mut self, id: ValuePos) -> &mut StoredValue {
+        return match self.values.map.get_mut(&id) {
+            Some(v) => v,
+            None => panic!("bad value fuck you"),
+        }
+    }
 
     // pub fn propagate_def(
     //     &mut self,
@@ -566,7 +572,12 @@ impl Globals {
 
 }
 
-
+// fn shit(n: &ASTNode, globals: &mut Globals, source: &EmeraldSource) -> Result<(), RuntimeError> {
+//     let a = &mut globals.get_mut(1).value;
+//     let b = &mut globals.get_mut(1).value;
+//     a;
+//     Ok(())
+// }
 
 
 macro_rules! interpreter_util {
@@ -1966,7 +1977,9 @@ pub fn execute(
 
             let val = match (&globals.get(base_id).value.clone(), &member[..]) {
                 (Value::String(s), "length") =>
-                    Value::Number(s.len() as f64),
+                    Value::Number(s.chars().count() as f64),
+                (Value::Array(arr), "length") =>
+                    Value::Number(arr.len() as f64),
 
                 (Value::Range(Range { start, .. }), "start") =>
                     if let Some(n) = start {Value::Number(*n)} else {Value::Null},

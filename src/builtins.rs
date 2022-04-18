@@ -65,6 +65,24 @@ macro_rules! builtin_types {
 }
 
 
+builtin_types!(
+    Number,
+    Bool,
+    String,
+    Nulltype,
+    Builtin,
+    Function,
+    Array,
+    Tuple,
+    Dict,
+    Type,
+    Pattern,
+    Range,
+
+    McFunc,
+    McVector,
+    Selector,
+);
 
 
 enum SpecialArgs {
@@ -75,13 +93,13 @@ enum SpecialArgs {
 
 macro_rules! builtins {
     {
-        ($call_node:ident, $scope_id:ident, $globals:ident, $source:ident, $areas:ident)
+        ($call_node:ident, $scope_id:ident, $globals:ident, $source:ident)
         $(
             [$builtin_name:ident]: $func_name:ident(
-                $(@$arg_info:ident => $var:ident)?
+                $(#[$arg_info:ident] => $var:ident)?
                 $(
                     $(
-                        $arg_name:ident $(: $type:ident)?
+                        $(&$mut:ident)? $arg_name:ident $(: $type:ident)? $(@ $arg_area:ident)?
                     ),+
                 )?
             ) $code:block
@@ -163,23 +181,25 @@ macro_rules! builtins {
                 $(
                     Builtin::$builtin_name => {
                         $(
-                            let mut $areas = vec![];
-                            let mut __arg_ids = vec![];
                             let mut __index = 0;
+                            let mut arg_ids = vec![];
                             $(
                                 let arg_id = execute(&args[__index], $scope_id, $globals, $source.clone())?;
+                                arg_ids.push(arg_id);
                                 $globals.protect_value(arg_id);
 
-                                $areas.push($globals.get(arg_id).def_area.clone());
+                                $(
+                                    let $arg_area = area!($source.clone(), args[__index].span);
+                                )?
+
                                 let $arg_name = $globals.get(arg_id).value.clone();
-                                $arg_name.type_str($globals); // just so it doesnt say unused
-
-
+                                format!("{:?}", $arg_name); // just so it doesnt say unused
                                 
                                 $(
                                     let $arg_name;
+
                                     match $globals.get(arg_id).value.clone() {
-                                        Value::$type(inner) => {$arg_name = inner},
+                                        Value::$type(v) => {$arg_name = v; format!("{:?}", $arg_name);},
                                         other => return Err( RuntimeError::TypeMismatch {
                                             expected: stringify!($type).to_case(Case::Snake).to_string(),
                                             found: format!("{}", other.type_str($globals)),
@@ -188,12 +208,53 @@ macro_rules! builtins {
                                         } )
                                     }
                                 )?
+
+                                $(
+                                    stringify!($mut);
+                                    let mut $arg_name = $arg_name;
+                                )?
                                 
-                                __arg_ids.push( arg_id );
                                 __index += 1;
                             )+
-                            let __areas = 4;
+
                             let __to_insert = $code;
+
+                            $(
+                                let mut __index = 0;
+                                let arg_id = arg_ids[__index];
+                                format!("{:?}", arg_id); // just so it doesnt say unused
+
+                                macro_rules! do_mut {
+                                    () => {
+                                        $(
+                                            stringify!($mut);
+                                            let val = $arg_name;
+                                            $globals.set_value(
+                                                arg_id,
+                                                val,
+                                                Some( area!($source.clone(), $call_node.span) ),
+                                            );
+                                        )?
+                                    };
+                                    ($lol_type:ident) => {
+                                        $(
+                                            stringify!($mut);
+                                            let val = Value::$lol_type($arg_name);
+                                            $globals.set_value(
+                                                arg_id,
+                                                val,
+                                                Some( area!($source.clone(), $call_node.span) ),
+                                            );
+                                        )?
+                                    };
+                                }
+                                "piss?";
+                                do_mut!( $($type)? );
+                                "fart?";
+
+                                __index += 1;
+                            )+
+
                             Ok ($globals.insert_value(
                                 __to_insert,
                                 area!($source.clone(), $call_node.span)
@@ -202,12 +263,10 @@ macro_rules! builtins {
                         $(
                             match SpecialArgs::$arg_info {
                                 SpecialArgs::Any => {
-                                    let mut $areas = vec![];
                                     let mut $var = vec![];
                                     for i in args {
                                         let arg_id = execute(&i, $scope_id, $globals, $source.clone())?;
                                         $globals.protect_value(arg_id);
-                                        $areas.push($globals.get(arg_id).def_area.clone());
                                         $var.push( $globals.get(arg_id).value.clone() )
                                     }
                                     Ok ($globals.insert_value(
@@ -225,31 +284,13 @@ macro_rules! builtins {
 }
 
 
-builtin_types!(
-    Number,
-    Bool,
-    String,
-    Nulltype,
-    Builtin,
-    Function,
-    Array,
-    Tuple,
-    Dict,
-    Type,
-    Pattern,
-    Range,
-
-    McFunc,
-    McVector,
-    Selector,
-);
 
 
 builtins!{
 
-    (call_node, scope_id, globals, info, __areas)
+    (call_node, scope_id, globals, source)
 
-    [Print]: print(@Any => poopie) {
+    [Print]: print(#[Any] => poopie) {
         let mut out_str = String::new();
         for i in poopie {
             out_str += &i.to_str(globals, &mut vec![]);
@@ -258,8 +299,8 @@ builtins!{
         Value::Null
     }
 
-    [Input]: input(prompt: String) {
-        print!("{}", format!("{}", prompt));
+    [Input]: input(s: String) {
+        print!("{}", format!("{}", s));
         io::stdout().flush().unwrap();
         let mut input_str = String::new();
         io::stdin()
@@ -296,14 +337,59 @@ builtins!{
     [Substr]: substr(s: String, start: Number, end: Number) {
         Value::String(s.as_str()[(start as usize)..(end as usize)].to_string())
     }
+    [SplitStr]: split_str(s: String, substr: String) {
+        let mut out = vec![];
+        for split in s.split(&substr) {
+            let item = globals.insert_value(
+                Value::String(split.to_string()),
+                CodeArea {
+                    source: source.clone(),
+                    range: call_node.span,
+                },
+            );
+            out.push(item);
+        }
+        Value::Array(out)
+    }
+    [ReverseStr]: reverse_str(s: String) {
+        Value::String(s.chars().rev().collect::<String>())
+    }
+
+    [RandInt]: rand_int(a: Number, b: Number) {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let a = a.floor() as i64;
+        let b = b.floor() as i64;
+        let rand = ( rng.gen::<i64>() ).rem_euclid(b - a) + a;
+        Value::Number(rand as f64)
+    }
+    [RandFloat]: rand_float(a: Number, b: Number) {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let rand = ( rng.gen::<f64>() ).rem_euclid(b - a) + a;
+        Value::Number(rand)
+    }
+
+    [SetItem]: set_item(&mut d: Dictionary, k: String, v @ v_area) {
+        let id = globals.insert_value(
+            v,
+            v_area,
+        );
+        d.insert(k, id);
+        Value::Null
+    }
+    [DeleteItem]: delete_item(&mut d: Dictionary, k: String) {
+        d.remove(&k);
+        Value::Null
+    }
 
 
-    [ID]: id(@Any => poopie) {
+    [ID]: id(#[Any] => poopie) {
         println!("id: {:?}", globals.get_scope(scope_id).func_id);
         Value::Null
 
     }
-    [Impls]: impls(@Any => poopie) {
+    [Impls]: impls(#[Any] => poopie) {
         println!("builtin impls: {:#?}", globals.builtin_impls);
         println!("impls: {:#?}", globals.struct_impls);
         Value::Null
