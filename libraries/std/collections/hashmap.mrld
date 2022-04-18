@@ -1,0 +1,74 @@
+
+
+
+export struct HashMap {
+    list: array,
+    elements: number,
+}
+
+let DEFAULT_SIZE = 2;
+
+impl HashMap {
+    new: (
+        from: dict = {},
+        slots: number = DEFAULT_SIZE,
+    ) => {
+        let new_map = HashMap::{
+            list: [[]] * slots,
+            elements: 0,
+        };
+        for (k, v) of from.items() {
+            new_map.insert(k, v);
+        }
+        return new_map;
+    },
+
+    _grow: (self) => {
+        let new_map = HashMap::new({}, self.list.length * 2);
+        for i of self.list {
+            for pair of i {
+                new_map.insert(pair[0], pair[1]);
+            }
+        }
+        self = new_map;
+    },
+
+    // display
+
+    insert: (
+        self,
+        key,
+        value,
+    ) => {
+        let index = hash(key) % self.list.length;
+        for (i, el) of self.list[index].enumerate() {
+            if el[0] == key {
+                self.list[index][i][1] = value;
+                return;
+            }
+        }
+        self.list[index].push( (key, value) );
+        self.elements += 1;
+        if self.elements >= self.list.length
+            self._grow();
+    },
+
+    get: (
+        self,
+        key,
+    ) => {
+        let index = hash(key) % self.list.length;
+        for el of self.list[index] {
+            if el[0] == key
+                return el[1];
+        }
+        return null;
+    }
+
+}
+
+
+
+
+
+

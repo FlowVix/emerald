@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash};
+use std::{collections::HashSet, hash::Hash};
 
 use fnv::FnvHashMap;
 
@@ -516,11 +516,9 @@ impl Iterator for RangeIter {
 
 pub mod value_ops {
 
-    use std::collections::HashMap;
-
     use fnv::FnvHashMap;
 
-    use crate::{interpreter::{StoredValue, Globals}, CodeArea, value::{Value, ValueType}, error::RuntimeError, builtins::BuiltinType};
+    use crate::{interpreter::{StoredValue, Globals}, CodeArea, value::{Value, ValueType, InstanceVariant}, error::RuntimeError, builtins::BuiltinType};
 
     use super::{Pattern, Range, RangeIter};
 
@@ -889,15 +887,162 @@ pub mod value_ops {
         }
     }
 
-    pub fn eq(a: &StoredValue, b: &StoredValue, _area: CodeArea, _globals: &mut Globals) -> Result<bool, RuntimeError> {
+    pub fn eq(a: &StoredValue, b: &StoredValue, globals: &mut Globals) -> bool {
+
+        macro_rules! eq_id {
+            ($a:expr, $b:expr) => {
+                eq(&globals.get(*$a).clone(), &globals.get(*$b).clone(), globals)
+            }
+        }
+
         match (&a.value, &b.value) {
-            (Value::Number(n1), Value::Number(n2)) => Ok(n1 == n2),
-            (Value::String(s1), Value::String(s2)) => Ok(s1 == s2),
-            (Value::Boolean(b1), Value::Boolean(b2)) => Ok(b1 == b2),
+            (Value::Number(v1), Value::Number(v2)) => v1 == v2,
+            (Value::String(v1), Value::String(v2)) => v1 == v2,
+            (Value::Boolean(v1), Value::Boolean(v2)) => v1 == v2,
 
-            (Value::Null, Value::Null) => Ok(true),
+            (Value::Null, Value::Null) => true,
+            
+            (Value::Builtin(v1), Value::Builtin(v2)) => v1 == v2,
+            (Value::Function(v1), Value::Function(v2)) => v1 == v2,
 
-            (_, _) => Ok(false),
+            (Value::Array(arr1), Value::Array(arr2)) | (Value::Tuple(arr1), Value::Tuple(arr2)) => {
+                if arr1.len() != arr2.len() {
+                    return false
+                }
+
+                for (i, j) in arr1.iter().zip(arr2) {
+                    if !eq_id!(i, j) {
+                        return false
+                    }
+                }
+                true
+                
+            },
+            (Value::Dictionary(d1), Value::Dictionary(d2)) => {
+                if d1.len() != d2.len() {
+                    return false
+                }
+
+                for (k, v1) in d1 {
+                    match d2.get(k) {
+                        Some(v2) => {
+                            if !eq_id!(v1, v2) {
+                                return false
+                            }
+                        },
+                        None => return false,
+                    }
+                }
+                true
+            },
+
+            (Value::Type(v1), Value::Type(v2)) => v1 == v2,
+            (Value::Pattern(v1), Value::Pattern(v2)) => v1 == v2,
+            (Value::Range(v1), Value::Range(v2)) => v1 == v2,
+
+            (Value::McFunc(v1), Value::McFunc(v2)) => v1 == v2,
+            (Value::McVector(v1), Value::McVector(v2)) => v1 == v2,
+
+            (Value::Selector(v1), Value::Selector(v2)) => {
+                if v1.selector_type != v2.selector_type {
+                    return false
+                }
+                
+                if v1.args.len() != v2.args.len() {
+                    return false
+                }
+
+                for ((k1, i), (k2, j)) in v1.args.iter().zip(&v2.args) {
+                    if k1 != k2 || !eq_id!(i, j) {
+                        return false
+                    }
+                }
+                true
+                
+            },
+
+
+            (Value::StructInstance {
+                struct_id: id1,
+                fields: f1
+            }, Value::StructInstance {
+                struct_id: id2,
+                fields: f2
+            }) => {
+
+                if id1 != id2 {
+                    return false
+                }
+
+                for (k, v1) in f1 {
+                    match f2.get(k) {
+                        Some(v2) => {
+                            if !eq_id!(v1, v2) {
+                                return false
+                            }
+                        },
+                        None => return false,
+                    }
+                }
+                true
+                
+            },
+
+            (Value::EnumInstance {
+                enum_id: id1,
+                variant_name: n1,
+                variant: v1,
+            }, Value::EnumInstance {
+                enum_id: id2,
+                variant_name: n2,
+                variant: v2,
+            }) => {
+
+                if id1 != id2 {
+                    return false
+                }
+                if n1 != n2 {
+                    return false
+                }
+                
+                match (v1, v2) {
+                    (InstanceVariant::Unit, InstanceVariant::Unit) => true,
+                    (InstanceVariant::Tuple(arr1), InstanceVariant::Tuple(arr2)) => {
+                        if arr1.len() != arr2.len() {
+                            return false
+                        }
+        
+                        for (i, j) in arr1.iter().zip(arr2) {
+                            if !eq_id!(i, j) {
+                                return false
+                            }
+                        }
+                        true
+                    },
+                    (InstanceVariant::Struct{
+                        fields: f1,
+                    }, InstanceVariant::Struct{
+                        fields: f2,
+                    }) => {
+                        for (k, v1) in f1 {
+                            match f2.get(k) {
+                                Some(v2) => {
+                                    if !eq_id!(v1, v2) {
+                                        return false
+                                    }
+                                },
+                                None => return false,
+                            }
+                        }
+                        true
+                    },
+                    _ => false,
+
+                }
+                
+            },
+
+            (_, _) => false,
         }
     }
 
@@ -949,11 +1094,11 @@ pub mod value_ops {
         }
     }
 
-    pub fn eq_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
-        Ok(Value::Boolean(eq(a, b, area, globals)?))
+    pub fn eq_op(a: &StoredValue, b: &StoredValue, _area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        Ok(Value::Boolean(eq(a, b, globals)))
     }
-    pub fn neq_op(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
-        Ok(Value::Boolean(!eq(a, b, area, globals)?))
+    pub fn neq_op(a: &StoredValue, b: &StoredValue, _area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
+        Ok(Value::Boolean(!eq(a, b, globals)))
     }
     pub fn greater(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
@@ -1075,7 +1220,7 @@ pub mod value_ops {
             (_, Value::Array(r)) => {
                 for i in r {
                     let s = globals.get(*i).clone();
-                    if eq(a, &s, area.clone(), globals).unwrap() {
+                    if eq(a, &s, globals) {
                         return Ok(Value::Boolean(true));
                     }
                 }

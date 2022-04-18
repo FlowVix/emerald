@@ -1037,7 +1037,7 @@ pub fn do_assign(
         }
         _ => {
             let left_id = protecute!(left => scope_id);
-            let equal = value_ops::eq(&globals.get(left_id).clone(), &globals.get(right).clone(), area!(source.clone(), left.span), globals)?;
+            let equal = value_ops::eq(&globals.get(left_id).clone(), &globals.get(right).clone(), globals);
             if !equal {
                 let value1 = globals.get(left_id).value.to_str(globals, &mut vec![]);
                 let value2 = globals.get(right).value.to_str(globals, &mut vec![]);
@@ -1873,7 +1873,7 @@ pub fn execute(
         NodeType::Index { base, index } => {
             let base_id = protecute!(base => scope_id);
             match &globals.get(base_id).value.clone() {
-                Value::Array(arr) => {
+                Value::Array(arr) | Value::Tuple(arr) => {
                     let index_id = execute!(index => scope_id);
                     match &globals.get(index_id).value.clone() {
                         Value::Number(n) => {

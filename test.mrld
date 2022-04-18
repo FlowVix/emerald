@@ -4,4 +4,4 @@
 extract import "libraries/std/lib.mrld";
 
 
-
+print([1, 2] == [1, 2]);

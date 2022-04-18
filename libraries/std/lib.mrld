@@ -17,6 +17,7 @@ import? "builtin_types/dict.mrld";
 import? "builtin_types/number.mrld";
 import? "builtin_types/selector.mrld";
 
+extract import? "collections/hashmap.mrld";
 
 
 export let MCInt = MCInt;
@@ -30,3 +31,4 @@ export let MC = MC;
 
 
 export let Marker = Marker;
+export let HashMap = HashMap;
