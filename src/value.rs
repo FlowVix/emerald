@@ -8,7 +8,7 @@ use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Global
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Function {
-    pub args: Vec<(Located<String>, Option<ValuePos>, Option<ValuePos>)>,
+    pub args: Vec<(Located<String>, Option<ValuePos>, Option<ValuePos>, bool)>,
     pub code: Box<ASTNode>,
     pub parent_scope: ScopePos,
     pub header_area: CodeArea,
@@ -41,12 +41,18 @@ impl ValueType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Type(ValueType),
-    Any,
+
     Either(Box<Pattern>, Box<Pattern>),
     Not(Box<Pattern>),
+    
+    Any,
+
+    Array(Box<Pattern>, Option<usize>),
+    Tuple(Vec<Pattern>),
+    Dict(FnvHashMap<String, Pattern>),
 }
 
 impl Pattern {
@@ -56,6 +62,40 @@ impl Pattern {
             Pattern::Type(t) => t.to_str(globals),
             Pattern::Either(a, b) => format!("({} | {})", a.to_str(globals), b.to_str(globals)),
             Pattern::Not(a) => format!("!{}", a.to_str(globals)),
+            Pattern::Array(t, n) => match n {
+                Some(n) => format!("array[{}, {}]", t.to_str(globals), n),
+                None => format!("array[{}]", t.to_str(globals)),
+            },
+            Pattern::Tuple(arr) => format!("tuple[{}]", arr.iter().map(|el| el.to_str(globals)).collect::<Vec<String>>().join(", ")),
+            Pattern::Dict(map) => format!("dict[{{{}}}]", map.iter().map(|(k, p)| format!("{}: {}", k, p.to_str(globals))).collect::<Vec<String>>().join(", ")),
+        }
+    }
+}
+
+
+impl Pattern {
+    pub fn hash<H: std::hash::Hasher>(&self, state: &mut H, globals: &Globals) {
+        match self {
+            Pattern::Any => core::mem::discriminant(self).hash(state),
+            Pattern::Type(t) => t.hash(state),
+            Pattern::Either(a, b) => {
+                a.hash(state, globals);
+                b.hash(state, globals);
+            },
+            Pattern::Not(a) => a.hash(state, globals),
+            Pattern::Array(t, n) => {
+                t.hash(state, globals);
+                n.hash(state);
+            }
+            Pattern::Tuple(arr) => for i in arr {
+                i.hash(state, globals)
+            },
+            Pattern::Dict(map) => {
+                for (k, v) in map {
+                    k.hash(state);
+                    v.hash(state, globals);
+                }
+            },
         }
     }
 }
@@ -225,7 +265,7 @@ impl Value {
         match self {
             Value::Number(n) => n.to_string(),
             Value::Boolean(b) => b.to_string(),
-            Value::String(s) => format!("\"{}\"", s),
+            Value::String(s) => format!("{}", s),
             Value::Null => "null".to_string(),
             Value::Builtin(b) => format!("<builtin: {}>", builtin_to_name(*b)),
             Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(Located {inner, ..}, ..)| inner.clone()).collect::<Vec<String>>().join(", ")),
@@ -393,12 +433,63 @@ impl Value {
         }
     }
 
-    pub fn matches_pat(&self, p: Pattern, globals: &Globals) -> Result<bool, RuntimeError> {
+    pub fn matches_pat(&self, p: &Pattern, globals: &Globals) -> Result<bool, RuntimeError> {
         match p {
             Pattern::Any => Ok( true ),
             Pattern::Type(t) => Ok( self.typ() == t.clone() ),
-            Pattern::Either(a, b) => Ok( self.matches_pat(*a, globals)? || self.matches_pat(*b, globals)? ),
-            Pattern::Not(a) => Ok( !self.matches_pat(*a, globals)? )
+            Pattern::Either(a, b) => Ok( self.matches_pat(a, globals)? || self.matches_pat(b, globals)? ),
+            Pattern::Not(a) => Ok( !self.matches_pat(a, globals)? ),
+            Pattern::Array(inner, n) => {
+                match self {
+                    Value::Array(arr) => {
+                        match n {
+                            Some(n) => if *n != arr.len() {return Ok(false)}
+                            None => (),
+                        }
+                        for i in arr {
+                            if !globals.get(*i).value.matches_pat(inner, globals)? {
+                                return Ok(false)
+                            }
+                        }
+                        Ok(true)
+                    },
+                    _ => Ok(false),
+                }
+            },
+            Pattern::Tuple(v) => {
+                match self {
+                    Value::Tuple(arr) => {
+                        if arr.len() != v.len() {return Ok(false)}
+                        for (i, p) in arr.iter().zip(v) {
+                            if !globals.get(*i).value.matches_pat(p, globals)? {
+                                return Ok(false)
+                            }
+                        }
+                        Ok(true)
+                    },
+                    _ => Ok(false),
+                }
+            },
+            Pattern::Dict(p_map) => {
+                match self {
+                    Value::Dictionary(map) => {
+                        if p_map.len() != map.len() {return Ok(false)}
+                        for (k, p) in p_map {
+                            match map.get(k) {
+                                Some(v) => {
+                                    if !globals.get(*v).value.matches_pat(p, globals)? {
+                                        return Ok(false)
+                                    }
+                                },
+                                None => return Ok(false),
+                            }
+                        }
+                        Ok(true)
+                    },
+                    _ => Ok(false),
+                }
+            },
+            _ => todo!(),
         }
     }
 
@@ -411,7 +502,7 @@ impl Value {
                 ..
             }) => {
                 scopes.insert(*parent_scope);
-                for (_, t, d) in args {
+                for (_, t, d, _) in args {
                     if let Some(id) = t {
                         values.insert(*id);
                         globals.get(*id).value.get_references(globals, values, scopes);
@@ -648,7 +739,7 @@ pub mod value_ops {
         match (&a.value, &b.value) {
             (v, Value::Type(t)) => Ok( v.typ() == t.clone() ),
 
-            (v, Value::Pattern(p)) => Ok( v.matches_pat(p.clone(), globals)? ),
+            (v, Value::Pattern(p)) => Ok( v.matches_pat(p, globals)? ),
             
             (_, value) => {
                 Err( RuntimeError::TypeMismatch {
@@ -1279,7 +1370,7 @@ impl Value {
                 }
             },
             Value::Type(v) => v.hash(state),
-            Value::Pattern(v) => v.hash(state),
+            Value::Pattern(v) => v.hash(state, globals.unwrap()),
             Value::Range(v) => v.hash(state),
             Value::McFunc(v) => v.hash(state),
             Value::McVector(v) => v.hash(state, globals.unwrap()),

@@ -149,6 +149,13 @@ pub enum RuntimeError {
         provided: usize,
         call_area: CodeArea,
     },
+    IndexArgCount {
+        provided: usize,
+        expected: String,
+        typ: String,
+        val_area: CodeArea,
+        index_area: CodeArea,
+    },
     PatternMismatch {
         typ: String,
         pattern: String,
@@ -255,6 +262,14 @@ pub enum RuntimeError {
         msg: String,
         area: CodeArea,
     },
+
+
+
+    CustomError {
+        msg: String,
+        area: CodeArea,
+        labels: Vec<(String, CodeArea)>,
+    }
 }
 
 
@@ -756,6 +771,21 @@ impl ToReport for RuntimeError {
                 ],
                 note: None,
             },
+            RuntimeError::IndexArgCount {
+                provided,
+                index_area,
+                expected,
+                typ,
+                val_area
+            } => ErrorReport {
+                source: index_area.clone(),
+                message: format!("{} arguments provided, but indexing {} takes {}", provided, typ, expected),
+                labels: vec![
+                    (index_area.clone(), format!("{} arguments were provided here", provided.fg(colors.next()))),
+                    (val_area.clone(), format!("This {} takes {} arguments", typ.fg(colors.next()), expected.fg(colors.next())))
+                ],
+                note: None,
+            },
             RuntimeError::PatternMismatch {
                 typ,
                 type_area,
@@ -1013,6 +1043,19 @@ impl ToReport for RuntimeError {
                 labels: vec![
                     (area.clone(), format!("Thrown here")),
                 ],
+                note: None,
+            },
+            RuntimeError::CustomError {
+                msg,
+                labels,
+                area,
+            } => ErrorReport {
+                source: area.clone(),
+                message: format!("{}", msg),
+                labels: labels.iter().map(
+                    |(s, a)|
+                    (a.clone(), s.clone())
+                ).collect(),
                 note: None,
             },
         }

@@ -1093,7 +1093,7 @@ pub fn execute(
 
 
                 let derived = globals.derive_scope($func.parent_scope, globals.get_scope(scope_id).func_id);
-                for (arg_id, (Located {inner, ..}, t, d)) in $arg_ids.iter().zip($func.args.clone()) {
+                for (arg_id, (Located {inner, ..}, t, _, _)) in $arg_ids.iter().zip($func.args.clone()) {
                     
                     match t {
                         Some(typ) => {
@@ -1424,45 +1424,45 @@ pub fn execute(
             }
         },
         NodeType::Unary { op, node } => {
-            let value = protecute!(node => scope_id);
-            match op {
-                Token::Plus => {
-                    let result = value_ops::identity(&globals.get(value).clone(), area!(source.clone(), node.span), globals)?;
-                    Ok(globals.insert_value(
-                        result,
-                        area!(source.clone(), node.span),
-                    ))
-                },
-                Token::Minus => {
-                    let result = value_ops::negate(&globals.get(value).clone(), area!(source.clone(), node.span), globals)?;
-                    Ok(globals.insert_value(
-                        result,
-                        area!(source.clone(), node.span),
-                    ))
-                },
-                Token::ExclMark => {
-                    let result = value_ops::not(&globals.get(value).clone(), area!(source.clone(), node.span), globals)?;
-                    Ok(globals.insert_value(
-                        result,
-                        area!(source.clone(), node.span),
-                    ))
-                },
-                Token::DoubleDot => {
-                    let result = value_ops::unary_range(&globals.get(value).clone(), area!(source.clone(), node.span), globals)?;
-                    Ok(globals.insert_value(
-                        result,
-                        area!(source.clone(), node.span),
-                    ))
-                },
-                Token::TripleDot => {
-                    let result = value_ops::unary_unbounded_range(&globals.get(value).clone(), area!(source.clone(), node.span), globals)?;
-                    Ok(globals.insert_value(
-                        result,
-                        area!(source.clone(), node.span),
-                    ))
-                },
-                _ => unreachable!()
+            // let value = protecute!(node => scope_id);
+            let value_raw = protecute_raw!(node => scope_id);
+
+            let value_clone = proteclone!(value_raw => @);
+
+            macro_rules! op_helper {
+                (
+                    $(
+                        $tok:ident: $name:ident Overload: $overload_name:ident
+                    )+
+                ) => {
+                    match op {
+                        $(
+                            Token::$tok => {
+                                match globals.get_method(value_clone, &format!("_{}_", stringify!($overload_name))) {
+                                    Some(f) => Ok( run_func!(vec![value_raw], f) ),
+                                    None => {
+                                        let result = value_ops::$name(&globals.get(value_clone).clone(), area!(source.clone(), node.span), globals)?;
+                                        Ok(globals.insert_value(
+                                            result,
+                                            area!(source.clone(), start_node.span),
+                                        ))
+                                    },
+                                }
+                            }
+                        )+
+                        _ => unreachable!(),
+                    }
+                }
             }
+
+
+            op_helper!(
+                Plus: identity                          Overload: identity
+                Minus: negate                           Overload: negate
+                ExclMark: not                           Overload: not
+                DoubleDot: unary_range                  Overload: unary_range
+                TripleDot: unary_unbounded_range        Overload: unbounded_range
+            )
         },
         NodeType::UnboundedRange { base } => {
             let val = protecute!(base => scope_id);
@@ -1779,7 +1779,7 @@ pub fn execute(
         }
         NodeType::FuncDef { func_name, args, code, header_area } => {
             let mut args_exec = vec![];
-            for (s, t, d) in args {
+            for (s, t, d, is_ref) in args {
                 let t = match t {
                     Some(n) => {
                         let _n = execute!(n => scope_id);
@@ -1794,7 +1794,7 @@ pub fn execute(
                     }
                     None => None,
                 };
-                args_exec.push( (s.clone(), t, d) );
+                args_exec.push( (s.clone(), t, d, *is_ref) );
             }
             let value_id = globals.insert_value(
                 Value::Function( Function {
@@ -1811,7 +1811,7 @@ pub fn execute(
         }
         NodeType::Lambda { args, code, header_area } => {
             let mut args_exec = vec![];
-            for (s, t, d) in args {
+            for (s, t, d, is_ref) in args {
                 let t = match t {
                     Some(n) => {
                         let _n = execute!(n => scope_id);
@@ -1826,7 +1826,7 @@ pub fn execute(
                     }
                     None => None,
                 };
-                args_exec.push( (s.clone(), t, d) );
+                args_exec.push( (s.clone(), t, d, *is_ref) );
             }
             Ok( globals.insert_value(
                 Value::Function( Function {
@@ -1870,10 +1870,25 @@ pub fn execute(
                 area!(source.clone(), start_node.span)
             ) )
         }
-        NodeType::Index { base, index } => {
+        NodeType::Index { base, args, args_area } => {
             let base_id = protecute!(base => scope_id);
+            let v = &globals.get(base_id).value.clone();
+
+
             match &globals.get(base_id).value.clone() {
                 Value::Array(arr) | Value::Tuple(arr) => {
+                    if args.len() != 1 {
+                        ret!(Err(
+                            RuntimeError::IndexArgCount {
+                                provided: args.len(),
+                                expected: format!("1"),
+                                index_area: args_area.clone(),
+                                val_area: area!(source.clone(), base.span),
+                                typ: v.type_str(globals),
+                            }
+                        ))
+                    }
+                    let index = &args[0];
                     let index_id = execute!(index => scope_id);
                     match &globals.get(index_id).value.clone() {
                         Value::Number(n) => {
@@ -1897,6 +1912,18 @@ pub fn execute(
                     }
                 },
                 Value::Dictionary(map) => {
+                    if args.len() != 1 {
+                        ret!(Err(
+                            RuntimeError::IndexArgCount {
+                                provided: args.len(),
+                                expected: format!("1"),
+                                index_area: area!(source.clone(), start_node.span),
+                                val_area: area!(source.clone(), base.span),
+                                typ: v.type_str(globals),
+                            }
+                        ))
+                    }
+                    let index = &args[0];
                     let index_id = execute!(index => scope_id);
                     match &globals.get(index_id).value.clone() {
                         Value::String(s) => {
@@ -1915,9 +1942,163 @@ pub fn execute(
                             defs: vec![(other.type_str(globals), globals.get(index_id).def_area.clone())],
                         } ))
                     }
-                }
+                },
+                Value::Type(ValueType::Builtin(BuiltinType::Array)) => {
+                    match args.len() {
+                        1 => {
+                            let pat = &args[0];
+                            let pat_id = protecute!(pat => scope_id);
+                            match &globals.get(pat_id).value.clone() {
+                                Value::Type(t) => {
+                                    Ok( globals.insert_value(
+                                        Value::Pattern(Pattern::Array(Box::new(Pattern::Type(t.clone())), None)),
+                                        area!(source.clone(), start_node.span)
+                                    ) )
+                                },
+                                Value::Pattern(p) => {
+                                    Ok( globals.insert_value(
+                                        Value::Pattern(Pattern::Array(Box::new(p.clone()), None)),
+                                        area!(source.clone(), start_node.span)
+                                    ) )
+                                },
+                                other => ret!(Err( RuntimeError::TypeMismatch {
+                                    expected: "type or pattern".to_string(),
+                                    found: format!("{}", other.type_str(globals)),
+                                    area: area!(source.clone(), pat.span),
+                                    defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
+                                } ))
+                            }
+                        },
+                        2 => {
+                            let pat = &args[0];
+                            let pat_id = protecute!(pat => scope_id);
+                            let l = &args[1];
+                            let l_id = protecute!(l => scope_id);
+
+                            let pat = match &globals.get(pat_id).value.clone() {
+                                Value::Type(t) => {
+                                    Box::new(Pattern::Type(t.clone()))
+                                },
+                                Value::Pattern(p) => {
+                                    Box::new(p.clone())
+                                },
+                                other => ret!(Err( RuntimeError::TypeMismatch {
+                                    expected: "type or pattern".to_string(),
+                                    found: format!("{}", other.type_str(globals)),
+                                    area: area!(source.clone(), pat.span),
+                                    defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
+                                } ))
+                            };
+                            
+                            let l = match &globals.get(l_id).value.clone() {
+                                Value::Number(n) => {
+                                    let id = *n as isize;
+                                    if id < 0 {
+                                        ret!(Err( RuntimeError::CustomError {
+                                            msg: "Cannot create array pattern with negative length".to_string(),
+                                            area: area!(source.clone(), l.span),
+                                            labels: vec![
+                                                ("This number is smaller than 0".to_string(), area!(source.clone(), l.span))
+                                            ],
+                                        } ))
+                                    }
+                                    id as usize
+                                }
+                                other => ret!(Err( RuntimeError::TypeMismatch {
+                                    expected: "number".to_string(),
+                                    found: format!("{}", other.type_str(globals)),
+                                    area: area!(source.clone(), l.span),
+                                    defs: vec![(other.type_str(globals), globals.get(l_id).def_area.clone())],
+                                } ))
+                            };
+                            Ok( globals.insert_value(
+                                Value::Pattern(Pattern::Array(pat, Some(l))),
+                                area!(source.clone(), start_node.span)
+                            ) )
+                        },
+                        l => ret!(Err(
+                            RuntimeError::IndexArgCount {
+                                provided: l,
+                                expected: format!("1 or 2"),
+                                index_area: args_area.clone(),
+                                val_area: area!(source.clone(), base.span),
+                                typ: format!("array type"),
+                            }
+                        ))
+                    }
+                },
+                Value::Type(ValueType::Builtin(BuiltinType::Tuple)) => {
+
+                    let mut v = vec![];
+                    for i in args {
+                        let pat = i;
+                        let pat_id = protecute!(pat => scope_id);
+                        match &globals.get(pat_id).value.clone() {
+                            Value::Type(t) => v.push( Pattern::Type(t.clone()) ),
+                            Value::Pattern(p) => v.push( p.clone() ),
+                            other => ret!(Err( RuntimeError::TypeMismatch {
+                                expected: "type or pattern".to_string(),
+                                found: format!("{}", other.type_str(globals)),
+                                area: area!(source.clone(), pat.span),
+                                defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
+                            } ))
+                        }
+                    }
+
+                    Ok( globals.insert_value(
+                        Value::Pattern(Pattern::Tuple(v)),
+                        area!(source.clone(), start_node.span)
+                    ) )
+                },
+                Value::Type(ValueType::Builtin(BuiltinType::Dict)) => {
+                    match args.len() {
+                        1 => {
+                            let dict = &args[0];
+                            let dict_id = protecute!(dict => scope_id);
+
+                            match &globals.get(dict_id).value.clone() {
+                                Value::Dictionary(map) => {
+                                    let mut p_map = FnvHashMap::default();
+                                    for (k, i) in map {
+                                        let entry = globals.get(*i);
+                                        match &entry.value {
+                                            Value::Type(t) => p_map.insert(k.clone(), Pattern::Type(t.clone())),
+                                            Value::Pattern(p) => p_map.insert(k.clone(), p.clone()),
+                                            _ => ret!(Err( RuntimeError::CustomError {
+                                                msg: "Dict pattern can only be created using a dict with type or pattern values".to_string(),
+                                                area: area!(source.clone(), dict.span),
+                                                labels: vec![
+                                                    ("This dict doesn't have only type or pattern values".to_string(), area!(source.clone(), dict.span))
+                                                ],
+                                            } ))
+                                        };
+                                    }
+                                    Ok( globals.insert_value(
+                                        Value::Pattern(Pattern::Dict(p_map)),
+                                        area!(source.clone(), start_node.span)
+                                    ) )
+                                },
+                                other => ret!(Err( RuntimeError::TypeMismatch {
+                                    expected: "dict".to_string(),
+                                    found: format!("{}", other.type_str(globals)),
+                                    area: area!(source.clone(), dict.span),
+                                    defs: vec![(other.type_str(globals), globals.get(dict_id).def_area.clone())],
+                                } ))
+                            }
+                        },
+                        l => ret!(Err(
+                            RuntimeError::IndexArgCount {
+                                provided: l,
+                                expected: format!("1"),
+                                index_area: args_area.clone(),
+                                val_area: area!(source.clone(), base.span),
+                                typ: format!("dict type"),
+                            }
+                        ))
+                    }
+                },
                 other => ret!(Err( RuntimeError::TypeMismatch {
-                    expected: "array or dict".to_string(),
+                    expected: "array, dict, or array type".to_string(),
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
@@ -2673,102 +2854,119 @@ pub fn execute(
             }
             Ok( clone!(val => @) )
         },
-        NodeType::Call { base, args } => {
-            let base_id = protecute!(base => scope_id);
-            
-            match &globals.get(base_id).value.clone() {
-                Value::Builtin(b) => run_builtin(
-                    *b,
-                    start_node,
-                    args,
-                    scope_id,
-                    globals,
-                    source,
-                ),
-                
-                Value::Function( f @ Function { args: params, self_arg, header_area, ..} ) => {
-                    // println!("1 {:?}", args);
+        NodeType::Call { base, args, .. } => {
+            let base_raw = protecute_raw!(base => scope_id);
+            let base_clone = proteclone!(base_raw => @);
 
 
-                    let mut args = args.clone();
-                    if let Some(n) = self_arg {
-                        args.insert(0, *n.clone());
-                    }
-
-                    if args.len() > params.len() {
-                        ret!(Err(
-                            RuntimeError::IncorrectArgumentCount {
-                                provided: args.len(),
-                                takes: params.len(),
-                                header_area: header_area.clone(),
-                                call_area: area!(source.clone(), start_node.span)
-                            }
-                        ))
-                    }
-
-                    let mut counter = 0;
+            match globals.get_method(base_clone, &format!("_call_")) {
+                Some(f) => Ok( {
 
                     let mut arg_ids = vec![];
-                    for (s, _, d) in params {
-                        let arg_id = if counter >= args.len() {
-                            if let Some(d) = d {
-                                globals.clone_value(*d, None)
-                            } else {
+                    for i in args {
+                        arg_ids.push( protecute!(i => scope_id) );
+                    }
+                    let arr_value = globals.insert_value(
+                        Value::Array(arg_ids),
+                        area!(source.clone(), start_node.span)
+                    );
+
+                    run_func!(vec![base_raw, arr_value], f)
+                } ),
+                None => {
+                    match &globals.get(base_clone).value.clone() {
+                        Value::Builtin(b) => run_builtin(
+                            *b,
+                            start_node,
+                            args,
+                            scope_id,
+                            globals,
+                            source,
+                        ),
+                        
+                        Value::Function( f @ Function { args: params, self_arg, header_area, ..} ) => {
+                            // println!("1 {:?}", args);
+        
+        
+                            let mut args = args.clone();
+                            if let Some(n) = self_arg {
+                                args.insert(0, *n.clone());
+                            }
+        
+                            if args.len() > params.len() {
                                 ret!(Err(
-                                    RuntimeError::ArgumentNotProvided {
-                                        arg_area: s.area.clone(),
-                                        arg_name: s.inner.clone(),
+                                    RuntimeError::IncorrectArgumentCount {
+                                        provided: args.len(),
+                                        takes: params.len(),
+                                        header_area: header_area.clone(),
                                         call_area: area!(source.clone(), start_node.span)
                                     }
                                 ))
                             }
-                        } else {
-                            let arg = &args[counter];
-                            if s.inner == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) }
-                        };
-                        arg_ids.push( arg_id );
-                        counter += 1;
-                    }
-
-
-                    // let mut arg_ids = vec![];
-                    // for (arg, (Located {inner, ..}, ..)) in args.iter().zip(params) {
-                    //     let arg_id = if inner == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
-                    //     // if name != "self" {
-                    //     //     arg_id = proteclone!(arg_id => a.clone());
-                    //     // }
-                    //     arg_ids.push( arg_id );
-                    // }
-                    // println!("3 {:?}", arg_ids.iter().map(|id| globals.get(*id).value.clone()).collect::<Vec<Value>>());
-                    
-                    Ok( run_func!(arg_ids, f) )
-                },
-
-                Value::Type(_) => {
-                    if args.len() != 1 {
-                        ret!(Err(
-                            RuntimeError::TypeArgCount {
-                                provided: args.len(),
-                                call_area: area!(source.clone(), start_node.span)
+        
+                            let mut counter = 0;
+        
+                            let mut arg_ids = vec![];
+                            for (s, _, d, is_ref) in params {
+                                let arg_id = if counter >= args.len() {
+                                    if let Some(d) = d {
+                                        globals.clone_value(*d, None)
+                                    } else {
+                                        ret!(Err(
+                                            RuntimeError::ArgumentNotProvided {
+                                                arg_area: s.area.clone(),
+                                                arg_name: s.inner.clone(),
+                                                call_area: area!(source.clone(), start_node.span)
+                                            }
+                                        ))
+                                    }
+                                } else {
+                                    let arg = &args[counter];
+                                    if s.inner == "self" || *is_ref { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) }
+                                };
+                                arg_ids.push( arg_id );
+                                counter += 1;
                             }
-                        ))
+        
+        
+                            // let mut arg_ids = vec![];
+                            // for (arg, (Located {inner, ..}, ..)) in args.iter().zip(params) {
+                            //     let arg_id = if inner == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
+                            //     // if name != "self" {
+                            //     //     arg_id = proteclone!(arg_id => a.clone());
+                            //     // }
+                            //     arg_ids.push( arg_id );
+                            // }
+                            // println!("3 {:?}", arg_ids.iter().map(|id| globals.get(*id).value.clone()).collect::<Vec<Value>>());
+                            
+                            Ok( run_func!(arg_ids, f) )
+                        },
+        
+                        Value::Type(_) => {
+                            if args.len() != 1 {
+                                ret!(Err(
+                                    RuntimeError::TypeArgCount {
+                                        provided: args.len(),
+                                        call_area: area!(source.clone(), start_node.span)
+                                    }
+                                ))
+                            }
+                            let arg_id = execute!(&args[0] => scope_id);
+                            let result = value_ops::convert(&globals.get(arg_id).clone(), &globals.get(base_clone).clone(), area!(source.clone(), node.span), globals)?;
+                            Ok(globals.insert_value(
+                                result,
+                                area!(source.clone(), node.span),
+                            ))
+                        }
+                        other => ret!(Err( RuntimeError::TypeMismatch {
+                            expected: "function, builtin, or type".to_string(),
+                            found: format!("{}", other.type_str(globals)),
+                            area: area!(source.clone(), base.span),
+                            defs: vec![(other.type_str(globals), globals.get(base_clone).def_area.clone())],
+                        } ))
                     }
-                    let arg_id = execute!(&args[0] => scope_id);
-                    let result = value_ops::convert(&globals.get(arg_id).clone(), &globals.get(base_id).clone(), area!(source.clone(), node.span), globals)?;
-                    Ok(globals.insert_value(
-                        result,
-                        area!(source.clone(), node.span),
-                    ))
-                }
-                other => ret!(Err( RuntimeError::TypeMismatch {
-                    expected: "function, builtin, or type".to_string(),
-                    found: format!("{}", other.type_str(globals)),
-                    area: area!(source.clone(), base.span),
-                    defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
-                } ))
+                },
             }
-
-
         },
         NodeType::MCCall { base } => {
             let base_id = protecute!(base => scope_id);

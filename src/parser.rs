@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::hash::Hash;
 
 use fnv::FnvHashMap;
 
@@ -56,12 +56,12 @@ pub enum NodeType {
     While {cond: Box<ASTNode>, code: Box<ASTNode> },
     For { left: Box<ASTNode>, iter: Box<ASTNode>, code: Box<ASTNode> },
     Loop { code: Box<ASTNode> },
-    Call { base: Box<ASTNode>, args: Vec<ASTNode> },
-    FuncDef { func_name: String, args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
-    Lambda { args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)>, header_area: CodeArea, code: Box<ASTNode> },
+    Call { base: Box<ASTNode>, args: Vec<ASTNode>, args_area: CodeArea },
+    FuncDef { func_name: String, args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)>, header_area: CodeArea, code: Box<ASTNode> },
+    Lambda { args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)>, header_area: CodeArea, code: Box<ASTNode> },
     Array { elements: Vec<ASTNode> },
     Tuple { elements: Vec<ASTNode> },
-    Index { base: Box<ASTNode>, index: Box<ASTNode> },
+    Index { base: Box<ASTNode>, args: Vec<ASTNode>, args_area: CodeArea },
     Dictionary { map: FnvHashMap<String, ASTNode> },
     Member { base: Box<ASTNode>, member: Located<String> },
     Return { node: Option<Box<ASTNode>> },
@@ -613,8 +613,13 @@ pub fn parse_unit(
                 Token::FatArrow => {
                     let header_start = span!(-1).0;
 
-                    let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)> = vec![];
+                    let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)> = vec![];
                     while_tok!(!= RParen: {
+                        let mut is_ref = false;
+                        if_tok!(== Ampersand: {
+                            pos += 1;
+                            is_ref = true;
+                        });
                         check_tok!(Ident(arg_name) else "argument name");
                         let arg_area = CodeArea {
                             source: info.source.clone(),
@@ -642,7 +647,7 @@ pub fn parse_unit(
                             pos += 1;
                             parse!(parse_expr(true) => let temp); default = Some(temp);
                         });
-                        args.push((Located::from(arg_name, arg_area), pat, default));
+                        args.push((Located::from(arg_name, arg_area), pat, default, is_ref));
                         if !matches!(tok!(0), Token::RParen | Token::Comma) {
                             expected_err!(") or ,", tok!(0), span!(0), info )
                         }
@@ -703,7 +708,7 @@ pub fn parse_unit(
                         range: start,
                     };
                     parse!(parse_expr(false) => let code);
-                    ret!( NodeType::Lambda { args: vec![(Located::from(name.to_string(), arg_area.clone()), None, None)], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
+                    ret!( NodeType::Lambda { args: vec![(Located::from(name.to_string(), arg_area.clone()), None, None, false)], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
                 }
                 _ => (),
             }
@@ -899,8 +904,13 @@ pub fn parse_unit(
             check_tok!(LParen else "(");
             let header_start = span!(-1).0;
 
-            let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>)> = vec![];
+            let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)> = vec![];
             while_tok!(!= RParen: {
+                let mut is_ref = false;
+                if_tok!(== Ampersand: {
+                    pos += 1;
+                    is_ref = true;
+                });
                 check_tok!(Ident(arg_name) else "argument name");
                 let arg_area = CodeArea {
                     source: info.source.clone(),
@@ -928,7 +938,7 @@ pub fn parse_unit(
                     pos += 1;
                     parse!(parse_expr(true) => let temp); default = Some(temp);
                 });
-                args.push(( Located::from(arg_name, arg_area), pat, default));
+                args.push(( Located::from(arg_name, arg_area), pat, default, is_ref));
                 if !matches!(tok!(0), Token::RParen | Token::Comma) {
                     expected_err!(") or ,", tok!(0), span!(0), info )
                 }
@@ -1341,6 +1351,7 @@ fn parse_value(
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
+                let area_start = span!(-1).0;
                 let mut args = vec![];
                 while_tok!(!= RParen: {
                     parse!(parse_expr(false) => let arg);
@@ -1350,22 +1361,40 @@ fn parse_value(
                     }
                     skip_tok!(Comma);
                 });
+                let area_end = span!(-1).1;
                 value = ASTNode {
                     node: NodeType::Call {
                         args,
                         base: Box::new(value),
+                        args_area: CodeArea {
+                            source: info.source.clone(),
+                            range: (area_start, area_end),
+                        }
                     },
                     span: ( start.0, span!(-1).1 )
                 }
             },
             Token::LSqBracket => {
                 pos += 1;
-                parse!(parse_expr(false) => let index);
-                check_tok!(RSqBracket else "]");
+                let area_start = span!(-1).0;
+                let mut args = vec![];
+                while_tok!(!= RSqBracket: {
+                    parse!(parse_expr(false) => let arg);
+                    args.push(arg);
+                    if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                        expected_err!(") or ,", tok!(0), span!(0), info )
+                    }
+                    skip_tok!(Comma);
+                });
+                let area_end = span!(-1).1;
                 value = ASTNode {
                     node: NodeType::Index {
-                        index: Box::new(index),
+                        args,
                         base: Box::new(value),
+                        args_area: CodeArea {
+                            source: info.source.clone(),
+                            range: (area_start, area_end),
+                        }
                     },
                     span: ( start.0, span!(-1).1 )
                 }
@@ -1777,9 +1806,10 @@ impl Hash for NodeType {
             NodeType::Loop { code } => {
                 code.hash(state);
             },
-            NodeType::Call { base, args } => {
+            NodeType::Call { base, args, args_area } => {
                 base.hash(state);
                 args.hash(state);
+                args_area.hash(state);
             },
             NodeType::FuncDef { func_name, args, header_area, code } => {
                 func_name.hash(state);
@@ -1798,10 +1828,10 @@ impl Hash for NodeType {
             NodeType::Tuple { elements } => {
                 elements.hash(state);
             },
-            NodeType::Index { base, index } => {
+            NodeType::Index { base, args, args_area } => {
                 base.hash(state);
-                index.hash(state);
-            },
+                args.hash(state);
+                args_area.hash(state)             },
             NodeType::Dictionary { map } => {
                 for (k, v) in map {
                     k.hash(state);
