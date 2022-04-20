@@ -16,9 +16,12 @@ let {
 
 export let MCFloat = MCFloat;
 
-func carry(w: MCInt, d: MCInt, mult: MCInt | nulltype) {
+func carry(w: MCInt, d: MCInt, mult: #[MCInt]) {
     (d > BOUND).then(!{
-        w += if (mult is nulltype) d / 100000000 else d / 100000000 * mult;
+        w += match mult {
+            case #(mult) -> d / 100000000 * mult,
+            case # -> d / 100000000,
+        }
         d %= 100000000;
     });
 }
@@ -153,9 +156,9 @@ impl MCFloat {
                             carry(result.whole, dec, last_digit * temp);
                         });
                         dec *= last_digit;
-                        carry(result.whole, dec, null);
+                        carry(result.whole, dec, #);
                         result.decimals += dec; 
-                        carry(result.whole, result.decimals, null);
+                        carry(result.whole, result.decimals, #);
                         wh /= 10;
                         exp += 1;
                         pow10 *= 10;
@@ -173,7 +176,7 @@ impl MCFloat {
                     // MC::print([": ", last_digit]);
                     d2 /= 10;
                     result.decimals += d2 * last_digit;
-                    carry(result.whole, result.decimals, null);
+                    carry(result.whole, result.decimals, #);
                     pow /= 10;
                 });
 

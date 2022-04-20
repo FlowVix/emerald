@@ -35,8 +35,6 @@ pub enum Token {
     False,
     #[token("true")]
     True,
-    #[token("null")]
-    Null,
 
     #[token("==")]
     Eq,
@@ -135,6 +133,9 @@ pub enum Token {
 
     #[token("$")]
     Dollar,
+
+    #[token("#")]
+    Hash,
 
     #[token("if")]
     If,
@@ -254,7 +255,6 @@ impl Token {
             Token::String(_) => "string literal",
             Token::False => "false",
             Token::True => "true",
-            Token::Null => "null",
             Token::Eq => "==",
             Token::NotEq => "!=",
             Token::FatArrow => "=>",
@@ -295,6 +295,7 @@ impl Token {
             Token::DoubleColon => "::",
             Token::Colon => ":",
             Token::Dollar => "$",
+            Token::Hash => "#",
             Token::Match => "match",
             Token::Case => "case",
             Token::If => "if",

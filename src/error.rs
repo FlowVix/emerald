@@ -4,6 +4,9 @@ use crate::{CodeArea, EmeraldSource, EmeraldCache, interpreter::{Globals}};
 use ariadne::{Report, ReportKind, Label, Fmt, ReportBuilder};
 
 
+
+
+
 #[derive(Debug, Clone)]
 pub enum SyntaxError {
     Expected {
@@ -246,6 +249,12 @@ pub enum RuntimeError {
         found: String,
         expected_area: CodeArea,
         found_area: CodeArea,
+    },
+    DestructureOptionMismatch {
+        tried: String,
+        found: String,
+        area1: CodeArea,
+        area2: CodeArea,
     },
     CannotIter {
         typ: String,
@@ -879,6 +888,20 @@ impl ToReport for RuntimeError {
                 ],
                 note: None,
             },
+            RuntimeError::DestructureOptionMismatch {
+                tried,
+                found,
+                area1,
+                area2,
+            } => ErrorReport {
+                source: area2.clone(),
+                message: format!("Cannot destructure option {} into option {}", found, tried),
+                labels: vec![
+                    (area1.clone(), format!("Tried to destructure option {} here", tried.fg(colors.next()))),
+                    (area2.clone(), format!("Found option {} here", found.fg(colors.next()))),
+                ],
+                note: None,
+            },
             RuntimeError::DestructureLengthMismatch {
                 for_type,
                 expected,
@@ -1068,6 +1091,7 @@ impl RuntimeError {
         match self {
             RuntimeError::EqualAssertionFailed { .. } |
             RuntimeError::DestructureTypeMismatch { .. } |
+            RuntimeError::DestructureOptionMismatch { .. } |
             RuntimeError::DestructureVariantMismatch { .. } |
             RuntimeError::DestructureLengthMismatch { .. } |
             RuntimeError::DestructureIncorrectVariantType { .. } |

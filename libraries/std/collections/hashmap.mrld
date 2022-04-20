@@ -66,9 +66,9 @@ impl HashMap {
         let index = hash(key) % self.list.length;
         for el of self.list[index] {
             if el[0] == key
-                return el[1];
+                return #(el[1]);
         }
-        return null;
+        return #;
     },
 
     _index_: (self, args) => {
@@ -87,13 +87,13 @@ impl HashMap {
         for el of self.list[index] {
             if el[0] == key {
                 if dict_form {
-                    return {key, value: el[1]};
+                    return #({key, value: el[1]});
                 } else {
-                    return (key, el[1]);
+                    return #((key, el[1]));
                 }
             }
         }
-        return null;
+        return #;
     },
 
     get_key: (
@@ -103,11 +103,11 @@ impl HashMap {
         for i of self.list {
             for el of i {
                 if el[1] == value {
-                    return el[0];
+                    return #(el[0]);
                 }
             }
         }
-        return null;
+        return #;
     },
 
     get_keys: (
@@ -180,14 +180,14 @@ impl HashMap {
         self,
         key,
     ) => {
-        return self.get(key) != null;
+        return self.get(key) != #;
     },
 
     has_value: (
         self,
         value,
     ) => {
-        return self.get_key(value) != null;
+        return self.get_key(value) != #;
     },
 
     get_or_insert: (
@@ -195,12 +195,13 @@ impl HashMap {
         key,
         or,
     ) => {
-        let get = self.get(key);
-        if get != null {
-            return get;
+        match self.get(key) {
+            case #(val) -> return val,
+            case # -> {
+                self.insert(key, or);
+                return or;
+            },
         }
-        self.insert(key, or);
-        return or;
     },
 
     is_empty: (self) => {
@@ -212,10 +213,10 @@ impl HashMap {
         key,
     ) => {
         let index = hash(key) % self.list.length;
-        let value = null;
+        let value = #;
         self.list[index] = self.list[index].filter(el => {
             if el[0] == key {
-                value = el[1];
+                value = #(el[1]);
                 self.elements -= 1;
                 return false;
             }

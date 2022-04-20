@@ -46,6 +46,9 @@ pub enum NodeType {
     Value { value: Value },
     Op { left: Box<ASTNode>, op: Token, right: Box<ASTNode> },
     Unary { op: Token, node: Box<ASTNode> },
+    
+    Option { inner: Option<Box<ASTNode>> },
+    OptionPattern { pattern: Box<ASTNode> },
 
     Declaration { left: Box<ASTNode>, right: Box<ASTNode> },
 
@@ -578,9 +581,23 @@ pub fn parse_unit(
             pos += 1;
             ret!( NodeType::Value { value: Value::Boolean(false) } => start );
         },
-        Token::Null => {
+        Token::Hash => {
             pos += 1;
-            ret!( NodeType::Value { value: Value::Null } => start );
+            match tok!(0) {
+                Token::LParen => {
+                    pos += 1;
+                    parse!(parse_expr(true) => let inner);
+                    check_tok!(RParen else ")");
+                    ret!( NodeType::Option { inner: Some(Box::new(inner)) } => start.0, span!(-1).1 );
+                },
+                Token::LSqBracket => {
+                    pos += 1;
+                    parse!(parse_expr(true) => let pattern);
+                    check_tok!(RSqBracket else "]");
+                    ret!( NodeType::OptionPattern { pattern: Box::new(pattern) } => start.0, span!(-1).1 );
+                }
+                _ => ret!( NodeType::Option { inner: None } => start.0, span!(-1).1 ),
+            }
         },
         Token::LParen => {
             pos += 1;

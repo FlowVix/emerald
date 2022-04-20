@@ -69,7 +69,7 @@ builtin_types!(
     Number,
     Bool,
     String,
-    Nulltype,
+    Option,
     Builtin,
     Function,
     Array,
@@ -303,7 +303,7 @@ builtins!{
             out_str += &i.to_str(globals, &mut vec![]);
         }
         println!("{}", out_str);
-        Value::Null
+        Value::unit()
     }
 
     [Input]: input(s: String) {
@@ -327,7 +327,7 @@ builtins!{
 
     [Sleep]: sleep(time: Number) {
         thread::sleep(time::Duration::from_millis((time * 1000.0) as u64));
-        Value::Null
+        Value::unit()
     }
 
 
@@ -405,16 +405,16 @@ builtins!{
             v_area,
         );
         d.insert(k, id);
-        Value::Null
+        Value::unit()
     }
     [DeleteItem]: delete_item(&mut d: Dictionary, k: String) {
         d.remove(&k);
-        Value::Null
+        Value::unit()
     }
 
     [PopIndex]: pop_index(&mut v: Array, i: Number) {
         v.remove(i as usize);
-        Value::Null
+        Value::unit()
     }
 
     [Hash]: hash(v) {
@@ -425,25 +425,25 @@ builtins!{
 
     [Debug]: debug(v) {
         println!("{:#?}", v);
-        Value::Null
+        Value::unit()
     }
 
     [ID]: id(#[Any] => poopie) {
         println!("id: {:?}", globals.get_scope(scope_id).func_id);
-        Value::Null
+        Value::unit()
 
     }
     [Impls]: impls(#[Any] => poopie) {
         println!("builtin impls: {:#?}", globals.builtin_impls);
         println!("impls: {:#?}", globals.struct_impls);
-        Value::Null
+        Value::unit()
 
     }
 
     [Command]: command(n: String) {
         let id = globals.get_scope(scope_id).func_id;
         globals.insert_command(id, n);
-        Value::Null
+        Value::unit()
     }
 
 

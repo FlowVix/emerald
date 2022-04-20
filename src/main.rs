@@ -176,10 +176,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             match result {
                 Ok(pos) => {
                     if print_return {
-                        match &globals.get(pos).value {
-                            Value::Null => (),
-                            other => println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", other.to_str(&globals, &mut vec![]))))
-                        }
+                        println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", globals.get(pos).value.to_str(&globals, &mut vec![]))))
                     }
                     // println!("{:?}", globals.values.map.len());
                     // println!("{}", globals.register.len());

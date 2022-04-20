@@ -51,9 +51,9 @@ impl array {
     ) => {
         for i of from..self.length {
             if self[i] == el
-                return i;
+                return #(i);
         }
-        return null;
+        return #;
     },
     index_last: (
         self,
@@ -62,9 +62,9 @@ impl array {
     ) => {
         for i of (self.length - 1)..(-1)..until {
             if self[i] == el
-                return i;
+                return #(i);
         }
-        return null;
+        return #;
     },
     index_all: (
         self,

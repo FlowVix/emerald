@@ -50,6 +50,8 @@ pub enum Pattern {
     
     Any,
 
+    Option(Box<Pattern>),
+
     Array(Box<Pattern>, Option<usize>),
     Tuple(Vec<Pattern>),
     Dict(FnvHashMap<String, Pattern>),
@@ -66,6 +68,7 @@ impl Pattern {
                 Some(n) => format!("array[{}, {}]", t.to_str(globals), n),
                 None => format!("array[{}]", t.to_str(globals)),
             },
+            Pattern::Option(o) => format!("#[{}]", o.to_str(globals)),
             Pattern::Tuple(arr) => format!("tuple[{}]", arr.iter().map(|el| el.to_str(globals)).collect::<Vec<String>>().join(", ")),
             Pattern::Dict(map) => format!("dict[{{{}}}]", map.iter().map(|(k, p)| format!("{}: {}", k, p.to_str(globals))).collect::<Vec<String>>().join(", ")),
         }
@@ -83,6 +86,7 @@ impl Pattern {
                 b.hash(state, globals);
             },
             Pattern::Not(a) => a.hash(state, globals),
+            Pattern::Option(o) => o.hash(state, globals),
             Pattern::Array(t, n) => {
                 t.hash(state, globals);
                 n.hash(state);
@@ -197,7 +201,7 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     String(String),
-    Null,
+    Option(Option<ValuePos>),
     Builtin(Builtin),
     Function(Function),
     Array(Vec<ValuePos>),
@@ -233,12 +237,22 @@ pub enum InstanceVariant {
 
 impl Value {
 
+    pub fn unit() -> Value {
+        Value::Tuple(vec![])
+    }
+    pub fn some(i: ValuePos) -> Value {
+        Value::Option(Some(i))
+    }
+    pub fn none() -> Value {
+        Value::Option(None)
+    }
+
     pub fn typ(&self) -> ValueType {
         match self {
             Value::Number(_) => ValueType::Builtin(BuiltinType::Number),
             Value::Boolean(_) => ValueType::Builtin(BuiltinType::Bool),
             Value::String(_) => ValueType::Builtin(BuiltinType::String),
-            Value::Null => ValueType::Builtin(BuiltinType::Nulltype),
+            Value::Option(_) => ValueType::Builtin(BuiltinType::Option),
             Value::Builtin(_) => ValueType::Builtin(BuiltinType::Builtin),
             Value::Function{..} => ValueType::Builtin(BuiltinType::Function),
             Value::Array(_) => ValueType::Builtin(BuiltinType::Array),
@@ -266,7 +280,10 @@ impl Value {
             Value::Number(n) => n.to_string(),
             Value::Boolean(b) => b.to_string(),
             Value::String(s) => format!("{}", s),
-            Value::Null => "null".to_string(),
+            Value::Option(o) => match o {
+                Some(v) => format!("#({})", globals.get(*v).value.to_str(globals, &mut vec![])),
+                None => format!("#"),
+            },
             Value::Builtin(b) => format!("<builtin: {}>", builtin_to_name(*b)),
             Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(Located {inner, ..}, ..)| inner.clone()).collect::<Vec<String>>().join(", ")),
             Value::Array(arr) => {
@@ -371,15 +388,15 @@ impl Value {
                 if *step != 1.0 {
                     format!(
                         "{}..{}..{}",
-                        if let Some(n) = start {n.to_string()} else {"null".to_string()},
+                        if let Some(n) = start {n.to_string()} else {".".to_string()},
                         step,
-                        if let Some(n) = end {n.to_string()} else {"null".to_string()}
+                        if let Some(n) = end {n.to_string()} else {".".to_string()}
                     )
                 } else {
                     format!(
                         "{}..{}",
-                        if let Some(n) = start {n.to_string()} else {"null".to_string()},
-                        if let Some(n) = end {n.to_string()} else {"null".to_string()}
+                        if let Some(n) = start {n.to_string()} else {".".to_string()},
+                        if let Some(n) = end {n.to_string()} else {".".to_string()}
                     )
                 }
             }
@@ -489,7 +506,15 @@ impl Value {
                     _ => Ok(false),
                 }
             },
-            _ => todo!(),
+            Pattern::Option(p) => {
+                match self {
+                    Value::Option(o) => match o {
+                        None => Ok(true),
+                        Some(id) => globals.get(*id).value.matches_pat(p, globals),
+                    }
+                    _ => Ok(false),
+                }
+            },
         }
     }
 
@@ -527,6 +552,12 @@ impl Value {
             },
             Value::Dictionary(map) => {
                 for (_, i) in map {
+                    values.insert(*i);
+                    globals.get(*i).value.get_references(globals, values, scopes);
+                }
+            },
+            Value::Option(o) => {
+                if let Some(i) = o {
                     values.insert(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
@@ -636,7 +667,6 @@ pub mod value_ops {
     pub fn to_bool(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<bool, RuntimeError> {
         match &a.value {
             Value::Boolean(b) => Ok(*b),
-            Value::Null => Ok(false),
             
             value => {
                 Err( RuntimeError::TypeMismatch {
@@ -1018,7 +1048,8 @@ pub mod value_ops {
             (Value::String(v1), Value::String(v2)) => v1 == v2,
             (Value::Boolean(v1), Value::Boolean(v2)) => v1 == v2,
 
-            (Value::Null, Value::Null) => true,
+            (Value::Option(None), Value::Option(None)) => true,
+            (Value::Option(Some(v1)), Value::Option(Some(v2))) => eq_id!(v1, v2),
             
             (Value::Builtin(v1), Value::Builtin(v2)) => v1 == v2,
             (Value::Function(v1), Value::Function(v2)) => v1 == v2,
@@ -1172,11 +1203,6 @@ pub mod value_ops {
                 end: Some(*n),
                 step: 1.0,
             })),
-            Value::Null => Ok(Value::Range(Range{
-                start: Some(0.0),
-                end: None,
-                step: 1.0,
-            })),
             
             value => {
                 Err( RuntimeError::TypeMismatch {
@@ -1193,11 +1219,6 @@ pub mod value_ops {
             Value::Number(n) => Ok(Value::Range(Range{
                 start: None,
                 end: Some(*n),
-                step: 1.0,
-            })),
-            Value::Null => Ok(Value::Range(Range{
-                start: None,
-                end: None,
                 step: 1.0,
             })),
             
@@ -1310,21 +1331,10 @@ pub mod value_ops {
                 end: Some(*n),
                 step: *e,
             })),
-
-            (Value::Null, Value::Number(n2)) => Ok(Value::Range(Range{
-                start: None,
-                end: Some(*n2),
-                step: 1.0,
-            })),
-            (Value::Number(n1), Value::Null) => Ok(Value::Range(Range{
-                start: Some(*n1),
-                end: None,
-                step: 1.0,
-            })),
             
             (value1, value2) => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "number and number, range and number, null and number, or number and null".to_string(),
+                    expected: "number and number or range and number".to_string(),
                     found: format!("{} and {}", value1.type_str(globals), value2.type_str(globals)),
                     area,
                     defs: vec![(value1.type_str(globals), a.def_area.clone()), (value2.type_str(globals), b.def_area.clone())],
@@ -1377,7 +1387,10 @@ impl Value {
             Value::Number(v) => v.to_bits().hash(state),
             Value::Boolean(v) => v.hash(state),
             Value::String(v) => v.hash(state),
-            Value::Null => "null".hash(state),
+            Value::Option(v) => match v {
+                Some(v) => globals.unwrap().get(*v).value.hash(state, globals),
+                None => "#".hash(state),
+            },
             Value::Builtin(v) => v.hash(state),
             Value::Function(v) => v.hash(state),
             Value::Array(v) => {

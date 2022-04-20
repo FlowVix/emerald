@@ -70,17 +70,17 @@ impl string {
         substr: string,
     ) => {
         if substr == '' 
-            return null;
+            return #;
         if substr.length > self.length 
-            return null;
+            return #;
         
         let r = self.length - substr.length + 1;
         for i of ..r {
             if self.substr(i, i + substr.length) == substr {
-                return i;
+                return #(i);
             }
         }
-        return null;
+        return #;
     },
     contains: (
         self,

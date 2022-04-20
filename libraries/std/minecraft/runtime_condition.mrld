@@ -111,16 +111,19 @@ impl RuntimeCondition {
     },
 
     _if_: (self, if_code, else_code) => {
-        if else_code == null {
-            self.then(!{
-                if_code();
-            });
-        } else {
-            self.then_else(!{
-                if_code();
-            }, !{
-                else_code();
-            });
+        match else_code {
+            case #(else_code) -> {
+                self.then_else(!{
+                    if_code();
+                }, !{
+                    else_code();
+                });
+            },
+            case # -> {
+                self.then(!{
+                    if_code();
+                });
+            }
         }
     },
 

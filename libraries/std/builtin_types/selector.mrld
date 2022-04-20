@@ -3,10 +3,10 @@
 func mcify(v) {
     match v {
         range -> {
-            if v.start == null {
+            if v.start == # {
                 return ".." + string(v.end);
             }
-            if v.end == null {
+            if v.end == # {
                 return string(v.start) + "..";
             }
             return string(v);

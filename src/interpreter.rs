@@ -766,6 +766,33 @@ pub fn do_assign(
                     } )
                 }
             }
+        },
+        NodeType::Option { inner } => {
+            match &globals.get(right).value.clone() {
+                Value::Option(val) => {
+
+                    match (inner, val) {
+                        (Some(i), Some(v)) => {
+                            do_assign(i, *v, scope_id, globals, source.clone(), list, is_declaration)?;
+                        },
+                        (None, None) => (),
+                        (i, v) => return Err( RuntimeError::DestructureOptionMismatch {
+                            tried: (if let Some(_) = i { "#(...)" } else { "#" } ).to_string(),
+                            found: (if let Some(_) = v { "#(...)" } else { "#" } ).to_string(),
+                            area1: area!(source.clone(), left.span),
+                            area2: globals.get(right).def_area.clone(),
+                        } )
+                    }
+                },
+                other => {
+                    return Err( RuntimeError::DestructureTypeMismatch {
+                        tried: "option".to_string(),
+                        found: format!("{}", other.type_str(globals)),
+                        area1: area!(source.clone(), left.span),
+                        area2: globals.get(right).def_area.clone(),
+                    } )
+                }
+            }
         }
         NodeType::Dictionary { map } => {
             match &globals.get(right).value.clone() {
@@ -1171,6 +1198,45 @@ pub fn execute(
             value.clone(),
             CodeArea {source: source.clone(), range: node.span},
         )),
+        NodeType::Option { inner } => {
+            match inner {
+                Some(n) => {
+                    let val = execute!(n => scope_id);
+                    Ok(globals.insert_value(
+                        Value::Option(Some(val)),
+                        CodeArea {source: source.clone(), range: node.span},
+                    ))
+                },
+                None => Ok(globals.insert_value(
+                    Value::Option(None),
+                    CodeArea {source: source.clone(), range: node.span},
+                )),
+            }
+        }
+        NodeType::OptionPattern { pattern } => {
+
+            let pat_id = protecute!(pattern => scope_id);
+            match &globals.get(pat_id).value.clone() {
+                Value::Type(t) => {
+                    Ok( globals.insert_value(
+                        Value::Pattern(Pattern::Option(Box::new(Pattern::Type(t.clone())))),
+                        area!(source.clone(), start_node.span)
+                    ) )
+                },
+                Value::Pattern(p) => {
+                    Ok( globals.insert_value(
+                        Value::Pattern(Pattern::Option(Box::new(p.clone()))),
+                        area!(source.clone(), start_node.span)
+                    ) )
+                },
+                other => ret!(Err( RuntimeError::TypeMismatch {
+                    expected: "type or pattern".to_string(),
+                    found: format!("{}", other.type_str(globals)),
+                    area: area!(source.clone(), pattern.span),
+                    defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
+                } ))
+            }
+        }
         NodeType::Op { left, op, right } => {
             match op {
                 Token::Plus |
@@ -1525,7 +1591,7 @@ pub fn execute(
         }
         NodeType::StatementList { statements } => {
             let mut ret_id = globals.insert_value(
-                Value::Null,
+                Value::unit(),
                 area!(source.clone(), start_node.span)
             );
             for i in statements {
@@ -1561,7 +1627,7 @@ pub fn execute(
         NodeType::If { cond, code, else_branch } => {
             let cond_value = protecute!(cond => scope_id);
             let mut ret_id = globals.insert_value(
-                Value::Null,
+                Value::unit(),
                 area!(source.clone(), start_node.span)
             );
             globals.protect_value(ret_id);
@@ -1573,12 +1639,18 @@ pub fn execute(
                         node: NodeType::Lambda { args: vec![], header_area: area!(source.clone(), node.span), code: code.clone() },
                     } => scope_id);
                     let else_f = match else_branch {
-                        Some(b) => protecute!( &ASTNode {
-                            span: node.span,
-                            node: NodeType::Lambda { args: vec![], header_area: area!(source.clone(), node.span), code: b.clone() },
-                        } => scope_id),
+                        Some(b) => {
+                            let id = protecute!( &ASTNode {
+                                span: node.span,
+                                node: NodeType::Lambda { args: vec![], header_area: area!(source.clone(), node.span), code: b.clone() },
+                            } => scope_id);
+                            globals.insert_value(
+                                Value::some(id),
+                                area!(source.clone(), start_node.span)
+                            )
+                        },
                         None => globals.insert_value(
-                            Value::Null,
+                            Value::none(),
                             area!(source.clone(), start_node.span)
                         ),
                     };
@@ -1599,7 +1671,7 @@ pub fn execute(
         }
         NodeType::While { cond, code } => {
             let mut ret_id = globals.insert_value(
-                Value::Null,
+                Value::unit(),
                 area!(source.clone(), start_node.span)
             );
             globals.protect_value(ret_id);
@@ -1655,7 +1727,7 @@ pub fn execute(
         }
         NodeType::Match { value, arms } => {
             let mut ret_id = globals.insert_value(
-                Value::Null,
+                Value::unit(),
                 area!(source.clone(), start_node.span)
             );
             globals.protect_value(ret_id);
@@ -1704,7 +1776,7 @@ pub fn execute(
         }
         NodeType::For { left, code, iter } => {
             let mut ret_id = globals.insert_value(
-                Value::Null,
+                Value::unit(),
                 area!(source.clone(), start_node.span)
             );
             globals.protect_value(ret_id);
@@ -2187,11 +2259,23 @@ pub fn execute(
                     Value::Number(arr.len() as f64),
 
                 (Value::Range(Range { start, .. }), "start") =>
-                    if let Some(n) = start {Value::Number(*n)} else {Value::Null},
+                    if let Some(n) = start {
+                        let id = globals.insert_value(
+                            Value::Number(*n),
+                            area!(source.clone(), base.span)
+                        );
+                        Value::some(id)
+                    } else {Value::none()},
                 (Value::Range(Range { step, .. }), "step") =>
                     Value::Number(*step as f64),
                 (Value::Range(Range { end, .. }), "end") =>
-                    if let Some(n) = end {Value::Number(*n)} else {Value::Null},
+                    if let Some(n) = end {
+                        let id = globals.insert_value(
+                            Value::Number(*n),
+                            area!(source.clone(), base.span)
+                        );
+                        Value::some(id)
+                    } else {Value::none()},
 
                 (Value::McFunc(id), "str") => /* if globals.mcfuncs.map[id].len() != 1 { */
                     Value::String( format!("function mrld:gen{}", id) ),
@@ -2267,7 +2351,7 @@ pub fn execute(
             let ret_value = match ret {
                 Some(n) => execute!(n => scope_id),
                 None => globals.insert_value(
-                    Value::Null,
+                    Value::unit(),
                     area!(source.clone(), start_node.span)
                 ),
             };
@@ -2279,7 +2363,7 @@ pub fn execute(
             let ret_value = match ret {
                 Some(n) => execute!(n => scope_id),
                 None => globals.insert_value(
-                    Value::Null,
+                    Value::unit(),
                     area!(source.clone(), start_node.span)
                 ),
             };
@@ -2289,7 +2373,7 @@ pub fn execute(
         NodeType::Continue => {
             // println!("{:?}", info);
             let ret_value = globals.insert_value(
-                Value::Null,
+                Value::unit(),
                 area!(source.clone(), start_node.span)
             );
             globals.exits.push( Exit::Continue(node.span) );
@@ -2677,7 +2761,7 @@ pub fn execute(
                                     },
                                 };
                                 ret!(Ok(globals.insert_value(
-                                    Value::Null,
+                                    Value::unit(),
                                     area!(source.clone(), start_node.span)
                                 )))
                             },
@@ -3006,7 +3090,7 @@ pub fn execute(
 
                     
                     Ok(globals.insert_value(
-                        Value::Null,
+                        Value::unit(),
                         area!(source.clone(), node.span),
                     ))
                 }
@@ -3022,7 +3106,7 @@ pub fn execute(
 
                     
                     Ok(globals.insert_value(
-                        Value::Null,
+                        Value::unit(),
                         area!(source.clone(), node.span),
                     ))
                 }

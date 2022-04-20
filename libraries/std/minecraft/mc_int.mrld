@@ -276,7 +276,7 @@ impl MCInt {
 impl ScoreRange {
 
     from: (r: range) => {
-        if r.start == null || r.end == null {
+        if r.start == # || r.end == # {
             throw "Runtime ranges cannot have undefined ends";
         }
         return ScoreRange::{
