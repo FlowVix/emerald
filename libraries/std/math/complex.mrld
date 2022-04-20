@@ -1,0 +1,206 @@
+
+
+export struct Complex {
+    re: number,
+    im: number,
+}
+
+let {
+    PI,
+} = import? "constants.mrld";
+
+
+impl Complex {
+    new: (
+        re: number = 0,
+        im: number = 0,
+    ) => {
+        return Complex::{ re, im };
+    },
+    from_polar: (
+        r: number,
+        phi: number,
+    ) => {
+        return Complex::new(cos(phi), sin(phi)) * r;
+    },
+    clone: (self) => {
+        return Complex::new(self.re, self.im);
+    },
+
+    i: Complex::new(0, 1),
+    zero: Complex::new(),
+    polar: (self) => (self.abs(), self.phase()),
+
+    _assign_: (self, other: number | Complex) => {
+        (self.re, self.im) = match other {
+            number -> (other, 0),
+            Complex -> (other.re, other.im),
+        }
+    },
+
+    _plus_eq_: (self, other: number | Complex) => {
+        match other {
+            number -> self.re += other,
+            Complex -> {
+                self.re += other.re;
+                self.im += other.im;
+            }
+        }
+    },
+    _plus_: (self, other: number | Complex) => {
+        let new = self.clone();
+        new += other;
+        return new;
+    },
+    _r_plus_: (self, other: number) => Complex::new(other) + self,
+
+    _minus_eq_: (self, other: number | Complex) => {
+        match other {
+            number -> self.re -= other,
+            Complex -> {
+                self.re -= other.re;
+                self.im -= other.im;
+            }
+        }
+    },
+    _minus_: (self, other: number | Complex) => {
+        let new = self.clone();
+        new -= other;
+        return new;
+    },
+    _r_minus_: (self, other: number) => Complex::new(other) - self,
+
+    _mult_eq_: (self, other: number | Complex) => {
+        match other {
+            number -> {
+                self.re *= other;
+                self.im *= other;
+            },
+            Complex -> {
+                (
+                    self.re,
+                    self.im,
+                ) = (
+                    self.re * other.re - self.im * other.im,
+                    self.re * other.im + self.im * other.re,
+                );
+            }
+        }
+    },
+    _mult_: (self, other: number | Complex) => {
+        let new = self.clone();
+        new *= other;
+        return new;
+    },
+    _r_mult_: (self, other: number) => Complex::new(other) * self,
+
+    _div_eq_: (self, other: number | Complex) => {
+        match other {
+            number -> {
+                self.re /= other;
+                self.im /= other;
+            },
+            Complex -> self = self * other.conj() / other.abs_sq(),
+        }
+    },
+    _div_: (self, other: number | Complex) => {
+        let new = self.clone();
+        new /= other;
+        return new;
+    },
+    _r_div_: (self, other: number) => Complex::new(other) / self,
+
+    _pow_eq_: (self, other: number | Complex) => {
+        (self.re, self.im) = self ** other;
+    },
+    _pow_: (self, other: number | Complex) => {
+        match other {
+            number -> {
+                let r = self.abs();
+                let angle = self.arg();
+                return Complex::from_polar(r ** other, angle * other);
+            },
+            Complex -> return self ** other.re * (Complex::i * self.ln() * other.im).exp(),
+        }
+    },
+    _r_pow_: (self, other: number) => Complex::new(other) ** self,
+
+    _mod_eq_: (self, other: number | Complex) => {
+        self = self % other;
+    },
+    _mod_: (self, other: number | Complex) => {
+        let operand = match other {
+            number -> Complex::new(other),
+            Complex -> other.clone(),
+        }
+        let result = self / operand;
+        (result.re, result.im) = (
+            floor(result.re),
+            floor(result.im),
+        );
+        return self - operand * result;
+    },
+    _r_mod_: (self, other: number) => Complex::new(other) % self,
+
+    _eq_: (self, other: number | Complex) => {
+        return match other {
+            number -> self.re == other && self.im == 0,
+            Complex -> self.re == other.re && self.im == other.im,
+        }
+    },
+
+    conj: (self) => Complex::new(self.re, -self.im),
+    abs: (self) => sqrt(self.re ** 2 + self.im ** 2),
+    abs_sq: (self) => self.re ** 2 + self.im ** 2,
+
+    arg: (self) => atan2(self.im, self.re),
+    phase: (self) => self.arg(),
+
+    invert: (self) => 1 / self,
+    sqrt: (self) => self ** 0.5,
+
+    ln: (self) => Complex::new(
+        ln(self.abs()),
+        self.arg(),
+    ),
+    log: (self, base: number | Complex) => {
+        return match base {
+            number -> self.ln() / Complex::new(base).ln(),
+            Complex -> self.ln() / base.ln(),
+        }
+    },
+
+    exp: (self) => Complex::from_polar(1, self.im) * exp(self.re),
+
+    sin: (self) => Complex::new(
+        sin(self.re) * cosh(self.im),
+        cos(self.re) * sinh(self.im),
+    ),
+
+    cos: (self) => (Complex::new(PI/2) - self).sin(),
+    tan: (self) => self.sin() / self.cos(),
+    cot: (self) => self.tan().invert(),
+    sec: (self) => self.cos().invert(),
+    csc: (self) => self.sin().invert(),
+
+    sinh: (self) => (Complex::i * self).sin() * Complex::i * -1,
+    cosh: (self) => (Complex::i * self).cos(),
+    tanh: (self) => (Complex::i * self).tan() * Complex::i * -1,
+    coth: (self) => (Complex::i * self).cot() * Complex::i,
+    sech: (self) => (Complex::i * self).sec(),
+    csch: (self) => (Complex::i * self).csc() * Complex::i,
+
+    asin: (self) =>
+        Complex::i * ((1 - self**2).sqrt() - Complex::i * self).ln(),
+    
+    acos: (self) => Complex::new(PI / 2) - self.asin(),
+    atan: (self) => Complex::new(0, -0.5) * ((Complex::new(1) + Complex::i*self) / (Complex::new(1) - Complex::i*self)).ln(),
+
+    acot: (self) => self.invert().atan(),
+    asec: (self) => self.invert().acos(),
+    acsc: (self) => self.invert().asin(),
+
+}
+
+
+

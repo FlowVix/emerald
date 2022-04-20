@@ -3,17 +3,5 @@
 
 extract import "libraries/std/lib.mrld";
 
-let h = dict[{
-    a: number,
-    bubu: string,
-}];
-
-let bruh = {
-    a: 3,
-    bubu: "bduf"
-}
-
-print(bruh is h);
-
 
 

@@ -330,16 +330,38 @@ builtins!{
         Value::Null
     }
 
+
     [Sin]: sin(n: Number) { Value::Number(n.sin()) }
     [Cos]: cos(n: Number) { Value::Number(n.cos()) }
     [Tan]: tan(n: Number) { Value::Number(n.tan()) }
 
+    [Sinh]: sinh(n: Number) { Value::Number(n.sinh()) }
+    [Cosh]: cosh(n: Number) { Value::Number(n.cosh()) }
+    [Tanh]: tanh(n: Number) { Value::Number(n.tanh()) }
+
+
+    [Asin]: asin(n: Number) { Value::Number(n.asin()) }
+    [Acos]: acos(n: Number) { Value::Number(n.acos()) }
+    [Atan]: atan(n: Number) { Value::Number(n.atan()) }
+    [Atan2]: atan2(a: Number, b: Number) { Value::Number(a.atan2(b)) }
+
+    [Asinh]: asinh(n: Number) { Value::Number(n.asinh()) }
+    [Acosh]: acosh(n: Number) { Value::Number(n.acosh()) }
+    [Atanh]: atanh(n: Number) { Value::Number(n.atanh()) }
+
     [Floor]: floor(n: Number) { Value::Number(n.floor()) }
 
     [Sqrt]: sqrt(n: Number) { Value::Number(n.sqrt()) }
+    [Ln]: ln(n: Number) { Value::Number(n.ln()) }
+    [Log]: log(n: Number, b: Number) { Value::Number(n.log(b)) }
 
     [Abs]: abs(n: Number) { Value::Number(n.abs()) }
     [Signum]: signum(n: Number) { Value::Number(n.signum()) }
+    [Exp]: exp(n: Number) { Value::Number(n.exp()) }
+
+
+
+
 
     [Substr]: substr(s: String, start: Number, end: Number) {
         Value::String(s.as_str()[(start as usize)..(end as usize)].to_string())

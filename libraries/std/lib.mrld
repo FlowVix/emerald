@@ -1,23 +1,21 @@
 
 
-extract import? "mc_int.mrld";
-extract import? "mc_float.mrld";
-extract import? "mc_string.mrld";
+extract import? "minecraft/mc_int.mrld";
+extract import? "minecraft/mc_float.mrld";
+extract import? "minecraft/mc_string.mrld";
 
-extract import? "runtime_condition.mrld";
+extract import? "minecraft/runtime_condition.mrld";
 
-extract import? "world.mrld";
-extract import? "mc.mrld";
+extract import? "minecraft/world.mrld";
+extract import? "minecraft/mc.mrld";
 
-extract import? "marker.mrld";
+extract import? "minecraft/marker.mrld";
 
 import? "builtin_types/string.mrld";
 import? "builtin_types/array.mrld";
 import? "builtin_types/dict.mrld";
 import? "builtin_types/number.mrld";
 import? "builtin_types/selector.mrld";
-
-extract import? "collections/hashmap.mrld";
 
 
 export let MCInt = MCInt;
@@ -31,4 +29,15 @@ export let MC = MC;
 
 
 export let Marker = Marker;
+
+extract import? "collections/hashmap.mrld";
 export let HashMap = HashMap;
+export let HashMapApply = HashMapApply;
+
+extract import? "math/complex.mrld";
+export let Complex = Complex;
+
+extract import? "math/constants.mrld";
+export let PI = PI;
+
+
