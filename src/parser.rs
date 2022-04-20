@@ -106,6 +106,8 @@ pub enum NodeType {
         def_area: CodeArea
     },
 
+    ListComp { expr: Box<ASTNode>, sources: Vec<(ASTNode, ASTNode)>, cond: Option<Box<ASTNode>> },
+
     Export { name: String, value: Box<ASTNode> },
     Import { path: String, cached: bool },
     MCCall { base: Box<ASTNode> },
@@ -824,18 +826,77 @@ pub fn parse_unit(
         Token::LSqBracket => {
             pos += 1;
 
-            let mut elements = vec![];
-            while_tok!(!= RSqBracket: {
-                parse!(parse_expr(false) => let elem);
-                elements.push( elem );
-                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                    expected_err!("] or ,", tok!(0), span!(0), info )
+
+            match tok!(0) {
+                Token::RSqBracket => {
+                    pos += 1;
+                    ret!( NodeType::Array { elements: vec![] } => start.0, span!(-1).1 )
                 }
-                skip_tok!(Comma);
-            });
-            ret!( NodeType::Array {
-                elements,
-            } => start.0, span!(-1).1 )
+                _ => {
+                    parse!(parse_expr(false) => let first_elem);
+                    match tok!(0) {
+                        Token::RSqBracket => {
+                            pos += 1;
+                            let elements = vec![first_elem];
+                            ret!( NodeType::Array {
+                                elements,
+                            } => start.0, span!(-1).1 )
+                        }
+                        Token::Comma => {
+                            pos += 1;
+                            let mut elements = vec![first_elem];
+                            while_tok!(!= RSqBracket: {
+                                parse!(parse_expr(false) => let elem);
+                                elements.push( elem );
+                                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                                    expected_err!("] or ,", tok!(0), span!(0), info )
+                                }
+                                skip_tok!(Comma);
+                            });
+                            ret!( NodeType::Array {
+                                elements,
+                            } => start.0, span!(-1).1 )
+                        }
+                        Token::For => {
+                            let mut sources = vec![];
+                            pos += 1;
+                            loop {
+                                parse!(parse_expr(true) => let expr);
+                                check_tok!(Of else "of");
+                                parse!(parse_expr(false) => let iter);
+                                sources.push((expr, iter));
+                                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                                    expected_err!("] or ,", tok!(0), span!(0), info )
+                                }
+                                skip_tok!(Comma);
+                                if matches!(tok!(0), Token::RSqBracket | Token::If) { break }
+                            }
+                            match tok!(0) {
+                                Token::RSqBracket => {
+                                    pos += 1;
+                                    ret!( NodeType::ListComp {
+                                        expr: Box::new(first_elem),
+                                        sources,
+                                        cond: None,
+                                    } => start.0, span!(-1).1 );
+                                }
+                                Token::If => {
+                                    pos += 1;
+                                    parse!(parse_expr(false) => let cond);
+                                    check_tok!(RSqBracket else "]");
+                                    ret!( NodeType::ListComp {
+                                        expr:  Box::new(first_elem),
+                                        sources,
+                                        cond: Some(Box::new(cond)),
+                                    } => start.0, span!(-1).1 );
+                                }
+                                _ => unreachable!(),
+                            }
+                        },
+                        _ => expected_err!("], for, or ,", tok!(0), span!(0), info )
+                    }
+                }
+            }
         }
         Token::If => {
             pos += 1;
@@ -1332,7 +1393,7 @@ pub fn parse_unit(
                 node: Box::new(value),
             } => start.0, span!(-1).1 )
         },
-        _ => expected_err!("value", tok!(0), span!(0), info)
+        _ => expected_err!("expression", tok!(0), span!(0), info)
     }
 }
 

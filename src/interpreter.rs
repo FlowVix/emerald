@@ -6,7 +6,7 @@ use convert_case::{Case, Casing};
 use fnv::FnvHashMap;
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector, ValueIter}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -3155,7 +3155,110 @@ pub fn execute(
                 } )),
             }
         }
-        _ => todo!(),
+        NodeType::ListComp { expr, sources, cond } => {
+            let mut iters = vec![];
+            for (e, i) in sources {
+                let iter_id = protecute!(i => scope_id);
+                let iter = value_ops::iter(&globals.get(iter_id), area!(source.clone(), i.span), globals)?;
+                iters.push((e, iter));
+            }
+
+            let mut v_vec: Vec<Value> = vec![];
+            let mut result_vec: Vec<usize> = vec![];
+
+            fn comp(
+                expr: &ASTNode,
+                cond: &Option<Box<ASTNode>>,
+                iters: &mut Vec<(&ASTNode, ValueIter)>,
+                base_scope: ScopePos,
+                globals: &mut Globals,
+                source: &EmeraldSource,
+                idx: usize,
+                v_vec: &mut Vec<Value>,
+                result_vec: &mut Vec<usize>,
+            ) -> Result<(), RuntimeError> {
+                let is_last = idx == iters.len() - 1;
+
+                for i in iters[idx].1.clone() {
+                    v_vec.push(i);
+                    if is_last {
+                        let derived = globals.derive_scope(base_scope, globals.get_scope(base_scope).func_id);
+                        for ((left, _), i) in iters.iter().zip(v_vec.clone()) {
+                            let temp = globals.insert_value(
+                                i.clone(),
+                                area!(source.clone(), left.span),
+                            );
+
+                            let mut list = HashMap::new();
+                            do_assign(left, temp, derived, globals, source.clone(), &mut list, true)?;
+
+                            for (l, r) in list {
+                                let right_clone = {
+                                    let new_id = globals.clone_value(
+                                        r,
+                                        None,
+                                    );
+                                    globals.protect_value(new_id);
+                                    new_id
+                                };
+                                
+                                globals.set_var(derived, l.1.unwrap(), right_clone);
+                            }
+                        }
+                        let expr_id = {
+                            let id = execute(expr, derived, globals, source.clone())?;
+                            let out = globals.clone_value(
+                                id,
+                                None,
+                            );
+                            globals.protect_value(id);
+                            globals.protect_value(out);
+                            out
+                        };
+
+                        match cond {
+                            Some(c) => {
+                                let cond_id = {
+                                    let id = execute(c, derived, globals, source.clone())?;
+                                    let out = globals.clone_value(
+                                        id,
+                                        None,
+                                    );
+                                    globals.protect_value(id);
+                                    globals.protect_value(out);
+                                    out
+                                };
+                                if value_ops::to_bool(globals.get(cond_id), area!(source.clone(), c.span), globals)? {
+                                    result_vec.push(expr_id)
+                                }
+                            },
+                            None => result_vec.push(expr_id),
+                        }
+                    } else {
+                        comp(
+                            expr,
+                            cond,
+                            iters,
+                            base_scope,
+                            globals,
+                            source,
+                            idx + 1,
+                            v_vec,
+                            result_vec
+                        )?
+                    }
+                    v_vec.pop();
+                }
+                Ok(())
+            }
+
+            comp(expr, cond, &mut iters, scope_id, globals, &source, 0, &mut v_vec, &mut result_vec)?;
+
+            Ok( globals.insert_value(
+                Value::Array(result_vec),
+                area!(source.clone(), start_node.span)
+            ) )
+        }
     };
 
     globals.pop_protected();

@@ -572,34 +572,54 @@ impl Value {
 
 }
 
-pub struct RangeIter {
-    start: f64,
-    step: f64,
-    end: Option<f64>,
-    current: f64,
+#[derive(Clone)]
+pub enum ValueIter {
+    List(Vec<Value>, usize),
+    Range {
+        start: f64,
+        step: f64,
+        end: Option<f64>,
+        current: f64,
+    },
 }
 
-impl RangeIter {
-    pub fn new(start: f64, step: f64, end: Option<f64>) -> Self {
-        RangeIter { start, step, end, current: start }
-    }
-}
-
-impl Iterator for RangeIter {
+impl Iterator for ValueIter {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let ret = self.current;
-        self.current += self.step;
-        return if let Some(e) = self.end {
-            if if self.start <= e {
-                ret < e
-            } else {
-                ret > e
-            } { Some(Value::Number(ret)) } else {None}
-        } else {
-            Some(Value::Number(ret))
+
+        match self {
+            ValueIter::List(v, i) => {
+                let ret = v.get(*i).map(|v| v.clone());
+                *i += 1;
+                ret
+            },
+            ValueIter::Range { start, step, end, current } => {
+                let ret = *current;
+                *current += *step;
+                return if let Some(e) = *end {
+                    if if *start <= e {
+                        ret < e
+                    } else {
+                        ret > e
+                    } { Some(Value::Number(ret)) } else {None}
+                } else {
+                    Some(Value::Number(ret))
+                }
+            },
         }
+
+        // let ret = self.current;
+        // self.current += self.step;
+        // return if let Some(e) = self.end {
+        //     if if self.start <= e {
+        //         ret < e
+        //     } else {
+        //         ret > e
+        //     } { Some(Value::Number(ret)) } else {None}
+        // } else {
+        //     Some(Value::Number(ret))
+        // }
     }
 }
 
@@ -611,7 +631,7 @@ pub mod value_ops {
 
     use crate::{interpreter::{StoredValue, Globals}, CodeArea, value::{Value, ValueType, InstanceVariant}, error::RuntimeError, builtins::BuiltinType};
 
-    use super::{Pattern, Range, RangeIter};
+    use super::{Pattern, Range, ValueIter};
 
     pub fn to_bool(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<bool, RuntimeError> {
         match &a.value {
@@ -629,11 +649,16 @@ pub mod value_ops {
         }
     }
 
-    pub fn iter(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<Box<dyn Iterator<Item = Value>>, RuntimeError> {
+    pub fn iter(a: &StoredValue, area: CodeArea, globals: &Globals) -> Result<ValueIter, RuntimeError> {
         let val = a.value.clone();
         match val {
-            Value::Array(arr) => Ok( Box::new(arr.iter().map(|e| globals.get(*e).value.clone() ).collect::<Vec<Value>>().into_iter()) ),
-            Value::Dictionary(map) => Ok( Box::new(map.iter().map(|(s, _)| Value::String(s.clone()) ).collect::<Vec<Value>>().into_iter()) ),
+            Value::Array(arr) => Ok(
+                ValueIter::List(arr.iter().map( |e| globals.get(*e).value.clone() ).collect(), 0)
+            ),
+            Value::Dictionary(map) => Ok(
+                ValueIter::List(map.iter().map( |(s, _)| Value::String(s.clone()) ).collect(), 0)
+            ),
+            
             Value::Range(Range { start, end, step }) => Ok(
                 {
                     if let None = start {
@@ -643,11 +668,13 @@ pub mod value_ops {
                             reason: "This range has no start".to_string()
                         } );
                     }
-                    let iter = RangeIter::new(start.unwrap(), step, end);
-                    Box::new(iter)
+                    ValueIter::Range { start: start.unwrap(), step, end, current: start.unwrap() }
                 }
             ),
-            Value::String(s) => Ok( Box::new(s.chars().map(|c| Value::String(c.to_string()) ).collect::<Vec<Value>>().into_iter()) ),
+            Value::String(s) => Ok(
+                ValueIter::List(s.chars().map( |c| Value::String(c.to_string()) ).collect(), 0)
+            ),
+        
             
             value => {
                 Err( RuntimeError::TypeMismatch {
@@ -689,7 +716,7 @@ pub mod value_ops {
                     } ),
                     _ => {
                         let mut v = vec![];
-                        let iter = RangeIter::new(start.unwrap(), *step, *end);
+                        let iter = iter(a, area.clone(), globals)?;
                         for i in iter {
                             v.push(globals.insert_value(
                                 i,

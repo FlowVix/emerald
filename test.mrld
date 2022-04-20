@@ -5,3 +5,13 @@ extract import "libraries/std/lib.mrld";
 
 
 
+
+let pythagorean_triples = [
+    (i, j, k)
+    for i of 1..15, j of 1..15, k of 1..15,
+    if i**2 + j**2 == k**2 && i <= j
+];
+
+for (i, j, k) of pythagorean_triples {
+    print(i, " ", j, " ", k);
+}
