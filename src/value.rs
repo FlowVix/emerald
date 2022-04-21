@@ -2,7 +2,7 @@ use std::{collections::HashSet, hash::Hash};
 
 use fnv::FnvHashMap;
 
-use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, error::RuntimeError, lexer::SelectorType};
+use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, error::RuntimeError, lexer::SelectorType, EmeraldSource};
 
 
 
@@ -603,7 +603,7 @@ impl Value {
 
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ValueIter {
     List(Vec<Value>, usize),
     Range {
@@ -613,6 +613,7 @@ pub enum ValueIter {
         current: f64,
     },
 }
+
 
 impl Iterator for ValueIter {
     type Item = Value;
@@ -638,19 +639,8 @@ impl Iterator for ValueIter {
                     Some(Value::Number(ret))
                 }
             },
+            _ => todo!(),
         }
-
-        // let ret = self.current;
-        // self.current += self.step;
-        // return if let Some(e) = self.end {
-        //     if if self.start <= e {
-        //         ret < e
-        //     } else {
-        //         ret > e
-        //     } { Some(Value::Number(ret)) } else {None}
-        // } else {
-        //     Some(Value::Number(ret))
-        // }
     }
 }
 

@@ -5,3 +5,17 @@ extract import "libraries/std/lib.mrld";
 
 
 
+
+
+let gaga = HashMap::new();
+
+gaga.insert(1, "buga");
+gaga.insert([1, 6], #(30));
+gaga.insert("bu", true);
+
+for (k, v) of gaga {
+    print(k, ": ", v);
+}
+
+
+

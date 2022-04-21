@@ -162,6 +162,12 @@ impl HashMap {
         return ret;
     },
 
+
+    _iter_: (self) => {
+        return self.pairs();
+    },
+
+
     inverted: (self) => {
         let new_map = HashMap::new();
         for i of self.list {

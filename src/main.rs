@@ -17,7 +17,6 @@ use error::{ToReport, RuntimeError};
 use fnv::FnvHashMap;
 use interpreter::{execute, Globals, Exit};
 use logos::Logos;
-use value::Value;
 
 use crate::{parser::parse, generator::generate_datapack};
 
@@ -137,7 +136,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                 &node,
                 0,
                 &mut globals,
-                source.clone(),
+                &source,
             );
             
             if let Ok(_) = result {

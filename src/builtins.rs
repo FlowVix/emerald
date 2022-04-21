@@ -166,7 +166,7 @@ macro_rules! builtins {
             args: &Vec<ASTNode>,
             $scope_id: ScopePos,
             $globals: &mut Globals,
-            $source: EmeraldSource,
+            $source: &EmeraldSource,
         ) -> Result<ValuePos, RuntimeError> {
             match arg_amount(func) {
                 Some(n) => if args.len() != n {
@@ -191,7 +191,7 @@ macro_rules! builtins {
                             let mut __index = 0;
                             let mut arg_ids = vec![];
                             $(
-                                let arg_id = execute(&args[__index], $scope_id, $globals, $source.clone())?;
+                                let arg_id = execute(&args[__index], $scope_id, $globals, $source)?;
                                 arg_ids.push(arg_id);
                                 $globals.protect_value(arg_id);
 
@@ -272,7 +272,7 @@ macro_rules! builtins {
                                 SpecialArgs::Any => {
                                     let mut $var = vec![];
                                     for i in args {
-                                        let arg_id = execute(&i, $scope_id, $globals, $source.clone())?;
+                                        let arg_id = execute(&i, $scope_id, $globals, $source)?;
                                         $globals.protect_value(arg_id);
                                         $var.push( $globals.get(arg_id).value.clone() )
                                     }
