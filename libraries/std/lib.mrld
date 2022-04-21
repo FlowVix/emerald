@@ -15,6 +15,7 @@ import? "builtin_types/string.mrld";
 import? "builtin_types/array.mrld";
 import? "builtin_types/dict.mrld";
 import? "builtin_types/number.mrld";
+import? "builtin_types/option.mrld";
 import? "builtin_types/selector.mrld";
 
 

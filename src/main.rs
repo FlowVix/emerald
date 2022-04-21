@@ -118,26 +118,25 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
         (code.len(), code.len())
     ));
 
-    // println!("{:?}", tokens);
-
     let cache = EmeraldCache::default();
     // cache.fetch(&source).unwrap();
 
     let ast = parse(&tokens, &source);
     
-    let mut globals = Globals::new();
+    let (mut globals, base_scope) = Globals::new();
     globals.exports.push( FnvHashMap::default() );
     match ast {
         Ok((node, _)) => {
             
-            globals.init_global(0, source.clone());
+            globals.init_global(base_scope, source.clone());
 
             let mut result = execute(
                 &node,
-                0,
+                base_scope,
                 &mut globals,
                 &source,
             );
+            // println!("collect: {} {} {}", globals.values.len(), globals.scopes.len(), globals.protected.len());
             
             if let Ok(_) = result {
                 result = match globals.exits.last() {
@@ -177,13 +176,6 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                     if print_return {
                         println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", globals.get(pos).value.to_str(&globals, &mut vec![]))))
                     }
-                    // println!("{:?}", globals.values.map.len());
-                    // println!("{}", globals.register.len());
-                    // for i in &globals.register {
-                    //     println!("{}: {:?}", i.0, i.1)
-                    // }
-
-                    // println!("{:#?}", globals.mcfuncs);
 
                     generate_datapack(&globals);
 
@@ -199,7 +191,6 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
         Err(e) => {
             let gaga = e.to_report();
             gaga.print_error(cache, &globals);
-            // println!("{:#?}", gaga);
             return false
         },
     }

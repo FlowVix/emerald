@@ -2,7 +2,7 @@ use std::{collections::HashSet, hash::Hash};
 
 use fnv::FnvHashMap;
 
-use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, error::RuntimeError, lexer::SelectorType, EmeraldSource};
+use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, error::RuntimeError, lexer::SelectorType};
 
 
 
@@ -28,13 +28,13 @@ impl ValueType {
     pub fn to_str(&self, globals: &Globals) -> String {
         match self {
             ValueType::Builtin(b) => builtin_type_str(b.clone()),
-            ValueType::CustomStruct(id) => match &globals.custom_structs.map[id] {
+            ValueType::CustomStruct(id) => match &globals.custom_structs[*id] {
                 CustomStruct { name, .. } => name.to_string()
             },
-            ValueType::CustomEnum(id) => match &globals.custom_enums.map[id] {
+            ValueType::CustomEnum(id) => match &globals.custom_enums[*id] {
                 CustomEnum { name, .. } => name.to_string()
             },
-            ValueType::Module(id) => match &globals.modules.map[id] {
+            ValueType::Module(id) => match &globals.modules[*id] {
                 Module { name, .. } => name.to_string()
             },
         }
@@ -279,9 +279,21 @@ impl Value {
         match self {
             Value::Number(n) => n.to_string(),
             Value::Boolean(b) => b.to_string(),
-            Value::String(s) => format!("{}", s),
+            Value::String(s) => if visited.len() > 0 {
+                format!("\"{}\"", s)
+            } else {
+                format!("{}", s)
+            },
             Value::Option(o) => match o {
-                Some(v) => format!("#({})", globals.get(*v).value.to_str(globals, &mut vec![])),
+                Some(v) => {
+                    if visited.contains(&self) {
+                        return "#(...)".to_string()
+                    }
+                    visited.push( self );
+                    let out_str = format!("#({})", globals.get(*v).value.to_str(globals, visited));
+                    visited.pop();
+                    out_str
+                },
                 None => format!("#"),
             },
             Value::Builtin(b) => format!("<builtin: {}>", builtin_to_name(*b)),
@@ -321,19 +333,19 @@ impl Value {
             },
             Value::Type(v) => match v {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
-                ValueType::CustomStruct(pos) => match &globals.custom_structs.map[pos] {
-                    CustomStruct { name, .. } => format!("<struct {}: {}>", pos, name)
+                ValueType::CustomStruct(pos) => match &globals.custom_structs[*pos] {
+                    CustomStruct { name, .. } => format!("<struct {:?}: {}>", pos, name)
                 },
-                ValueType::CustomEnum(pos) => match &globals.custom_enums.map[pos] {
-                    CustomEnum { name, .. } => format!("<enum {}: {}>", pos, name)
+                ValueType::CustomEnum(pos) => match &globals.custom_enums[*pos] {
+                    CustomEnum { name, .. } => format!("<enum {:?}: {}>", pos, name)
                 },
-                ValueType::Module(pos) => match &globals.modules.map[pos] {
-                    Module { name, .. } => format!("<mod {}: {}>", pos, name)
+                ValueType::Module(pos) => match &globals.modules[*pos] {
+                    Module { name, .. } => format!("<mod {:?}: {}>", pos, name)
                 },
             },
             Value::StructInstance { struct_id, fields } => {
 
-                let name = match &globals.custom_structs.map[struct_id] {
+                let name = match &globals.custom_structs[*struct_id] {
                     CustomStruct { name, .. } => name,
                 };
 
@@ -352,7 +364,7 @@ impl Value {
                 variant_name,
                 variant
             } => {
-                let name = match &globals.custom_enums.map[enum_id] {
+                let name = match &globals.custom_enums[*enum_id] {
                     CustomEnum { name, .. } => name,
                 };
 
@@ -639,7 +651,6 @@ impl Iterator for ValueIter {
                     Some(Value::Number(ret))
                 }
             },
-            _ => todo!(),
         }
     }
 }
@@ -726,7 +737,7 @@ pub mod value_ops {
                 }
                 Ok(Value::Array(v))
             },
-            (Value::Range(Range { start, end, step }), Value::Type(t @ ValueType::Builtin(BuiltinType::Array))) => {
+            (Value::Range(Range { start, end, .. }), Value::Type(t @ ValueType::Builtin(BuiltinType::Array))) => {
                 match (start, end) {
                     (_, None) | (None, _) => Err( RuntimeError::CannotConvert {
                         type1: "range with undefined ends".to_string(),
@@ -782,7 +793,6 @@ pub mod value_ops {
 
     
     pub fn is_op_raw(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<bool, RuntimeError> {
-        // println!("aa {:?} {:?}", &a.value, &b.value);
         match (&a.value, &b.value) {
             (v, Value::Type(t)) => Ok( v.typ() == t.clone() ),
 

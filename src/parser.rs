@@ -72,6 +72,8 @@ pub enum NodeType {
     Throw { msg: Box<ASTNode> },
     Continue,
 
+    Propagate { base: Box<ASTNode> },
+
     UnboundedRange { base: Box<ASTNode> },
 
     StructDef {
@@ -204,7 +206,7 @@ selector_args!{
             Value::Dictionary(map) => {
                 let mut valid = true;
                 for (_, id) in map {
-                    if !(matches!(globals.get(*id).value, Value::Range(_)) || matches!(globals.values.map[id].value, Value::Number(_))) {
+                    if !(matches!(globals.get(*id).value, Value::Range(_)) || matches!(globals.values[*id].value, Value::Number(_))) {
                         valid = false;
                         break;
                     }
@@ -453,6 +455,7 @@ macro_rules! operators {
                     _ => (),
                 };
                 prec += 1;
+                format!("{}", prec);
             )*
             1000000
         }
@@ -466,6 +469,7 @@ macro_rules! operators {
                     _ => (),
                 };
                 prec += 1;
+                format!("{}", prec);
             )*
             1000000
         }
@@ -484,7 +488,7 @@ macro_rules! operators {
             let mut amount = 0;
             $(
                 amount += 1;
-                OpType::$optype;
+                format!("{:?}", OpType::$optype);
             )*
             amount
         }
@@ -494,6 +498,7 @@ macro_rules! operators {
                     return OpType::$optype;
                 }
                 prec -= 1;
+                format!("{}", prec);
             )*
             unreachable!()
         }
@@ -713,7 +718,6 @@ pub fn parse_unit(
             parse!(parse_expr(true) => let left);
             check_tok!(Assign else "=");
             parse!(parse_expr(false) => let right);
-            // println!("{} {}", var_name, mutable);
             ret!( NodeType::Declaration { left: Box::new(left), right: Box::new(right) } => start.0, span!(-1).1 );
         }
         Token::Ident(name) => {
@@ -1096,7 +1100,6 @@ pub fn parse_unit(
                 source: info.source.clone(),
                 range: (start.0, span!(-1).1),
             };
-            // println!("{}: {:#?}", struct_name, fields);
             ret!( NodeType::StructDef { struct_name, fields, field_areas, def_area } => start.0, span!(-1).1 );
         },
         Token::Enum => {
@@ -1181,7 +1184,6 @@ pub fn parse_unit(
                 source: info.source.clone(),
                 range: (start.0, span!(-1).1),
             };
-            // println!("{}: {:#?}", struct_name, fields);
             ret!( NodeType::EnumDef { enum_name, variants, variant_areas, def_area } => start.0, span!(-1).1 );
         },
         Token::Module => {
@@ -1239,7 +1241,7 @@ pub fn parse_unit(
                                             range: span!(0),
                                         },
                                     } ),
-                                    None => {is_caret_type = Some(false);},
+                                    None => {is_caret_type = Some(false); format!("{:?}", is_caret_type);},
                                     Some(false) => (),
                                 }
                             }
@@ -1269,7 +1271,7 @@ pub fn parse_unit(
                                             range: span!(0),
                                         },
                                     } ),
-                                    None => {is_caret_type = Some(true);},
+                                    None => {is_caret_type = Some(true); format!("{:?}", is_caret_type);},
                                     Some(true) => (),
                                 }
                             } else {
@@ -1307,7 +1309,7 @@ pub fn parse_unit(
                                             range: span!(0),
                                         },
                                     } ),
-                                    None => {is_caret_type = Some(false);},
+                                    None => {is_caret_type = Some(false); format!("{:?}", is_caret_type);},
                                     Some(false) => (),
                                 }
                             }
@@ -1330,8 +1332,6 @@ pub fn parse_unit(
                 rot = Some((h, v))
             });
             check_tok!(Backslash else "\\");
-
-            // println!("{:#?} {:#?} {:#?} {:#?}", x, y, z, rot);
 
             ret!( NodeType::McVector { x, y, z, rot } => start.0, span!(-1).1 );
         },
@@ -1424,8 +1424,16 @@ fn parse_value(
     parse!(parse_unit => let mut value);
     let start = value.span;
     
-    // println!("{}", pos);
-    while matches!(tok!(0), Token::LParen | Token::LSqBracket | Token::Dot | Token::DoubleColon | Token::ExclMark | Token::Colon | Token::TripleDot) {
+    while matches!(tok!(0),
+        Token::LParen |
+        Token::LSqBracket |
+        Token::Dot |
+        Token::DoubleColon |
+        Token::ExclMark |
+        Token::Colon |
+        Token::TripleDot |
+        Token::QMark
+    ) {
         match tok!(0) {
             Token::LParen => {
                 pos += 1;
@@ -1499,6 +1507,15 @@ fn parse_value(
                 pos += 1;
                 value = ASTNode {
                     node: NodeType::UnboundedRange {
+                        base: Box::new(value),
+                    },
+                    span: ( start.0, span!(-1).1 )
+                }
+            }
+            Token::QMark => {
+                pos += 1;
+                value = ASTNode {
+                    node: NodeType::Propagate {
                         base: Box::new(value),
                     },
                     span: ( start.0, span!(-1).1 )
@@ -1760,7 +1777,7 @@ fn parse_statement(
                     }
 
                     // cheeky thing to make me not have to write the same errors twice
-                    _ => { parse!(parse_expr(false) => let _value); panic!() },
+                    _ => { parse!(parse_expr(false) => let _value); format!("{}", pos); panic!() },
                 }
             }
             _ => expected_err!("let, func, struct, mod, or enum", tok!(0), span!(0), info ),
@@ -2015,5 +2032,59 @@ impl Hash for NodeType {
             },
             _ => core::mem::discriminant(self).hash(state),
         }
+    }
+}
+
+
+
+impl NodeType {
+
+    #[allow(dead_code)]
+    pub fn name(&self) -> String {
+        match self {
+            NodeType::Value { .. } => "Value",
+            NodeType::Op { .. } => "Op",
+            NodeType::Unary { .. } => "Unary",
+            NodeType::Option { .. } => "Option",
+            NodeType::OptionPattern { .. } => "OptionPattern",
+            NodeType::Declaration { .. } => "Declaration",
+            NodeType::Var { .. } => "Var",
+            NodeType::StatementList { .. } => "StatementList",
+            NodeType::Block { .. } => "Block",
+            NodeType::If { .. } => "If",
+            NodeType::While { .. } => "While",
+            NodeType::For { .. } => "For",
+            NodeType::Loop { .. } => "Loop",
+            NodeType::Call { .. } => "Call",
+            NodeType::FuncDef { .. } => "FuncDef",
+            NodeType::Lambda { .. } => "Lambda",
+            NodeType::Array { .. } => "Array",
+            NodeType::Tuple { .. } => "Tuple",
+            NodeType::Index { .. } => "Index",
+            NodeType::Dictionary { .. } => "Dictionary",
+            NodeType::Member { .. } => "Member",
+            NodeType::Return { .. } => "Return",
+            NodeType::Break { .. } => "Break",
+            NodeType::Throw { .. } => "Throw",
+            NodeType::Continue => "Continue",
+            NodeType::UnboundedRange { .. } => "UnboundedRange",
+            NodeType::StructDef { .. } => "StructDef",
+            NodeType::StructInstance { .. } => "StructInstance",
+            NodeType::Impl { .. } => "Impl",
+            NodeType::Associated { .. } => "Associated",
+            NodeType::Match { .. } => "Match",
+            NodeType::EnumDef { .. } => "EnumDef",
+            NodeType::EnumInstance { .. } => "EnumInstance",
+            NodeType::ModuleDef { .. } => "ModuleDef",
+            NodeType::ListComp { .. } => "ListComp",
+            NodeType::Export { .. } => "Export",
+            NodeType::Import { .. } => "Import",
+            NodeType::MCCall { .. } => "MCCall",
+            NodeType::CurrentMcId => "CurrentMcId",
+            NodeType::McVector { .. } => "McVector",
+            NodeType::Extract { .. } => "Extract",
+            NodeType::Selector { .. } => "Selector",
+            NodeType::Propagate { .. } => "Propagate",
+        }.to_string()
     }
 }

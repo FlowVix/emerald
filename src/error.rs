@@ -356,7 +356,7 @@ const ERROR_V: f64 = 1.0;
 
 
 impl ErrorReport {
-    pub fn print_error(&self, cache: EmeraldCache, globals: &Globals) {
+    pub fn print_error(&self, cache: EmeraldCache, _globals: &Globals) {
 
         let mut colors = RainbowColorGenerator::new(0.0, ERROR_S, ERROR_V, 60.0);
 

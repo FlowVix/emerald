@@ -1,0 +1,20 @@
+
+
+
+impl option {
+
+    unwrap: (self) => match self {
+        case #(inner) -> inner,
+        case # -> throw "Called unwrap on #",
+    },
+    unwrap_or: (self, or) => match self {
+        case #(inner) -> inner,
+        case # -> or,
+    },
+    map: (self, f: function) => match self {
+        case #(inner) -> #( f(inner) ),
+        case # -> #,
+    },
+
+}
+

@@ -1,21 +1,34 @@
 
 
+enum Data {
+    Good(_),
+    Bad(_),
+}
 
-extract import "libraries/std/lib.mrld";
-
-
-
-
-
-let gaga = HashMap::new();
-
-gaga.insert(1, "buga");
-gaga.insert([1, 6], #(30));
-gaga.insert("bu", true);
-
-for (k, v) of gaga {
-    print(k, ": ", v);
+impl Data {
+    _try_: (self) => match self {
+        case Data:Good(g) -> g,
+        case Data:Bad(b) -> return return Data:Bad(b),
+    }
 }
 
 
+func lol(v: number | string) {
+    return match v {
+        number -> Data:Good(v),
+        string -> Data:Bad(v),
+    }
+}
+
+func gaga() {
+
+    let a = lol(3)?;
+    print("a: ", a);
+
+    let b = lol("sa")?;
+    print("b: ", b);
+
+}
+
+print(gaga());
 

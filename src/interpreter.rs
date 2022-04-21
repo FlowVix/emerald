@@ -1,13 +1,14 @@
 
 
 
-use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, io::{self, Write}};
+use std::{collections::{HashMap, HashSet}, fs, path::PathBuf};
+use slotmap::{SlotMap, new_key_type};
 
 use convert_case::{Case, Casing};
 use fnv::FnvHashMap;
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector, ValueIter}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}, EmeraldCache};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector, ValueIter}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -18,10 +19,12 @@ pub enum Exit {
 }
 
 
-pub type ValuePos = usize;
-pub type ScopePos = usize;
-pub type TypePos = usize;
+new_key_type! { pub struct ValuePos; }
+new_key_type! { pub struct ScopePos; }
+new_key_type! { pub struct TypePos; }
 pub type McFuncID = usize;
+
+
 
 #[derive(Debug, Clone)]
 pub struct StoredValue {
@@ -84,11 +87,11 @@ impl Collector {
     pub fn new(globals: &Globals) -> Self {
         let mut marked_scopes = HashSet::new();
         let mut marked_values = HashSet::new();
-        for (i, _) in &globals.values.map {
-            marked_values.insert(*i);
+        for (i, _) in &globals.values {
+            marked_values.insert(i);
         }
-        for (i, _) in &globals.scopes.map {
-            marked_scopes.insert(*i);
+        for (i, _) in &globals.scopes {
+            marked_scopes.insert(i);
         }
         Self {
             marked_values,
@@ -124,12 +127,12 @@ pub struct Register<K, V> {
 
 
 pub struct Globals {
-    pub values: Register<ValuePos, StoredValue>,
-    pub scopes: Register<ScopePos, Scope>,
+    pub values: SlotMap<ValuePos, StoredValue>,
+    pub scopes: SlotMap<ScopePos, Scope>,
 
-    pub custom_structs: Register<TypePos, CustomStruct>,
-    pub custom_enums: Register<TypePos, CustomEnum>,
-    pub modules: Register<TypePos, Module>,
+    pub custom_structs: SlotMap<TypePos, CustomStruct>,
+    pub custom_enums: SlotMap<TypePos, CustomEnum>,
+    pub modules: SlotMap<TypePos, Module>,
 
 
 
@@ -151,7 +154,7 @@ pub struct Globals {
     pub exports: Vec<FnvHashMap<String, ValuePos>>,
     pub import_caches: HashMap<PathBuf, FnvHashMap<String, ValuePos>>,
 
-    pub mcfuncs: Register<McFuncID, Vec<String>>,
+    pub mcfuncs: Vec<Vec<String>>,
 
 }
 
@@ -169,48 +172,33 @@ pub struct Scope {
 
 impl Globals {
 
-    pub fn new() -> Self {
-        let mut scopes = Register {
-            map: HashMap::new(),
-            counter: 0,
-        };
-        scopes.map.insert(0, Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![], func_id: 0 });
-        Self {
-            values: Register {
-                map: HashMap::new(),
-                counter: 0,
+    pub fn new() -> (Self, ScopePos) {
+        let mut scopes = SlotMap::with_key();
+        let base_scope = scopes.insert(Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![], func_id: McFuncID::default() });
+        (
+            Self {
+                values: SlotMap::with_key(),
+                scopes,
+                custom_structs: SlotMap::with_key(),
+                custom_enums: SlotMap::with_key(),
+                modules: SlotMap::with_key(),
+                last_amount: 0,
+                protected: vec![],
+                backup_protector: None,
+                // custom_types: vec![],
+                struct_impls: HashMap::new(),
+                enum_impls: HashMap::new(),
+                builtin_impls: HashMap::new(),
+                module_impls: HashMap::new(),
+                exits: vec![],
+                trace: vec![],
+                import_trace: vec![],
+                exports: vec![],
+                import_caches: HashMap::new(),
+                mcfuncs: vec![],
             },
-            scopes,
-            custom_structs: Register {
-                map: HashMap::new(),
-                counter: 0,
-            },
-            custom_enums: Register {
-                map: HashMap::new(),
-                counter: 0,
-            },
-            modules: Register {
-                map: HashMap::new(),
-                counter: 0,
-            },
-            last_amount: 0,
-            protected: vec![],
-            backup_protector: None,
-            // custom_types: vec![],
-            struct_impls: HashMap::new(),
-            enum_impls: HashMap::new(),
-            builtin_impls: HashMap::new(),
-            module_impls: HashMap::new(),
-            exits: vec![],
-            trace: vec![],
-            import_trace: vec![],
-            exports: vec![],
-            import_caches: HashMap::new(),
-            mcfuncs: Register {
-                map: HashMap::new(),
-                counter: 0,
-            },
-        }
+            base_scope,
+        )
     }
 
     pub fn init_global(&mut self, scope_id: ScopePos, source: EmeraldSource) {
@@ -249,28 +237,22 @@ impl Globals {
     pub fn new_struct(
         &mut self,
         typ: CustomStruct,
-    ) -> ValuePos {
-        self.custom_structs.counter += 1;
-        self.custom_structs.map.insert( self.custom_structs.counter, typ );
-        self.custom_structs.counter
+    ) -> TypePos {
+        self.custom_structs.insert( typ )
     }
 
     pub fn new_enum(
         &mut self,
         typ: CustomEnum,
-    ) -> ValuePos {
-        self.custom_enums.counter += 1;
-        self.custom_enums.map.insert( self.custom_enums.counter, typ );
-        self.custom_enums.counter
+    ) -> TypePos {
+        self.custom_enums.insert( typ )
     }
 
     pub fn new_module(
         &mut self,
         typ: Module,
-    ) -> ValuePos {
-        self.modules.counter += 1;
-        self.modules.map.insert( self.modules.counter, typ );
-        self.modules.counter
+    ) -> TypePos {
+        self.modules.insert( typ )
     }
 
 
@@ -280,12 +262,10 @@ impl Globals {
         value: Value,
         def_area: CodeArea,
     ) -> ValuePos {
-        self.values.counter += 1;
-        self.values.map.insert( self.values.counter, StoredValue {
+        self.values.insert( StoredValue {
             value,
             def_area,
-        } );
-        self.values.counter
+        } )
     }
     pub fn set_value(
         &mut self,
@@ -293,21 +273,18 @@ impl Globals {
         value: Value,
         def_area: Option<CodeArea>,
     ) {
-        let v_a = {
-            let val = self.get(id);
-            val.def_area.clone()
-        };
-        self.values.map.insert( id, StoredValue {
-            value,
-            def_area: if let Some(m) = def_area {m} else {v_a},
-        } );
+        let stored_val = self.get_mut(id);
+        stored_val.value = value;
+        if let Some(a) = def_area {
+            stored_val.def_area = a;
+        }
     }
     pub fn redef_value(
         &mut self,
         id: ValuePos,
         def_area: CodeArea,
     ) {
-        self.values.map.get_mut(&id).unwrap().def_area = def_area;
+        self.get_mut(id).def_area = def_area;
     }
     pub fn clone_value(
         &mut self,
@@ -324,33 +301,18 @@ impl Globals {
         )
     }
     pub fn get(&self, id: ValuePos) -> &StoredValue {
-        return match self.values.map.get(&id) {
+        return match self.values.get(id) {
             Some(v) => v,
             None => panic!("bad value fuck you"),
         }
     }
     pub fn get_mut(&mut self, id: ValuePos) -> &mut StoredValue {
-        return match self.values.map.get_mut(&id) {
+        return match self.values.get_mut(id) {
             Some(v) => v,
-            None => panic!("bad value fuck you"),
+            None => panic!("bad mutable value fuck you"),
         }
     }
 
-    // pub fn propagate_def(
-    //     &mut self,
-    //     id: ValuePos,
-    // ) {
-    //     let def = self.get(id).def_area.clone();
-    //     match self.get(id).value.clone() {
-    //         Value::Array(arr) => {
-    //             for i in arr {
-    //                 self.redef(i, def.clone());
-    //                 self.propagate_def(i);
-    //             }
-    //         }
-    //         _ => (),
-    //     }
-    // }
     pub fn protect_value(&mut self, pos: ValuePos) {
         self.protected
             .last_mut()
@@ -368,43 +330,40 @@ impl Globals {
 
 
     pub fn get_scope(&self, scope_id: ScopePos) -> &Scope {
-        self.scopes.map.get(&scope_id).unwrap()
+        self.scopes.get(scope_id).unwrap()
     }
     pub fn get_scope_mut(&mut self, scope_id: ScopePos) -> &mut Scope {
-        self.scopes.map.get_mut(&scope_id).unwrap()
+        self.scopes.get_mut(scope_id).unwrap()
     }
 
 
     pub fn insert_scope(
         &mut self,
         scope: Scope,
-    ) -> ValuePos {
-        self.scopes.counter += 1;
-        self.scopes.map.insert( self.scopes.counter, scope );
-        self.scopes.counter
+    ) -> ScopePos {
+        self.scopes.insert( scope )
     }
     fn derive_scope(&mut self, scope_id: ScopePos, mc_func_id: McFuncID) -> ScopePos {
-        self.scopes.counter += 1;
-        self.scopes.map.insert(self.scopes.counter, Scope {
+        let pos = self.scopes.insert(Scope {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
             extra_prot: vec![],
             func_id: mc_func_id,
         });
-        self.protect_scope(self.scopes.counter);
-        self.scopes.counter
+        self.protect_scope(pos);
+        pos
     }
     fn derive_scope_mcfunc(&mut self, scope_id: ScopePos) -> ScopePos {
-        self.scopes.counter += 1;
-        self.mcfuncs.counter += 1;
-        self.scopes.map.insert(self.scopes.counter, Scope {
+        self.mcfuncs.push(vec![]);
+
+        let pos = self.scopes.insert( Scope {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
             extra_prot: vec![],
-            func_id: self.mcfuncs.counter,
+            func_id: self.mcfuncs.len() - 1,
         });
-        self.protect_scope(self.scopes.counter);
-        self.scopes.counter
+        self.protect_scope(pos);
+        pos
     }
 
     pub fn set_var(
@@ -450,12 +409,12 @@ impl Globals {
             }
         }
 
-        for (_, s) in &self.custom_structs.map {
+        for (_, s) in &self.custom_structs {
             if collector.marked_scopes.contains(&s.def_scope) {
                 self.mark_scope(s.def_scope, &mut collector);
             }
         }
-        for (_, s) in &self.custom_enums.map {
+        for (_, s) in &self.custom_enums {
             if collector.marked_scopes.contains(&s.def_scope) {
                 self.mark_scope(s.def_scope, &mut collector);
             }
@@ -494,13 +453,13 @@ impl Globals {
         }
 
         for i in collector.marked_scopes {
-            self.scopes.map.remove(&i);
+            self.scopes.remove(i);
         }
         for i in collector.marked_values {
-            self.values.map.remove(&i);
+            self.values.remove(i);
         }
 
-        self.last_amount = self.values.map.len();
+        self.last_amount = self.values.len();
 
     }
 
@@ -540,9 +499,10 @@ impl Globals {
 
 
     pub fn insert_command(&mut self, func_id: McFuncID, command: String) {
-        match self.mcfuncs.map.get_mut(&func_id) {
+        match self.mcfuncs.get_mut(func_id) {
             Some(v) => {v.push(command);},
-            None => {self.mcfuncs.map.insert(func_id, vec![command]);},
+            // None => {self.mcfuncs.push(func_id, vec![command]);},
+            None => unreachable!(),
         };
     }
 
@@ -584,6 +544,7 @@ impl Globals {
 
 macro_rules! interpreter_util {
     ($globals:expr, $source:expr) => {
+        #[allow(unused_macros)]
         macro_rules! execute {
             ($node:expr => $scope_id:expr) => {
                 {
@@ -595,6 +556,7 @@ macro_rules! interpreter_util {
                 }
             }
         }
+        #[allow(unused_macros)]
         macro_rules! execute_raw {
             ($node:expr => $scope_id:expr) => {
                 {
@@ -602,6 +564,7 @@ macro_rules! interpreter_util {
                 }
             }
         }
+        #[allow(unused_macros)]
         macro_rules! protecute {
             ($node:expr => $scope_id:expr) => {
                 {
@@ -616,6 +579,7 @@ macro_rules! interpreter_util {
                 }
             }
         }
+        #[allow(unused_macros)]
         macro_rules! protecute_raw {
             ($node:expr => $scope_id:expr) => {
                 {
@@ -625,6 +589,7 @@ macro_rules! interpreter_util {
                 }
             }
         }
+        #[allow(unused_macros)]
         macro_rules! clone {
             ($id:expr => @ ) => {
                 {
@@ -645,6 +610,7 @@ macro_rules! interpreter_util {
                 }
             };
         }
+        #[allow(unused_macros)]
         macro_rules! proteclone {
             ($id:expr => @ ) => {
                 {
@@ -667,10 +633,13 @@ macro_rules! interpreter_util {
                 }
             };
         }
+        #[allow(unused_macros)]
         macro_rules! ret {
-            ($thing:expr) => {
+            ($thing:expr, Pop: $n:expr) => {
                 {
-                    $globals.pop_protected();
+                    for _ in 0..$n {
+                        $globals.pop_protected();
+                    }
                     return $thing;
                 }
             };
@@ -680,10 +649,10 @@ macro_rules! interpreter_util {
 
 macro_rules! area {
     ($source:expr, $area:expr) => {
-        CodeArea {source: $source, range: $area}
+        CodeArea {source: $source.clone(), range: $area}
     };
     ($source:expr, $start:expr, $end:expr) => {
-        CodeArea {source: $source, range: ($start, $end)}
+        CodeArea {source: $source.clone(), range: ($start, $end)}
     };
 }
 
@@ -825,8 +794,8 @@ pub fn do_assign(
         }
         NodeType::StructInstance {
             base,
-            field_areas,
             fields,
+            ..
         } => {
             let base_id = protecute!(base => scope_id);
             match &globals.get(base_id).value.clone() {
@@ -835,8 +804,8 @@ pub fn do_assign(
                         Value::StructInstance { struct_id, fields: value_fields } => {
                             if struct_id != id {
                                 return Err( RuntimeError::DestructureTypeMismatch {
-                                    tried: globals.custom_structs.map[id].name.clone(),
-                                    found: globals.custom_structs.map[struct_id].name.clone(),
+                                    tried: globals.custom_structs[*id].name.clone(),
+                                    found: globals.custom_structs[*struct_id].name.clone(),
                                     area1: area!(source.clone(), left.span),
                                     area2: globals.get(right).def_area.clone(),
                                 } )
@@ -845,7 +814,7 @@ pub fn do_assign(
                             for (k, v) in fields {
                                 if !value_fields.contains_key(k) {
                                     return Err( RuntimeError::DestructureNonExistentKeyField {
-                                        for_type: globals.custom_structs.map[id].name.clone(),
+                                        for_type: globals.custom_structs[*id].name.clone(),
                                         what: "field".to_string(),
                                         name: k.clone(),
                                         area1: area!(source.clone(), left.span),
@@ -858,7 +827,7 @@ pub fn do_assign(
                         },
                         other => {
                             return Err( RuntimeError::DestructureTypeMismatch {
-                                tried: globals.custom_structs.map[id].name.clone(),
+                                tried: globals.custom_structs[*id].name.clone(),
                                 found: format!("{}", other.type_str(globals)),
                                 area1: area!(source.clone(), left.span),
                                 area2: globals.get(right).def_area.clone(),
@@ -868,7 +837,7 @@ pub fn do_assign(
                 },
                 _ => ret!(Err( RuntimeError::InstanceNonStruct {
                     area: area!(source.clone(), base.span),
-                } ))
+                } ), Pop: 1)
             }
         }
         NodeType::EnumInstance {
@@ -888,8 +857,8 @@ pub fn do_assign(
                         } => {
                             if enum_id != id {
                                 return Err( RuntimeError::DestructureTypeMismatch {
-                                    tried: globals.custom_structs.map[id].name.clone(),
-                                    found: globals.custom_structs.map[enum_id].name.clone(),
+                                    tried: globals.custom_structs[*id].name.clone(),
+                                    found: globals.custom_structs[*enum_id].name.clone(),
                                     area1: area!(source.clone(), left.span),
                                     area2: globals.get(right).def_area.clone(),
                                 } )
@@ -903,7 +872,7 @@ pub fn do_assign(
                                 } )
                             }
                             
-                            let enum_type = globals.custom_enums.map[id].clone();
+                            let enum_type = globals.custom_enums[*id].clone();
 
                             match variant {
                                 VariantType::Unit => {
@@ -914,14 +883,14 @@ pub fn do_assign(
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
                                             expected: format!("struct"),
                                             found: format!("unit"),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         VariantType::Unit => (),
                                     }
                                 },
@@ -933,14 +902,14 @@ pub fn do_assign(
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
                                             expected: format!("struct"),
                                             found: format!("tuple"),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         VariantType::Tuple(_) => (),
                                     }
                                 },
@@ -952,14 +921,14 @@ pub fn do_assign(
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         VariantType::Unit { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
                                             expected: format!("unit"),
                                             found: format!("struct"),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         VariantType::Struct { .. } => (),
                                     }
                                 },
@@ -974,13 +943,13 @@ pub fn do_assign(
                                             found: format!("tuple"),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         InstanceVariant::Struct { .. } => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
                                             expected: format!("unit"),
                                             found: format!("struct"),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         InstanceVariant::Unit => (), // not much to destructure lol
                                     }
                                 },
@@ -991,13 +960,13 @@ pub fn do_assign(
                                             found: format!("unit"),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         InstanceVariant::Struct { .. } => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
                                             expected: format!("tuple"),
                                             found: format!("struct"),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         InstanceVariant::Tuple(value_arr) => {
                                             if arr.len() != value_arr.len() {
                                                 return Err( RuntimeError::DestructureLengthMismatch {
@@ -1022,18 +991,18 @@ pub fn do_assign(
                                             found: format!("unit"),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         InstanceVariant::Tuple(_) => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
                                             expected: format!("struct"),
                                             found: format!("tuple"),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
-                                        } )),
+                                        } ), Pop: 1),
                                         InstanceVariant::Struct { fields: value_fields } => {
                                             for (k, v) in fields {
                                                 if !value_fields.contains_key(k) {
                                                     return Err( RuntimeError::DestructureNonExistentKeyField {
-                                                        for_type: globals.custom_enums.map[id].name.clone(),
+                                                        for_type: globals.custom_enums[*id].name.clone(),
                                                         what: "struct variant field".to_string(),
                                                         name: k.clone(),
                                                         area1: area!(source.clone(), left.span),
@@ -1050,7 +1019,7 @@ pub fn do_assign(
                         },
                         other => {
                             return Err( RuntimeError::DestructureTypeMismatch {
-                                tried: globals.custom_enums.map[id].name.clone(),
+                                tried: globals.custom_enums[*id].name.clone(),
                                 found: format!("{}", other.type_str(globals)),
                                 area1: area!(source.clone(), left.span),
                                 area2: globals.get(right).def_area.clone(),
@@ -1060,7 +1029,7 @@ pub fn do_assign(
                 },
                 _ => ret!(Err( RuntimeError::InstanceNonEnum {
                     area: area!(source.clone(), base.span),
-                } ))
+                } ), Pop: 1)
             }
         }
         _ => {
@@ -1089,7 +1058,7 @@ pub fn do_assign(
 
 fn run_func(
     func: &Function,
-    arg_ids: Vec<usize>,
+    arg_ids: Vec<ValuePos>,
     globals: &mut Globals,
     scope_id: ScopePos,
     source: &EmeraldSource,
@@ -1184,8 +1153,6 @@ pub fn execute(
 ) -> Result<ValuePos, RuntimeError> {
     interpreter_util!(globals, source);
 
-    // println!("aaaa");
-    // io::stdout().flush().unwrap();
     let start_node = node;
 
     macro_rules! run_func {
@@ -1198,11 +1165,10 @@ pub fn execute(
         }
     }
     
-    // if globals.values.map.len() > 50000 + globals.last_amount {
-    if true {
-        // println!("{}", globals.values.map.len());
+    if globals.values.len() > 50000 + globals.last_amount {
+    // if true {
         globals.collect(scope_id);
-        // println!("{} {}\n", globals.values.map.len(), globals.last_amount);
+        println!("collect: {} {} {}", globals.values.len(), globals.scopes.len(), globals.protected.len());
     }
 
     globals.push_protected();
@@ -1248,7 +1214,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), pattern.span),
                     defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
-                } ))
+                } ), Pop: 1)
             }
         }
         NodeType::Op { left, op, right } => {
@@ -1286,8 +1252,6 @@ pub fn execute(
                             match op {
                                 $(
                                     Token::$tok => {
-                                        // println!("a: {:?}", globals.get_method(left, &format!("_{}_", stringify!($overload_name))));
-                                        // println!("b: {:?}", globals.get_method(right, &format!("_r_{}_", stringify!($overload_name))));
                                         match globals.get_method(left_clone, &format!("_{}_", stringify!($overload_name))) {
                                             Some(f) => Ok( run_func!(vec![left_raw, right_clone], &f) ),
                                             None => match globals.get_method(right_clone, &format!("_r_{}_", stringify!($overload_name))) {
@@ -1562,7 +1526,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), area!(source.clone(), base.span))],
-                } ))
+                } ), Pop: 1)
             };
             Ok(globals.insert_value(
                 result,
@@ -1585,7 +1549,6 @@ pub fn execute(
             Ok(proteclone!(right_id => @))
         }
         NodeType::Var { var_name } => {
-            // println!("c: {:?} {}", globals.get_scope(scope_id).vars, var_name);
             if var_name == "_" {
                 Ok( globals.insert_value(
                     Value::Pattern(Pattern::Any),
@@ -1609,11 +1572,9 @@ pub fn execute(
                 area!(source.clone(), start_node.span)
             );
             for i in statements {
-                // println!("d1: {:?}", globals.get_scope(scope_id).vars);
                 ret_id = execute!(i => scope_id);
-                // println!("d2: {:?}", globals.get_scope(scope_id).vars);
                 if globals.exits.len() > 0 {
-                    ret!( Ok( ret_id ) );
+                    ret!( Ok( ret_id ), Pop: 1 );
                 }
             }
             Ok(ret_id)
@@ -1623,14 +1584,10 @@ pub fn execute(
                 BlockType::Regular { .. } => execute!(code => globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id)),
                 BlockType::McFunc => {
                     let derived = globals.derive_scope_mcfunc(scope_id);
-                    let id = globals.mcfuncs.counter;
-                    match globals.mcfuncs.map.get_mut(&id) {
-                        Some(_) => (),
-                        None => {globals.mcfuncs.map.insert(id, vec![]);},
-                    };
+                    globals.mcfuncs.push(vec![]);
                     execute!(code => derived);
                     globals.insert_value(
-                        Value::McFunc(id),
+                        Value::McFunc(globals.mcfuncs.len()),
                         area!(source.clone(), node.span),
                     )
                 },
@@ -1706,6 +1663,7 @@ pub fn execute(
                 None => {
                     let mut calculated = true;
                     loop {
+                        globals.push_protected();
                         let cond_value = if calculated { cond_value } else { execute!(cond => scope_id) };
                         calculated = false;
                         if !(value_ops::to_bool(globals.get(cond_value), area!(source.clone(), cond.span), globals)?) {
@@ -1718,12 +1676,12 @@ pub fn execute(
                             ) => {
                                 ret_id = *v;
                                 globals.exits.pop();
-                                ret!(Ok( ret_id ));
+                                ret!(Ok( ret_id ), Pop: 2);
                             },
                             Some(
                                 Exit::Return(_, _)
                             ) => {
-                                ret!(Ok( ret_id ));
+                                ret!(Ok( ret_id ), Pop: 2);
                             },
                             Some(
                                 Exit::Continue(_)
@@ -1732,6 +1690,7 @@ pub fn execute(
                             },
                             None => (),
                         }
+                        globals.pop_protected();
                     }
                 }
             }
@@ -1778,7 +1737,7 @@ pub fn execute(
                                     globals.protected.push(globals.backup_protector.clone().unwrap());
                                     continue;
                                 } else {
-                                    ret!(Err( e ))
+                                    ret!(Err( e ), Pop: 1)
                                 }
                             },
                         }
@@ -1801,6 +1760,7 @@ pub fn execute(
 
             macro_rules! for_loop {
                 ($i:expr) => {
+                    globals.push_protected();
                     let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
                     {
                         let temp = globals.insert_value(
@@ -1812,25 +1772,25 @@ pub fn execute(
                         do_assign(left, temp, derived, globals, source, &mut list, true)?;
 
                         for (l, r) in list {
-                            let right_clone = proteclone!(r => @);
+                            let right_clone = clone!(r => @);
                             
                             globals.set_var(derived, l.1.unwrap(), right_clone);
                         }
 
                     }
-                    ret_id = protecute!(code => derived);
+                    ret_id = execute!(code => derived);
                     match globals.exits.last() {
                         Some(
                             Exit::Break(v, _)
                         ) => {
                             ret_id = *v;
                             globals.exits.pop();
-                            ret!(Ok( ret_id ));
+                            ret!(Ok( ret_id ), Pop: 2);
                         },
                         Some(
                             Exit::Return(_, _)
                         ) => {
-                            ret!(Ok( ret_id ));
+                            ret!(Ok( ret_id ), Pop: 2);
                         },
                         Some(
                             Exit::Continue(_)
@@ -1839,6 +1799,7 @@ pub fn execute(
                         },
                         None => (),
                     }
+                    globals.pop_protected();
                 }
             }
 
@@ -1850,7 +1811,7 @@ pub fn execute(
                     match next_val {
                         Value::Function(f) => {
                             loop {
-                                let next = run_func!(Vec::<usize>::new(), &f);
+                                let next = run_func!(Vec::<ValuePos>::new(), &f);
                                 match globals.get(next).value.clone() {
                                     Value::Option(o) => match o {
                                         Some(v) => {
@@ -1864,7 +1825,7 @@ pub fn execute(
                                         found: format!("{}", other.type_str(globals)),
                                         area: globals.get(next).def_area.clone(),
                                         defs: vec![(other.type_str(globals), globals.get(next).def_area.clone())],
-                                    } ))
+                                    } ), Pop: 1)
                                 }
                             }
                         }
@@ -1894,12 +1855,12 @@ pub fn execute(
                     ) => {
                         ret_id = *v;
                         globals.exits.pop();
-                        ret!(Ok( ret_id ));
+                        ret!(Ok( ret_id ), Pop: 1);
                     },
                     Some(
                         Exit::Return(_, _)
                     ) => {
-                        ret!(Ok( ret_id ));
+                        ret!(Ok( ret_id ), Pop: 1);
                     },
                     Some(
                         Exit::Continue(_)
@@ -2037,7 +1998,7 @@ pub fn execute(
                                     val_area: area!(source.clone(), base.span),
                                     typ: v.type_str(globals),
                                 }
-                            ))
+                            ), Pop: 1)
                         }
                         let index = &args[0];
                         let index_id = execute!(index => scope_id);
@@ -2051,7 +2012,7 @@ pub fn execute(
                                         index: id,
                                         length: arr.len(),
                                         area: area!(source.clone(), start_node.span),
-                                    } ))
+                                    } ), Pop: 1)
                                 }
                             }
                             other => ret!(Err( RuntimeError::TypeMismatch {
@@ -2059,7 +2020,7 @@ pub fn execute(
                                 found: format!("{}", other.type_str(globals)),
                                 area: area!(source.clone(), index.span),
                                 defs: vec![(other.type_str(globals), globals.get(index_id).def_area.clone())],
-                            } ))
+                            } ), Pop: 1)
                         }
                     },
                     Value::Dictionary(map) => {
@@ -2072,7 +2033,7 @@ pub fn execute(
                                     val_area: area!(source.clone(), base.span),
                                     typ: v.type_str(globals),
                                 }
-                            ))
+                            ), Pop: 1)
                         }
                         let index = &args[0];
                         let index_id = execute!(index => scope_id);
@@ -2083,7 +2044,7 @@ pub fn execute(
                                     None => ret!(Err( RuntimeError::NonexistentKey {
                                         key: s.clone(),
                                         area: area!(source.clone(), start_node.span),
-                                    } ))
+                                    } ), Pop: 1)
                                 }
                             }
                             other => ret!(Err( RuntimeError::TypeMismatch {
@@ -2091,7 +2052,7 @@ pub fn execute(
                                 found: format!("{}", other.type_str(globals)),
                                 area: area!(source.clone(), index.span),
                                 defs: vec![(other.type_str(globals), globals.get(index_id).def_area.clone())],
-                            } ))
+                            } ), Pop: 1)
                         }
                     },
                     Value::Type(ValueType::Builtin(BuiltinType::Array)) => {
@@ -2117,7 +2078,7 @@ pub fn execute(
                                         found: format!("{}", other.type_str(globals)),
                                         area: area!(source.clone(), pat.span),
                                         defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
-                                    } ))
+                                    } ), Pop: 1)
                                 }
                             },
                             2 => {
@@ -2138,7 +2099,7 @@ pub fn execute(
                                         found: format!("{}", other.type_str(globals)),
                                         area: area!(source.clone(), pat.span),
                                         defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
-                                    } ))
+                                    } ), Pop: 1)
                                 };
                                 
                                 let l = match &globals.get(l_id).value.clone() {
@@ -2151,7 +2112,7 @@ pub fn execute(
                                                 labels: vec![
                                                     ("This number is smaller than 0".to_string(), area!(source.clone(), l.span))
                                                 ],
-                                            } ))
+                                            } ), Pop: 1)
                                         }
                                         id as usize
                                     }
@@ -2160,7 +2121,7 @@ pub fn execute(
                                         found: format!("{}", other.type_str(globals)),
                                         area: area!(source.clone(), l.span),
                                         defs: vec![(other.type_str(globals), globals.get(l_id).def_area.clone())],
-                                    } ))
+                                    } ), Pop: 1)
                                 };
                                 Ok( globals.insert_value(
                                     Value::Pattern(Pattern::Array(pat, Some(l))),
@@ -2175,7 +2136,7 @@ pub fn execute(
                                     val_area: area!(source.clone(), base.span),
                                     typ: format!("array type"),
                                 }
-                            ))
+                            ), Pop: 1)
                         }
                     },
                     Value::Type(ValueType::Builtin(BuiltinType::Tuple)) => {
@@ -2192,7 +2153,7 @@ pub fn execute(
                                     found: format!("{}", other.type_str(globals)),
                                     area: area!(source.clone(), pat.span),
                                     defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
-                                } ))
+                                } ), Pop: 1)
                             }
                         }
     
@@ -2221,7 +2182,7 @@ pub fn execute(
                                                     labels: vec![
                                                         ("This dict doesn't have only type or pattern values".to_string(), area!(source.clone(), dict.span))
                                                     ],
-                                                } ))
+                                                } ), Pop: 1)
                                             };
                                         }
                                         Ok( globals.insert_value(
@@ -2234,7 +2195,7 @@ pub fn execute(
                                         found: format!("{}", other.type_str(globals)),
                                         area: area!(source.clone(), dict.span),
                                         defs: vec![(other.type_str(globals), globals.get(dict_id).def_area.clone())],
-                                    } ))
+                                    } ), Pop: 1)
                                 }
                             },
                             l => ret!(Err(
@@ -2245,7 +2206,7 @@ pub fn execute(
                                     val_area: area!(source.clone(), base.span),
                                     typ: format!("dict type"),
                                 }
-                            ))
+                            ), Pop: 1)
                         }
                     },
                     other => ret!(Err( RuntimeError::TypeMismatch {
@@ -2253,7 +2214,7 @@ pub fn execute(
                         found: format!("{}", other.type_str(globals)),
                         area: area!(source.clone(), base.span),
                         defs: vec![(other.type_str(globals), globals.get(base_clone).def_area.clone())],
-                    } ))
+                    } ), Pop: 1)
                 }
             }
             
@@ -2283,7 +2244,7 @@ pub fn execute(
                             ret!(Ok( globals.insert_value(
                                 f_v,
                                 f_a
-                            ) ))
+                            ) ), Pop: 1)
                         },
                         _ => unreachable!(),
                     }
@@ -2292,22 +2253,22 @@ pub fn execute(
             match (&globals.get(base_id).value.clone(), &member.inner[..]) {
                 (Value::Dictionary(map), member) => {
                     match map.get(member) {
-                        Some(i) => ret!( Ok(*i) ),
+                        Some(i) => ret!( Ok(*i), Pop: 1 ),
                         None => ret!(Err( RuntimeError::NonexistentKey {
                             key: member.to_string(),
                             area: area!(source.clone(), start_node.span),
-                        } ))
+                        } ), Pop: 1)
                     }
                 }
                 (s @Value::StructInstance { fields, .. }, member) => {
                     match fields.get(member) {
-                        Some(i) => ret!( Ok(*i) ),
+                        Some(i) => ret!( Ok(*i), Pop: 1 ),
                         None => ret!(Err( RuntimeError::NonexistentField {
                             field: member.to_string(),
                             type_str: s.type_str(globals),
                             val_area: area!(source.clone(), base.span),
                             area: area!(source.clone(), start_node.span),
-                        } ))
+                        } ), Pop: 1)
                     }
                 }
                 _ => (),
@@ -2399,7 +2360,7 @@ pub fn execute(
                     type_str: other.type_str(globals),
                     val_area: area!(source.clone(), base.span),
                     area: member.area.clone(),
-                } )),
+                } ), Pop: 1),
             };
 
             Ok( globals.insert_value(
@@ -2408,7 +2369,6 @@ pub fn execute(
             ) )
         }
         NodeType::Return { node: ret } => {
-            // println!("{:?}", info);
             let ret_value = match ret {
                 Some(n) => execute!(n => scope_id),
                 None => globals.insert_value(
@@ -2420,7 +2380,6 @@ pub fn execute(
             Ok( clone!(ret_value => @) )
         }
         NodeType::Break { node: ret } => {
-            // println!("{:?}", info);
             let ret_value = match ret {
                 Some(n) => execute!(n => scope_id),
                 None => globals.insert_value(
@@ -2432,13 +2391,42 @@ pub fn execute(
             Ok( clone!(ret_value => @) )
         }
         NodeType::Continue => {
-            // println!("{:?}", info);
             let ret_value = globals.insert_value(
                 Value::unit(),
                 area!(source.clone(), start_node.span)
             );
             globals.exits.push( Exit::Continue(node.span) );
             Ok( clone!(ret_value => @) )
+        }
+        NodeType::Propagate { base } => {
+            let prop_value = execute!(base => scope_id);
+
+            match globals.get_method(prop_value, &format!("_try_")) {
+                Some(f) => Ok( {
+                    run_func!(vec![prop_value], &f)
+                } ),
+                None => {
+                    match &globals.get(prop_value).value.clone() {
+                        Value::Option(o) => {
+                            match o {
+                                Some(v) => {
+                                    Ok( clone!(*v => @) )
+                                },
+                                None => {
+                                    globals.exits.push( Exit::Return(prop_value, node.span) );
+                                    Ok( clone!(prop_value => @) )
+                                }
+                            }
+                        }
+                        other => ret!(Err( RuntimeError::TypeMismatch {
+                            expected: "option".to_string(),
+                            found: format!("{}", other.type_str(globals)),
+                            area: area!(source, base.span),
+                            defs: vec![(other.type_str(globals), area!(source, base.span))],
+                        } ), Pop: 1)
+                    }
+                },
+            }
         }
         NodeType::StructDef { struct_name, fields, field_areas, def_area } => {
             let type_id = globals.new_struct( CustomStruct {
@@ -2491,7 +2479,7 @@ pub fn execute(
             let base_id = protecute!(base => scope_id);
             match &globals.get(base_id).value.clone() {
                 Value::Type(ValueType::CustomStruct(id)) => {
-                    let struct_type = globals.custom_structs.map[id].clone();
+                    let struct_type = globals.custom_structs[*id].clone();
 
                     let mut id_map = FnvHashMap::default();
 
@@ -2507,7 +2495,7 @@ pub fn execute(
                                 field_name: k.clone(),
                                 used: field_areas[k].clone(),
                                 struct_def: struct_type.def_area.clone(),
-                            } ))
+                            } ), Pop: 1)
                         }
                         let id = protecute!(v => scope_id);
                         id_map.insert( k.clone(), id );
@@ -2525,7 +2513,7 @@ pub fn execute(
                                 },
                                 pattern_area: area!(source.clone(), struct_type.fields[k].0.span),
                                 type_area: globals.get(*v).def_area.clone(),
-                            } ))
+                            } ), Pop: 1)
                         }
                     }
                     if id_map.len() != struct_type.fields.len() {
@@ -2537,7 +2525,7 @@ pub fn execute(
                             fields: missing,
                             area: area!(source.clone(), start_node.span),
                             struct_def: struct_type.def_area.clone(),
-                        } ))
+                        } ), Pop: 1)
                     }
                     Ok( globals.insert_value(
                         Value::StructInstance { struct_id: *id, fields: id_map },
@@ -2546,7 +2534,7 @@ pub fn execute(
                 },
                 _ => ret!(Err( RuntimeError::InstanceNonStruct {
                     area: area!(source.clone(), base.span),
-                } ))
+                } ), Pop: 1)
             }
         }
         NodeType::EnumInstance {
@@ -2558,14 +2546,14 @@ pub fn execute(
             let base_id = protecute!(base => scope_id);
             match &globals.get(base_id).value.clone() {
                 Value::Type(ValueType::CustomEnum(id)) => {
-                    let enum_type = globals.custom_enums.map[id].clone();
+                    let enum_type = globals.custom_enums[*id].clone();
 
                     if !enum_type.variants.contains_key(variant_name) {
                         ret!(Err( RuntimeError::NonexistentVariant {
                             variant_name: variant_name.clone(),
                             used: variant_area.clone(),
                             enum_def: enum_type.def_area.clone(),
-                        } ))
+                        } ), Pop: 1)
                     }
 
                     match variant {
@@ -2577,14 +2565,14 @@ pub fn execute(
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
-                                } )),
+                                } ), Pop: 1),
                                 VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
                                     expected: format!("struct"),
                                     found: format!("unit"),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
-                                } )),
+                                } ), Pop: 1),
                                 VariantType::Unit => {
                                     Ok( globals.insert_value(
                                         Value::EnumInstance {
@@ -2605,14 +2593,14 @@ pub fn execute(
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
-                                } )),
+                                } ), Pop: 1),
                                 VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
                                     expected: format!("struct"),
                                     found: format!("tuple"),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
-                                } )),
+                                } ), Pop: 1),
                                 VariantType::Tuple(types) => {
 
                                     if types.len() != values.len() {
@@ -2622,7 +2610,7 @@ pub fn execute(
                                             variant_name: variant_name.clone(),
                                             used: area!(source.clone(), start_node.span),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } ))
+                                        } ), Pop: 1)
                                     }
 
                                     let mut elems = vec![];
@@ -2642,7 +2630,7 @@ pub fn execute(
                                                 },
                                                 pattern_area: area!(source.clone(), t.span),
                                                 type_area: globals.get(value_id).def_area.clone(),
-                                            } ))
+                                            } ), Pop: 1)
                                         }
 
                                         elems.push(value_id);
@@ -2670,17 +2658,16 @@ pub fn execute(
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
-                                } )),
+                                } ), Pop: 1),
                                 VariantType::Unit { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
                                     expected: format!("unit"),
                                     found: format!("struct"),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
-                                } )),
+                                } ), Pop: 1),
                                 VariantType::Struct {
-                                    fields: field_types,
-                                    field_areas: field_type_areas,
+                                    fields: field_types, ..
                                 } => {
                                     let mut id_map = FnvHashMap::default();
 
@@ -2691,7 +2678,7 @@ pub fn execute(
                                                 field_name: k.clone(),
                                                 used: field_areas[k].clone(),
                                                 variant_def: enum_type.variant_areas[variant_name].clone(),
-                                            } ))
+                                            } ), Pop: 1)
                                         }
                                         let id = protecute!(v => scope_id);
                                         id_map.insert( k.clone(), id );
@@ -2710,7 +2697,7 @@ pub fn execute(
                                                 },
                                                 pattern_area: area!(source.clone(), field_types[k].span),
                                                 type_area: globals.get(*v).def_area.clone(),
-                                            } ))
+                                            } ), Pop: 1)
                                         }
                                     }
                                     if id_map.len() != field_types.len() {
@@ -2723,7 +2710,7 @@ pub fn execute(
                                             variant_name: variant_name.clone(),
                                             area: area!(source.clone(), start_node.span),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
-                                        } ))
+                                        } ), Pop: 1)
                                     }
                                     Ok( globals.insert_value(
                                         Value::EnumInstance {
@@ -2740,7 +2727,7 @@ pub fn execute(
                 },
                 _ => ret!(Err( RuntimeError::InstanceNonEnum {
                     area: area!(source.clone(), base.span),
-                } ))
+                } ), Pop: 1)
             }
         }
         NodeType::Impl { type_var: (name, name_area), fields } => {
@@ -2824,7 +2811,7 @@ pub fn execute(
                                 ret!(Ok(globals.insert_value(
                                     Value::unit(),
                                     area!(source.clone(), start_node.span)
-                                )))
+                                )), Pop: 1)
                             },
                             other => {
                                 let temp = globals.get(*id).def_area.clone();
@@ -2833,7 +2820,7 @@ pub fn execute(
                                     found: format!("{}", other.type_str(globals)),
                                     area: name_area.clone(),
                                     defs: vec![(other.type_str(globals), temp)],
-                                } ))
+                                } ), Pop: 1)
                             }
                         }
                     },
@@ -2871,7 +2858,7 @@ pub fn execute(
                                 None => ret!(Err( RuntimeError::NoAssociatedMember {
                                     assoc: assoc.clone(),
                                     area: area!(source.clone(), start_node.span),
-                                } ))
+                                } ), Pop: 1)
                             }
                         }
                     }
@@ -2881,7 +2868,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
-                } ))
+                } ), Pop: 1)
             }
         },
         NodeType::Import { path, cached } => {
@@ -2890,7 +2877,7 @@ pub fn execute(
             match &source {
                 EmeraldSource::String(_) => ret!(Err( RuntimeError::CantImportInEval {
                     import_area: area!(source.clone(), start_node.span),
-                } )),
+                } ), Pop: 1),
                 EmeraldSource::File(f) => {
                     buf = f.clone();
                 },
@@ -2901,7 +2888,6 @@ pub fn execute(
 
 
             if *cached {
-                // println!("{:?} {:#?}", buf, globals.import_caches);
                 match globals.import_caches.get(&buf) {
                     Some(cache) => {
                         let ret_value = Value::Dictionary( cache.clone() );
@@ -2909,7 +2895,7 @@ pub fn execute(
                         ret!( Ok(globals.insert_value(
                             ret_value,
                             area!(source.clone(), start_node.span),
-                        )) );
+                        )), Pop: 1 );
                     },
                     None => (),
                 }
@@ -2920,7 +2906,7 @@ pub fn execute(
                 Err(_) => ret!(Err( RuntimeError::NonexistentFile {
                     path: path.clone(),
                     area: area!(source.clone(), start_node.span),
-                } )),
+                } ), Pop: 1),
             };
 
             let mut tokens_iter = lexer::Token
@@ -2942,8 +2928,6 @@ pub fn execute(
                 lexer::Token::Eof,
                 (code.len(), code.len())
             ));
-
-            // println!("{:?}", tokens);
 
             let mod_source = EmeraldSource::File(buf.clone());
             let ast = crate::parser::parse(&tokens, &mod_source);
@@ -2986,15 +2970,13 @@ pub fn execute(
                     ret!(Err( RuntimeError::ErrorParsingImport {
                         import_area: area!(source.clone(), start_node.span),
                         error: e,
-                    } ))
+                    } ), Pop: 1)
                 },
             }
 
         },
         NodeType::Export { name, value } => {
-            // println!("a: {:?}", globals.get_scope(scope_id).vars);
             let val = execute!(value => scope_id);
-            // println!("b: {:?}", globals.get_scope(scope_id).vars);
             globals.exports.last_mut().unwrap().insert(name.clone(), val);
             Ok( val )
         },
@@ -3012,7 +2994,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), value.span),
                     defs: vec![(other.type_str(globals), globals.get(val).def_area.clone())],
-                } ))
+                } ), Pop: 1)
             }
             Ok( clone!(val => @) )
         },
@@ -3047,7 +3029,6 @@ pub fn execute(
                         ),
                         
                         Value::Function( f @ Function { args: params, self_arg, header_area, ..} ) => {
-                            // println!("1 {:?}", args);
         
         
                             let mut args = args.clone();
@@ -3063,7 +3044,7 @@ pub fn execute(
                                         header_area: header_area.clone(),
                                         call_area: area!(source.clone(), start_node.span)
                                     }
-                                ))
+                                ), Pop: 1)
                             }
         
                             let mut counter = 0;
@@ -3080,7 +3061,7 @@ pub fn execute(
                                                 arg_name: s.inner.clone(),
                                                 call_area: area!(source.clone(), start_node.span)
                                             }
-                                        ))
+                                        ), Pop: 1)
                                     }
                                 } else {
                                     let arg = &args[counter];
@@ -3091,16 +3072,6 @@ pub fn execute(
                             }
         
         
-                            // let mut arg_ids = vec![];
-                            // for (arg, (Located {inner, ..}, ..)) in args.iter().zip(params) {
-                            //     let arg_id = if inner == "self" { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) };
-                            //     // if name != "self" {
-                            //     //     arg_id = proteclone!(arg_id => a.clone());
-                            //     // }
-                            //     arg_ids.push( arg_id );
-                            // }
-                            // println!("3 {:?}", arg_ids.iter().map(|id| globals.get(*id).value.clone()).collect::<Vec<Value>>());
-                            
                             Ok( run_func!(arg_ids, f) )
                         },
         
@@ -3111,7 +3082,7 @@ pub fn execute(
                                         provided: args.len(),
                                         call_area: area!(source.clone(), start_node.span)
                                     }
-                                ))
+                                ), Pop: 1)
                             }
                             let arg_id = execute!(&args[0] => scope_id);
                             let result = value_ops::convert(&globals.get(arg_id).clone(), &globals.get(base_clone).clone(), area!(source.clone(), node.span), globals)?;
@@ -3125,7 +3096,7 @@ pub fn execute(
                             found: format!("{}", other.type_str(globals)),
                             area: area!(source.clone(), base.span),
                             defs: vec![(other.type_str(globals), globals.get(base_clone).def_area.clone())],
-                        } ))
+                        } ), Pop: 1)
                     }
                 },
             }
@@ -3172,7 +3143,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
-                } ))
+                } ), Pop: 1)
             }
 
 
@@ -3193,7 +3164,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), x.get_inner().span),
                     defs: vec![(other.type_str(globals), globals.get(x_val_id).def_area.clone())],
-                } )),
+                } ), Pop: 1),
             }
             let y_val_id = execute!(y.get_inner() => scope_id); let y_val =  globals.get(y_val_id).value.clone();
             match y_val {
@@ -3203,7 +3174,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), y.get_inner().span),
                     defs: vec![(other.type_str(globals), globals.get(y_val_id).def_area.clone())],
-                } )),
+                } ), Pop: 1),
             }
             let z_val_id = execute!(z.get_inner() => scope_id); let z_val =  globals.get(z_val_id).value.clone();
             match z_val {
@@ -3213,7 +3184,7 @@ pub fn execute(
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), z.get_inner().span),
                     defs: vec![(other.type_str(globals), globals.get(z_val_id).def_area.clone())],
-                } )),
+                } ), Pop: 1),
             }
 
             let val_id = match rot {
@@ -3237,7 +3208,7 @@ pub fn execute(
                             found: format!("{}", other.type_str(globals)),
                             area: area!(source.clone(), h.get_inner().span),
                             defs: vec![(other.type_str(globals), globals.get(h_val_id).def_area.clone())],
-                        } )),
+                        } ), Pop: 1),
                     }
                     let v_val_id = execute!(v.get_inner() => scope_id); let v_val =  globals.get(v_val_id).value.clone();
                     match v_val {
@@ -3247,7 +3218,7 @@ pub fn execute(
                             found: format!("{}", other.type_str(globals)),
                             area: area!(source.clone(), v.get_inner().span),
                             defs: vec![(other.type_str(globals), globals.get(v_val_id).def_area.clone())],
-                        } )),
+                        } ), Pop: 1),
                     }
                     globals.insert_value(
                         Value::McVector(McVector::WithRot(
@@ -3287,13 +3258,13 @@ pub fn execute(
                 Value::String(s) => ret!(Err( RuntimeError::Throw {
                     area: area!(source.clone(), start_node.span),
                     msg: s.clone(),
-                } )),
+                } ), Pop: 1),
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "string".to_string(),
                     found: format!("{}", other.type_str(globals)),
                     area: area!(source.clone(), msg.span),
                     defs: vec![(other.type_str(globals), globals.get(msg_val_id).def_area.clone())],
-                } )),
+                } ), Pop: 1),
             }
         }
         NodeType::ListComp { expr, sources, cond } => {
@@ -3301,7 +3272,7 @@ pub fn execute(
             #[derive(Clone, Debug)]
             enum IterType {
                 Regular(ValueIter),
-                Custom(Function, usize),
+                Custom(Function, ValuePos),
             }
             
 
@@ -3323,7 +3294,7 @@ pub fn execute(
             }
 
             let mut v_vec: Vec<Value> = vec![];
-            let mut result_vec: Vec<usize> = vec![];
+            let mut result_vec: Vec<ValuePos> = vec![];
 
             fn comp(
                 expr: &ASTNode,
@@ -3334,13 +3305,14 @@ pub fn execute(
                 source: &EmeraldSource,
                 idx: usize,
                 v_vec: &mut Vec<Value>,
-                result_vec: &mut Vec<usize>,
+                result_vec: &mut Vec<ValuePos>,
                 start_node: &ASTNode,
             ) -> Result<(), RuntimeError> {
                 let is_last = idx == iters.len() - 1;
 
                 macro_rules! for_loop {
                     ($i:expr) => {
+                        globals.push_protected();
                         v_vec.push($i);
                         if is_last {
                             let derived = globals.derive_scope(base_scope, globals.get_scope(base_scope).func_id);
@@ -3410,6 +3382,7 @@ pub fn execute(
                             )?
                         }
                         v_vec.pop();
+                        globals.pop_protected();
                     }
                 }
 
