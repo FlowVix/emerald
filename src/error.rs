@@ -806,7 +806,7 @@ impl ToReport for RuntimeError {
                 message: format!("Pattern mismatch"),
                 labels: vec![
                     (pattern_area.clone(), format!("Pattern defined as {} here", pattern.fg(colors.next()))),
-                    (type_area.clone(), format!("Value defined as {} here", typ.fg(colors.next()))),
+                    (type_area.clone(), format!("This {} is not {}", typ.fg(colors.next()), pattern.fg(colors.next()))),
                     // (area2.clone(), format!("Conversion type {} here", type2.fg(colors.next()))),
                 ],
                 note: None,

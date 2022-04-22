@@ -233,7 +233,7 @@ impl HashMap {
 
     map: (
         self,
-        cb: function | tuple[function, function],
+        cb: (_) -> _ | tuple[(_) -> _, (_) -> _],
         apply_type: HashMapApply = HashMapApply:Values,
         in_place: bool = false,
     ) => {
@@ -253,7 +253,7 @@ impl HashMap {
 
     filter: (
         self,
-        cb: function | tuple[function, function],
+        cb: (_) -> bool | tuple[(_) -> bool, (_) -> bool],
         apply_type: HashMapApply = HashMapApply:Values,
         in_place: bool = false,
     ) => {
@@ -275,7 +275,7 @@ impl HashMap {
 
     any: (
         self,
-        cb: function | tuple[function, function],
+        cb: (_) -> bool | tuple[(_) -> bool, (_) -> bool],
         apply_type: HashMapApply = HashMapApply:Values,
     ) => {
         let new_map = HashMap::new();
@@ -293,7 +293,7 @@ impl HashMap {
 
     all: (
         self,
-        cb: function | tuple[function, function],
+        cb: (_) -> bool | tuple[(_) -> bool, (_) -> bool],
         apply_type: HashMapApply = HashMapApply:Values,
     ) => {
         let new_map = HashMap::new();

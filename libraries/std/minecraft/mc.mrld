@@ -65,19 +65,19 @@ impl MC {
         }
         command('tellraw @a {"nbt":"str_' + string(out_str.id) + '","storage":"mrld","interpret":true}');
     },
-    while_loop: (cond: function, f: mc_func) => {
+    while_loop: (cond: () -> RuntimeCondition, f: mc_func) => {
         cond().then(!{
             f!;
             cond().then($);
         });
     },
-    do_while_loop: (cond: function, f: mc_func) => {
+    do_while_loop: (cond: () -> RuntimeCondition, f: mc_func) => {
         !{
             f!;
             cond().then($);
         }!;
     },
-    for_loop: (r: range | ScoreRange, f: function) => {
+    for_loop: (r: range | ScoreRange, f: (MCInt) -> _) => {
         let i = MCInt::new(0);
         i = r.start;
         (i < r.end).then(!{

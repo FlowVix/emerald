@@ -160,7 +160,7 @@ impl MCInt {
         }
     },
 
-    to_const: (self, r: range, f: function) => {
+    to_const: (self, r: range, f: (number) -> _) => {
         let score = self.clone();
         for i of r {
             (score == i).then(!{f(i);});

@@ -1,34 +1,9 @@
 
 
-enum Data {
-    Good(_),
-    Bad(_),
-}
 
-impl Data {
-    _try_: (self) => match self {
-        case Data:Good(g) -> g,
-        case Data:Bad(b) -> return return Data:Bad(b),
-    }
-}
+extract import? "libraries/std/lib.mrld";
 
 
-func lol(v: number | string) {
-    return match v {
-        number -> Data:Good(v),
-        string -> Data:Bad(v),
-    }
-}
 
-func gaga() {
 
-    let a = lol(3)?;
-    print("a: ", a);
-
-    let b = lol("sa")?;
-    print("b: ", b);
-
-}
-
-print(gaga());
 

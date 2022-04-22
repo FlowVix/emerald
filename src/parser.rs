@@ -2,7 +2,7 @@ use std::hash::Hash;
 
 use fnv::FnvHashMap;
 
-use crate::{CodeArea, lexer::{Token, SelectorType}, value::{Value, CoordType, Range}, interpreter::{Globals}, error::{SyntaxError, RuntimeError}, EmeraldSource};
+use crate::{CodeArea, lexer::{Token, SelectorType}, value::{Value, CoordType, Range, FuncArg}, interpreter::{Globals}, error::{SyntaxError, RuntimeError}, EmeraldSource};
 
 
 
@@ -60,8 +60,22 @@ pub enum NodeType {
     For { left: Box<ASTNode>, iter: Box<ASTNode>, code: Box<ASTNode> },
     Loop { code: Box<ASTNode> },
     Call { base: Box<ASTNode>, args: Vec<ASTNode>, args_area: CodeArea },
-    FuncDef { func_name: String, args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)>, header_area: CodeArea, code: Box<ASTNode> },
-    Lambda { args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)>, header_area: CodeArea, code: Box<ASTNode> },
+
+    FuncDef {
+        func_name: String,
+        args: Vec<FuncArg<ASTNode, ASTNode>>,
+        header_area: CodeArea,
+        code: Box<ASTNode>,
+        ret_pattern: Option<Box<ASTNode>>,
+    },
+    Lambda {
+        args: Vec<FuncArg<ASTNode, ASTNode>>,
+        header_area: CodeArea,
+        code: Box<ASTNode>,
+        ret_pattern: Option<Box<ASTNode>>,
+    },
+    FuncPattern { args: Vec<ASTNode>, ret_pattern: Box<ASTNode> },
+
     Array { elements: Vec<ASTNode> },
     Tuple { elements: Vec<ASTNode> },
     Index { base: Box<ASTNode>, args: Vec<ASTNode>, args_area: CodeArea },
@@ -560,433 +574,157 @@ operators!(
 // }
 
 
+macro_rules! unit_parse_helper {
+    {
 
-pub fn parse_unit(
-    tokens: &Tokens,
-    mut pos: usize,
-    info: &ParseInfo,
-) -> Result<(ASTNode, usize), SyntaxError> {
-    parse_util!(tokens, pos, info);
+        ($tokens:ident, $pos:ident, $info:ident, $start:ident, $unary_op:ident);
 
-    let start = span!(0);
-    match tok!(0) {
-        Token::Num(n) => {
-            pos += 1;
-            ret!( NodeType::Value { value: Value::Number(*n) } => start );
-        },
-        Token::String(s) => {
-            pos += 1;
-            ret!( NodeType::Value { value: Value::String(s.clone()) } => start );
-        },
-        Token::True => {
-            pos += 1;
-            ret!( NodeType::Value { value: Value::Boolean(true) } => start );
-        },
-        Token::False => {
-            pos += 1;
-            ret!( NodeType::Value { value: Value::Boolean(false) } => start );
-        },
-        Token::Hash => {
-            pos += 1;
+        $(
+            [$t:pat] => $b:block,
+        )+
+
+        !Unary $unary:block
+
+        !else $else:block
+    } => {
+        pub fn parse_unit(
+            $tokens: &Tokens,
+            mut $pos: usize,
+            $info: &ParseInfo,
+        ) -> Result<(ASTNode, usize), SyntaxError> {
+            parse_util!($tokens, $pos, $info);
+            let $start = span!(0);
+
             match tok!(0) {
-                Token::LParen => {
-                    pos += 1;
-                    parse!(parse_expr(true) => let inner);
-                    check_tok!(RParen else ")");
-                    ret!( NodeType::Option { inner: Some(Box::new(inner)) } => start.0, span!(-1).1 );
-                },
-                Token::LSqBracket => {
-                    pos += 1;
-                    parse!(parse_expr(true) => let pattern);
-                    check_tok!(RSqBracket else "]");
-                    ret!( NodeType::OptionPattern { pattern: Box::new(pattern) } => start.0, span!(-1).1 );
-                }
-                _ => ret!( NodeType::Option { inner: None } => start.0, span!(-1).1 ),
+                $(
+                    $t => $b,
+                )+
+                $unary_op if is_unary($unary_op) => $unary,
+                _ => $else,
             }
-        },
-        Token::LParen => {
-            pos += 1;
+        }
+        #[allow(dead_code)]
+        pub fn can_be_expr(token: &Token) -> bool {
+            #[allow(unused_variables)]
+            match token {
+                $(
+                    $t => true,
+                )+
+                _ => false,
+            }
+        }
 
+    }
+}
 
-            if matches!(tok!(0), Token::RParen) && !matches!(tok!(1), Token::FatArrow) {
+unit_parse_helper!{
+
+    (tokens, pos, info, start, unary_op);
+
+    [Token::Num(n)] => {
+        pos += 1;
+        ret!( NodeType::Value { value: Value::Number(*n) } => start );
+    },
+    [Token::String(s)] => {
+        pos += 1;
+        ret!( NodeType::Value { value: Value::String(s.clone()) } => start );
+    },
+    [Token::True] => {
+        pos += 1;
+        ret!( NodeType::Value { value: Value::Boolean(true) } => start );
+    },
+    [Token::False] => {
+        pos += 1;
+        ret!( NodeType::Value { value: Value::Boolean(false) } => start );
+    },
+    [Token::Hash] => {
+        pos += 1;
+        match tok!(0) {
+            Token::LParen => {
                 pos += 1;
-                ret!( NodeType::Tuple { elements: vec![] } => start.0, span!(-1).1 );
+                parse!(parse_expr(true) => let inner);
+                check_tok!(RParen else ")");
+                ret!( NodeType::Option { inner: Some(Box::new(inner)) } => start.0, span!(-1).1 );
+            },
+            Token::LSqBracket => {
+                pos += 1;
+                parse!(parse_expr(true) => let pattern);
+                check_tok!(RSqBracket else "]");
+                ret!( NodeType::OptionPattern { pattern: Box::new(pattern) } => start.0, span!(-1).1 );
             }
+            _ => ret!( NodeType::Option { inner: None } => start.0, span!(-1).1 ),
+        }
+    },
+    [Token::LParen] => {
+        pos += 1;
 
-            let mut i = 0;
-            let mut depth = 1;
 
-            loop {
-                match tok!(i) {
-                    Token::LParen => depth += 1,
-                    Token::RParen => { depth -= 1; if depth == 0 {i += 1; break;} },
-                    Token::Eof => return Err( SyntaxError::UnmatchedChar {
-                        for_char: "(".to_string(),
-                        not_found: ")".to_string(),
-                        area: CodeArea {
-                            source: info.source.clone(),
-                            range: start,
-                        }
-                    } ),
-                    _ => (),
-                }
-                i += 1;
-            }
+        if matches!(tok!(0), Token::RParen) && !matches!(tok!(1), Token::FatArrow) && !matches!(tok!(1), Token::Arrow) {
+            pos += 1;
+            ret!( NodeType::Tuple { elements: vec![] } => start.0, span!(-1).1 );
+        }
 
+        let mut i = 0;
+        let mut depth = 1;
+
+        loop {
             match tok!(i) {
-                Token::FatArrow => {
-                    let header_start = span!(-1).0;
+                Token::LParen => depth += 1,
+                Token::RParen => { depth -= 1; if depth == 0 {i += 1; break;} },
+                Token::Eof => return Err( SyntaxError::UnmatchedChar {
+                    for_char: "(".to_string(),
+                    not_found: ")".to_string(),
+                    area: CodeArea {
+                        source: info.source.clone(),
+                        range: start,
+                    }
+                } ),
+                _ => (),
+            }
+            i += 1;
+        }
 
-                    let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)> = vec![];
+        let is_pattern;
+
+        match tok!(i) {
+            Token::FatArrow => is_pattern = false,
+            Token::Arrow => {
+                let prev_pos = pos;
+                pos += i as usize + 1;
+                parse!(parse_expr(true) => let __);
+
+                is_pattern = !can_be_expr(tok!(0));
+                pos = prev_pos;
+            },
+            _ => {
+                parse!(parse_expr(false) => let value);
+
+                if_tok!(== Comma: {
+                    pos += 1;
+
+                    let mut elements = vec![value];
                     while_tok!(!= RParen: {
-                        let mut is_ref = false;
-                        if_tok!(== Ampersand: {
-                            pos += 1;
-                            is_ref = true;
-                        });
-                        check_tok!(Ident(arg_name) else "argument name");
-                        let arg_area = CodeArea {
-                            source: info.source.clone(),
-                            range: span!(-1),
-                        };
-                        if let Some(id) = args.iter().position(|(Located {inner, ..}, ..)| inner == &arg_name) {
-                            return Err( SyntaxError::DuplicateArg {
-                                arg_name,
-                                first_used: args[id].0.area.clone(),
-                                used_again: arg_area,
-                            } )
-                        }
-                        if arg_name == "self" && !args.is_empty() {
-                            return Err( SyntaxError::SelfNotFirstArg {
-                                area: arg_area,
-                            } )
-                        }
-                        let mut pat = None;
-                        if_tok!(== Colon: {
-                            pos += 1;
-                            parse!(parse_expr(true) => let temp); pat = Some(temp);
-                        });
-                        let mut default = None;
-                        if_tok!(== Assign: {
-                            pos += 1;
-                            parse!(parse_expr(true) => let temp); default = Some(temp);
-                        });
-                        args.push((Located::from(arg_name, arg_area), pat, default, is_ref));
+                        parse!(parse_expr(false) => let elem);
+                        elements.push( elem );
                         if !matches!(tok!(0), Token::RParen | Token::Comma) {
                             expected_err!(") or ,", tok!(0), span!(0), info )
                         }
                         skip_tok!(Comma);
                     });
-                    let header_end = span!(-1).1;
-                    let header_area = CodeArea {
-                        source: info.source.clone(),
-                        range: (header_start, header_end),
-                    };
-                    pos += 1;
-                    parse!(parse_expr(false) => let code);
-                    ret!( NodeType::Lambda { args, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
-                },
-                _ => {
-                    parse!(parse_expr(false) => let value);
-
-                    if_tok!(== Comma: {
-                        pos += 1;
-
-                        let mut elements = vec![value];
-                        while_tok!(!= RParen: {
-                            parse!(parse_expr(false) => let elem);
-                            elements.push( elem );
-                            if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                                expected_err!(") or ,", tok!(0), span!(0), info )
-                            }
-                            skip_tok!(Comma);
-                        });
-                        ret!( NodeType::Tuple {
-                            elements,
-                        } => start.0, span!(-1).1 )
-                    });
-
-                    check_tok!(RParen else ")");
-                    ret!( value.node => start.0, span!(-1).1 );
-                }
-            }
-
-
-        }
-        Token::Let => {
-            pos += 1;
-            parse!(parse_expr(true) => let left);
-            check_tok!(Assign else "=");
-            parse!(parse_expr(false) => let right);
-            ret!( NodeType::Declaration { left: Box::new(left), right: Box::new(right) } => start.0, span!(-1).1 );
-        }
-        Token::Ident(name) => {
-            pos += 1;
-
-            match tok!(0) {
-                Token::FatArrow => {
-                    pos += 1;
-                    let arg_area = CodeArea {
-                        source: info.source.clone(),
-                        range: start,
-                    };
-                    parse!(parse_expr(false) => let code);
-                    ret!( NodeType::Lambda { args: vec![(Located::from(name.to_string(), arg_area.clone()), None, None, false)], header_area: arg_area, code: Box::new(code) } => start.0, span!(-1).1 );
-                }
-                _ => (),
-            }
-
-            ret!( NodeType::Var { var_name: name.clone() } => start );
-        }
-        Token::FatArrow => {
-            pos += 1;
-            let header_area = CodeArea {
-                source: info.source.clone(),
-                range: start,
-            };
-            parse!(parse_expr(false) => let code);
-            ret!( NodeType::Lambda { args: vec![], header_area, code: Box::new(code) } => start.0, span!(-1).1 );
-        }
-        Token::LBracket => {
-            pos += 1;
-
-            if matches!(tok!(0), Token::RBracket) {
-                pos += 1;
-                ret!( NodeType::Dictionary {map: FnvHashMap::default()} => start );
-            }
-
-            if matches!(tok!(0), Token::Ident(_)) && matches!(tok!(1), Token::Colon | Token::Comma | Token::RBracket) {
-                let mut map = FnvHashMap::default();
-                let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
-                while_tok!(!= RBracket: {
-                    check_tok!(Ident(key) else "key name");
-                    let last_area = CodeArea {
-                        source: info.source.clone(),
-                        range: span!(-1),
-                    };
-                    if map.contains_key(&key) {
-                        return Err( SyntaxError::DuplicateKey {
-                            first_used: areas[&key].clone(),
-                            key_name: key,
-                            used_again: last_area,
-                        } )
-                    }
-                    areas.insert(key.clone(), last_area);
-                    let mut value = ASTNode {
-                        node: NodeType::Var {
-                            var_name: key.clone(),
-                        },
-                        span: span!(-1),
-                    };
-                    if_tok!(== Colon: {
-                        pos += 1;
-                        parse!(parse_expr(false) => value);
-                    });
-
-                    map.insert(key, value);
-                    if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                        expected_err!("} or ,", tok!(0), span!(0), info )
-                    }
-                    skip_tok!(Comma);
-                });
-                ret!( NodeType::Dictionary {map} => start.0, span!(-1).1 );
-            } else {
-                parse!(parse_statements => let statements);
-                check_tok!(RBracket else "}");
-                ret!( NodeType::Block { code: Box::new(statements), typ: BlockType::Regular {not_safe: false} } => start.0, span!(-1).1 );
-            }
-
-        }
-        Token::ExcLBracket => {
-            pos += 1;
-            parse!(parse_statements => let statements);
-            check_tok!(RBracket else "}");
-            ret!( NodeType::Block { code: Box::new(statements), typ: BlockType::McFunc } => start.0, span!(-1).1 );
-        }
-        Token::Impl => {
-            pos += 1;
-            check_tok!(Ident(type_var) else "type to impl on");
-            let type_var_area = CodeArea {
-                source: info.source.clone(),
-                range: span!(-1),
-            };
-            check_tok!(LBracket else "{");
-
-            let mut field_names = vec![];
-            let mut fields = vec![];
-            let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
-            while_tok!(!= RBracket: {
-                check_tok!(Ident(field) else "field name");
-                let last_area = CodeArea {
-                    source: info.source.clone(),
-                    range: span!(-1),
-                };
-                if field_names.contains(&field) {
-                    return Err( SyntaxError::DuplicateFieldImpl {
-                        first_used: areas[&field].clone(),
-                        field_name: field,
-                        used_again: last_area,
-                    } )
-                }
-                areas.insert(field.clone(), last_area);
-                check_tok!(Colon else ":");
-
-                parse!(parse_expr(false) => let value);
-
-                field_names.push(field.clone());
-                fields.push((field, value));
-                if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                    expected_err!("} or ,", tok!(0), span!(0), info )
-                }
-                skip_tok!(Comma);
-            });
-            ret!( NodeType::Impl {type_var: (type_var, type_var_area), fields} => start );
-            
-
-        }
-        Token::LSqBracket => {
-            pos += 1;
-
-
-            match tok!(0) {
-                Token::RSqBracket => {
-                    pos += 1;
-                    ret!( NodeType::Array { elements: vec![] } => start.0, span!(-1).1 )
-                }
-                _ => {
-                    parse!(parse_expr(false) => let first_elem);
-                    match tok!(0) {
-                        Token::RSqBracket => {
-                            pos += 1;
-                            let elements = vec![first_elem];
-                            ret!( NodeType::Array {
-                                elements,
-                            } => start.0, span!(-1).1 )
-                        }
-                        Token::Comma => {
-                            pos += 1;
-                            let mut elements = vec![first_elem];
-                            while_tok!(!= RSqBracket: {
-                                parse!(parse_expr(false) => let elem);
-                                elements.push( elem );
-                                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                                    expected_err!("] or ,", tok!(0), span!(0), info )
-                                }
-                                skip_tok!(Comma);
-                            });
-                            ret!( NodeType::Array {
-                                elements,
-                            } => start.0, span!(-1).1 )
-                        }
-                        Token::For => {
-                            let mut sources = vec![];
-                            pos += 1;
-                            loop {
-                                parse!(parse_expr(true) => let expr);
-                                check_tok!(Of else "of");
-                                parse!(parse_expr(false) => let iter);
-                                sources.push((expr, iter));
-                                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                                    expected_err!("] or ,", tok!(0), span!(0), info )
-                                }
-                                skip_tok!(Comma);
-                                if matches!(tok!(0), Token::RSqBracket | Token::If) { break }
-                            }
-                            match tok!(0) {
-                                Token::RSqBracket => {
-                                    pos += 1;
-                                    ret!( NodeType::ListComp {
-                                        expr: Box::new(first_elem),
-                                        sources,
-                                        cond: None,
-                                    } => start.0, span!(-1).1 );
-                                }
-                                Token::If => {
-                                    pos += 1;
-                                    parse!(parse_expr(false) => let cond);
-                                    check_tok!(RSqBracket else "]");
-                                    ret!( NodeType::ListComp {
-                                        expr:  Box::new(first_elem),
-                                        sources,
-                                        cond: Some(Box::new(cond)),
-                                    } => start.0, span!(-1).1 );
-                                }
-                                _ => unreachable!(),
-                            }
-                        },
-                        _ => expected_err!("], for, or ,", tok!(0), span!(0), info )
-                    }
-                }
-            }
-        }
-        Token::If => {
-            pos += 1;
-            parse!(parse_expr(false) => let cond);
-            parse!(parse_expr(false) => let code);
-            let mut else_branch = None;
-            if_tok!(== Else: {
-                pos += 1;
-                parse!(parse_expr(false) => let temp); else_branch = Some(Box::new(temp));
-            });
-            ret!( NodeType::If { cond: Box::new(cond), code: Box::new(code), else_branch  } => start.0, span!(-1).1 );
-        }
-        Token::Match => {
-            pos += 1;
-            parse!(parse_expr(false) => let value);
-            check_tok!(LBracket else "{");
-
-            let mut arms = vec![];
-            while_tok!(!= RBracket: {
-
-                let arm;
-                if_tok!(== Case: {
-                    pos += 1;
-                    parse!(parse_expr(false) => let check);
-                    arm = MatchArm::Structure(check);
-                } else {
-                    parse!(parse_expr(false) => let check);
-                    arm = MatchArm::Pattern(check);
+                    ret!( NodeType::Tuple {
+                        elements,
+                    } => start.0, span!(-1).1 )
                 });
 
-                check_tok!(Arrow else "->");
-                parse!(parse_expr(false) => let expr);
+                check_tok!(RParen else ")");
+                ret!( value.node => start.0, span!(-1).1 );
+            }
+        }
 
-                arms.push( (arm, expr) );
-                if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                    expected_err!("} or ,", tok!(0), span!(0), info )
-                }
-                skip_tok!(Comma);
-            });
-
-
-            ret!( NodeType::Match { value: Box::new(value), arms  } => start.0, span!(-1).1 );
-        }
-        Token::While => {
-            pos += 1;
-            parse!(parse_expr(false) => let cond);
-            parse!(parse_expr(false) => let code);
-            ret!( NodeType::While { cond: Box::new(cond), code: Box::new(code) } => start.0, span!(-1).1 );
-        }
-        Token::Loop => {
-            pos += 1;
-            parse!(parse_expr(false) => let code);
-            ret!( NodeType::Loop { code: Box::new(code) } => start.0, span!(-1).1 );
-        }
-        Token::For => {
-            pos += 1;
-            parse!(parse_expr(true) => let left);
-            check_tok!(Of else "of");
-            parse!(parse_expr(false) => let iter);
-            parse!(parse_expr(false) => let code);
-            ret!( NodeType::For { code: Box::new(code), iter: Box::new(iter), left: Box::new(left) } => start.0, span!(-1).1 );
-        }
-        Token::Func => {
-            pos += 1;
-            check_tok!(Ident(func_name) else "function name");
-            check_tok!(LParen else "(");
+        if !is_pattern {
             let header_start = span!(-1).0;
 
-            let mut args: Vec<(Located<String>, Option<ASTNode>, Option<ASTNode>, bool)> = vec![];
+            let mut args: Vec<FuncArg<ASTNode, ASTNode>> = vec![];
             while_tok!(!= RParen: {
                 let mut is_ref = false;
                 if_tok!(== Ampersand: {
@@ -998,10 +736,10 @@ pub fn parse_unit(
                     source: info.source.clone(),
                     range: span!(-1),
                 };
-                if let Some(id) = args.iter().position(|(Located {inner, ..}, ..)| inner == &arg_name) {
+                if let Some(id) = args.iter().position(|FuncArg {name: Located {inner, ..}, ..}| inner == &arg_name) {
                     return Err( SyntaxError::DuplicateArg {
                         arg_name,
-                        first_used: args[id].0.area.clone(),
+                        first_used: args[id].name.area.clone(),
                         used_again: arg_area,
                     } )
                 }
@@ -1020,7 +758,12 @@ pub fn parse_unit(
                     pos += 1;
                     parse!(parse_expr(true) => let temp); default = Some(temp);
                 });
-                args.push(( Located::from(arg_name, arg_area), pat, default, is_ref));
+                args.push( FuncArg {
+                    name: Located::from(arg_name, arg_area),
+                    pattern: pat,
+                    default,
+                    is_ref,
+                } );
                 if !matches!(tok!(0), Token::RParen | Token::Comma) {
                     expected_err!(") or ,", tok!(0), span!(0), info )
                 }
@@ -1032,385 +775,753 @@ pub fn parse_unit(
                 range: (header_start, header_end),
             };
 
-            parse!(parse_expr(false) => let code);
-            ret!( NodeType::FuncDef { func_name, args, header_area, code: Box::new(code) } => start.0, span!(-1).1 );
-        },
-        Token::Return => {
-            pos += 1;
-            let mut node = None;
-            if_tok!(!= Eol: {
-                parse!(parse_expr(false) => let temp); node = Some(Box::new(temp));
+            let mut ret_pattern = None;
+            if_tok!(== Arrow: {
+                pos += 1;
+                parse!(parse_expr(true) => let temp); ret_pattern = Some(Box::new(temp));
+            } else {
+                pos += 1;
             });
-            ret!( NodeType::Return {
-                node
-            } => start.0, span!(-1).1 )
-        },
-        Token::Break => {
-            pos += 1;
-            let mut node = None;
-            if_tok!(!= Eol: {
-                parse!(parse_expr(false) => let temp); node = Some(Box::new(temp));
-            });
-            ret!( NodeType::Break {
-                node
-            } => start.0, span!(-1).1 )
-        },
-        Token::Continue => {
-            pos += 1;
-            ret!( NodeType::Continue => start.0, span!(-1).1 )
-        },
-        Token::Struct => {
-            pos += 1;
-            check_tok!(Ident(struct_name) else "struct name");
-            check_tok!(LBracket else "{");
 
-            let mut fields = FnvHashMap::default();
-            let mut field_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
+            parse!(parse_expr(false) => let code);
+            ret!( NodeType::Lambda { args, header_area, code: Box::new(code), ret_pattern } => start.0, span!(-1).1 );
+        } else {
+
+            let mut args = vec![];
+            while_tok!(!= RParen: {
+                parse!(parse_expr(true) => let pat);
+                args.push( pat );
+                if !matches!(tok!(0), Token::RParen | Token::Comma) {
+                    expected_err!(") or ,", tok!(0), span!(0), info )
+                }
+                skip_tok!(Comma);
+            });
+            pos += 1;
+        
+            parse!(parse_expr(true) => let ret_pattern);
+            ret!( NodeType::FuncPattern { args, ret_pattern: Box::new(ret_pattern) } => start.0, span!(-1).1 );
+        }
+
+    },
+    [Token::Let] => {
+        pos += 1;
+        parse!(parse_expr(true) => let left);
+        check_tok!(Assign else "=");
+        parse!(parse_expr(false) => let right);
+        ret!( NodeType::Declaration { left: Box::new(left), right: Box::new(right) } => start.0, span!(-1).1 );
+    },
+    [Token::Ident(name)] => {
+        pos += 1;
+
+        match tok!(0) {
+            Token::FatArrow => {
+                pos += 1;
+                let arg_area = CodeArea {
+                    source: info.source.clone(),
+                    range: start,
+                };
+                parse!(parse_expr(false) => let code);
+                ret!( NodeType::Lambda { args: vec![
+                    FuncArg {
+                        name: Located::from(name.to_string(), arg_area.clone()),
+                        pattern: None,
+                        default: None,
+                        is_ref: false,
+                    }
+                ], header_area: arg_area, code: Box::new(code), ret_pattern: None } => start.0, span!(-1).1 );
+            }
+            _ => (),
+        }
+
+        ret!( NodeType::Var { var_name: name.clone() } => start );
+    },
+    [Token::FatArrow] => {
+        pos += 1;
+        let header_area = CodeArea {
+            source: info.source.clone(),
+            range: start,
+        };
+        parse!(parse_expr(false) => let code);
+        ret!( NodeType::Lambda { args: vec![], header_area, code: Box::new(code), ret_pattern: None } => start.0, span!(-1).1 );
+    },
+    [Token::LBracket] => {
+        pos += 1;
+
+        if matches!(tok!(0), Token::RBracket) {
+            pos += 1;
+            ret!( NodeType::Dictionary {map: FnvHashMap::default()} => start );
+        }
+
+        if matches!(tok!(0), Token::Ident(_)) && matches!(tok!(1), Token::Colon | Token::Comma | Token::RBracket) {
+            let mut map = FnvHashMap::default();
+            let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
             while_tok!(!= RBracket: {
-                check_tok!(Ident(field) else "field name");
+                check_tok!(Ident(key) else "key name");
                 let last_area = CodeArea {
                     source: info.source.clone(),
                     range: span!(-1),
                 };
-                if fields.contains_key(&field) {
-                    return Err( SyntaxError::DuplicateField {
-                        first_used: field_areas[&field].clone(),
-                        field_name: field,
+                if map.contains_key(&key) {
+                    return Err( SyntaxError::DuplicateKey {
+                        first_used: areas[&key].clone(),
+                        key_name: key,
                         used_again: last_area,
                     } )
                 }
-                field_areas.insert(field.clone(), last_area);
-                check_tok!(Colon else ":");
-
-                let mut default = None;
-                parse!(parse_expr(true) => let field_type);
-                if_tok!(== Assign: {
+                areas.insert(key.clone(), last_area);
+                let mut value = ASTNode {
+                    node: NodeType::Var {
+                        var_name: key.clone(),
+                    },
+                    span: span!(-1),
+                };
+                if_tok!(== Colon: {
                     pos += 1;
-                    parse!(parse_expr(true) => let temp); default = Some(temp);
+                    parse!(parse_expr(false) => value);
                 });
 
-                fields.insert(field, (field_type, default));
+                map.insert(key, value);
                 if !matches!(tok!(0), Token::RBracket | Token::Comma) {
                     expected_err!("} or ,", tok!(0), span!(0), info )
                 }
                 skip_tok!(Comma);
             });
-            
-            let def_area = CodeArea {
+            ret!( NodeType::Dictionary {map} => start.0, span!(-1).1 );
+        } else {
+            parse!(parse_statements => let statements);
+            check_tok!(RBracket else "}");
+            ret!( NodeType::Block { code: Box::new(statements), typ: BlockType::Regular {not_safe: false} } => start.0, span!(-1).1 );
+        }
+
+    },
+    [Token::ExcLBracket] => {
+        pos += 1;
+        parse!(parse_statements => let statements);
+        check_tok!(RBracket else "}");
+        ret!( NodeType::Block { code: Box::new(statements), typ: BlockType::McFunc } => start.0, span!(-1).1 );
+    },
+    [Token::Impl] => {
+        pos += 1;
+        check_tok!(Ident(type_var) else "type to impl on");
+        let type_var_area = CodeArea {
+            source: info.source.clone(),
+            range: span!(-1),
+        };
+        check_tok!(LBracket else "{");
+
+        let mut field_names = vec![];
+        let mut fields = vec![];
+        let mut areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
+        while_tok!(!= RBracket: {
+            check_tok!(Ident(field) else "field name");
+            let last_area = CodeArea {
                 source: info.source.clone(),
-                range: (start.0, span!(-1).1),
+                range: span!(-1),
             };
-            ret!( NodeType::StructDef { struct_name, fields, field_areas, def_area } => start.0, span!(-1).1 );
-        },
-        Token::Enum => {
-            pos += 1;
-            check_tok!(Ident(enum_name) else "enum name");
-            check_tok!(LBracket else "{");
+            if field_names.contains(&field) {
+                return Err( SyntaxError::DuplicateFieldImpl {
+                    first_used: areas[&field].clone(),
+                    field_name: field,
+                    used_again: last_area,
+                } )
+            }
+            areas.insert(field.clone(), last_area);
+            check_tok!(Colon else ":");
 
-            let mut variants = FnvHashMap::default();
-            let mut variant_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
-
-            while_tok!(!= RBracket: {
-                check_tok!(Ident(name) else "variant name");
-                let last_area = CodeArea {
-                    source: info.source.clone(),
-                    range: span!(-1),
-                };
-                if variants.contains_key(&name) {
-                    return Err( SyntaxError::DuplicateEnumVariant {
-                        first_used: variant_areas[&name].clone(),
-                        variant_name: name,
-                        used_again: last_area,
-                    } )
-                }
-                variant_areas.insert(name.clone(), last_area);
-
-                match tok!(0) {
-                    Token::Comma => {
-                        variants.insert(name, VariantType::Unit);
-                    }
-                    Token::LParen => {
-                        pos += 1;
-                        let mut elements = vec![];
-                        while_tok!(!= RParen: {
-                            parse!(parse_expr(false) => let elem);
-                            elements.push( elem );
-                            if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                                expected_err!(") or ,", tok!(0), span!(0), info )
-                            }
-                            skip_tok!(Comma);
-                        });
-                        variants.insert(name, VariantType::Tuple(elements));
-                    }
-                    Token::LBracket => {
-                        pos += 1;
-                        let mut fields = FnvHashMap::default();
-                        let mut field_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
-                        while_tok!(!= RBracket: {
-                            check_tok!(Ident(field) else "field name");
-                            let last_area = CodeArea {
-                                source: info.source.clone(),
-                                range: span!(-1),
-                            };
-                            if fields.contains_key(&field) {
-                                return Err( SyntaxError::DuplicateFieldStructVariant {
-                                    first_used: field_areas[&field].clone(),
-                                    field_name: field,
-                                    used_again: last_area,
-                                } )
-                            }
-                            field_areas.insert(field.clone(), last_area);
-                            check_tok!(Colon else ":");
-                            
-                            parse!(parse_expr(true) => let field_type);
-
-                            fields.insert(field, field_type);
-                            if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                                expected_err!("b } or ,", tok!(0), span!(0), info )
-                            }
-                            skip_tok!(Comma);
-                        });
-                        variants.insert(name, VariantType::Struct{ fields, field_areas } );
-                    }
-                    _ => (),
-                }
-                if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                    expected_err!("{, (, }, or ,", tok!(0), span!(0), info )
-                }
-                skip_tok!(Comma);
-            });
-
-            let def_area = CodeArea {
-                source: info.source.clone(),
-                range: (start.0, span!(-1).1),
-            };
-            ret!( NodeType::EnumDef { enum_name, variants, variant_areas, def_area } => start.0, span!(-1).1 );
-        },
-        Token::Module => {
-            pos += 1;
-            check_tok!(Ident(module_name) else "module name");
-            
-            let def_area = CodeArea {
-                source: info.source.clone(),
-                range: (start.0, span!(-1).1),
-            };
-
-            ret!( NodeType::ModuleDef { module_name, def_area } => start.0, span!(-1).1 );
-        },
-        Token::Import => {
-            pos += 1;
-            let mut cached = false;
-            if_tok!(== QMark: {
-                pos += 1;
-                cached = true;
-            });
-            check_tok!(String(path) else "string");
-
-            ret!( NodeType::Import { path, cached } => start.0, span!(-1).1 );
-        },
-        Token::Extract => {
-            pos += 1;
             parse!(parse_expr(false) => let value);
 
-            ret!( NodeType::Extract { value: Box::new(value) } => start.0, span!(-1).1 );
-        },
-        Token::Throw => {
-            pos += 1;
-            parse!(parse_expr(false) => let msg);
-
-            ret!( NodeType::Throw { msg: Box::new(msg) } => start.0, span!(-1).1 );
-        },
-        Token::Dollar => {
-            pos += 1;
-
-            ret!( NodeType::CurrentMcId => start.0, span!(-1).1 );
-        },
-        Token::VectorSpecial => {
-            pos += 1;
-            let mut is_caret_type = None;
-            macro_rules! parse_coord {
-                ($rot:expr) => {
-                    match tok!(0) {
-                        Token::Tilde => {
-                            if !$rot {
-                                match is_caret_type {
-                                    Some(true) => return Err( SyntaxError::VectorMismatch {
-                                        in_rot: false,
-                                        area: CodeArea {
-                                            source: info.source.clone(),
-                                            range: span!(0),
-                                        },
-                                    } ),
-                                    None => {is_caret_type = Some(false); format!("{:?}", is_caret_type);},
-                                    Some(false) => (),
-                                }
-                            }
+            field_names.push(field.clone());
+            fields.push((field, value));
+            if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                expected_err!("} or ,", tok!(0), span!(0), info )
+            }
+            skip_tok!(Comma);
+        });
+        ret!( NodeType::Impl {type_var: (type_var, type_var_area), fields} => start );
         
-                            pos += 1;
-                            let value;
-                            if !matches!(tok!(0), Token::Tilde | Token::Caret | Token::Comma | Token::Backslash) {
-                                parse!(parse_expr(false) => value);
-                            } else {
-                                value = ASTNode {
-                                    node: NodeType::Value {
-                                        value: Value::Number(0.0),
-                                    },
-                                    span: span!(-1),
-                                };
+
+    },
+    [Token::LSqBracket] => {
+        pos += 1;
+
+
+        match tok!(0) {
+            Token::RSqBracket => {
+                pos += 1;
+                ret!( NodeType::Array { elements: vec![] } => start.0, span!(-1).1 )
+            }
+            _ => {
+                parse!(parse_expr(false) => let first_elem);
+                match tok!(0) {
+                    Token::RSqBracket => {
+                        pos += 1;
+                        let elements = vec![first_elem];
+                        ret!( NodeType::Array {
+                            elements,
+                        } => start.0, span!(-1).1 )
+                    }
+                    Token::Comma => {
+                        pos += 1;
+                        let mut elements = vec![first_elem];
+                        while_tok!(!= RSqBracket: {
+                            parse!(parse_expr(false) => let elem);
+                            elements.push( elem );
+                            if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                                expected_err!("] or ,", tok!(0), span!(0), info )
                             }
-                            CoordType::Tilde(Box::new(value))
+                            skip_tok!(Comma);
+                        });
+                        ret!( NodeType::Array {
+                            elements,
+                        } => start.0, span!(-1).1 )
+                    }
+                    Token::For => {
+                        let mut sources = vec![];
+                        pos += 1;
+                        loop {
+                            parse!(parse_expr(true) => let expr);
+                            check_tok!(Of else "of");
+                            parse!(parse_expr(false) => let iter);
+                            sources.push((expr, iter));
+                            if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                                expected_err!("] or ,", tok!(0), span!(0), info )
+                            }
+                            skip_tok!(Comma);
+                            if matches!(tok!(0), Token::RSqBracket | Token::If) { break }
                         }
-                        Token::Caret => {
+                        match tok!(0) {
+                            Token::RSqBracket => {
+                                pos += 1;
+                                ret!( NodeType::ListComp {
+                                    expr: Box::new(first_elem),
+                                    sources,
+                                    cond: None,
+                                } => start.0, span!(-1).1 );
+                            }
+                            Token::If => {
+                                pos += 1;
+                                parse!(parse_expr(false) => let cond);
+                                check_tok!(RSqBracket else "]");
+                                ret!( NodeType::ListComp {
+                                    expr:  Box::new(first_elem),
+                                    sources,
+                                    cond: Some(Box::new(cond)),
+                                } => start.0, span!(-1).1 );
+                            }
+                            _ => unreachable!(),
+                        }
+                    },
+                    _ => expected_err!("], for, or ,", tok!(0), span!(0), info )
+                }
+            }
+        }
+    },
+    [Token::If] => {
+        pos += 1;
+        parse!(parse_expr(false) => let cond);
+        parse!(parse_expr(false) => let code);
+        let mut else_branch = None;
+        if_tok!(== Else: {
+            pos += 1;
+            parse!(parse_expr(false) => let temp); else_branch = Some(Box::new(temp));
+        });
+        ret!( NodeType::If { cond: Box::new(cond), code: Box::new(code), else_branch  } => start.0, span!(-1).1 );
+    },
+    [Token::Match] => {
+        pos += 1;
+        parse!(parse_expr(false) => let value);
+        check_tok!(LBracket else "{");
+
+        let mut arms = vec![];
+        while_tok!(!= RBracket: {
+
+            let arm;
+            if_tok!(== Case: {
+                pos += 1;
+                parse!(parse_expr(false) => let check);
+                arm = MatchArm::Structure(check);
+            } else {
+                parse!(parse_expr(false) => let check);
+                arm = MatchArm::Pattern(check);
+            });
+
+            check_tok!(Arrow else "->");
+            parse!(parse_expr(false) => let expr);
+
+            arms.push( (arm, expr) );
+            if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                expected_err!("} or ,", tok!(0), span!(0), info )
+            }
+            skip_tok!(Comma);
+        });
+
+
+        ret!( NodeType::Match { value: Box::new(value), arms  } => start.0, span!(-1).1 );
+    },
+    [Token::While] => {
+        pos += 1;
+        parse!(parse_expr(false) => let cond);
+        parse!(parse_expr(false) => let code);
+        ret!( NodeType::While { cond: Box::new(cond), code: Box::new(code) } => start.0, span!(-1).1 );
+    },
+    [Token::Loop] => {
+        pos += 1;
+        parse!(parse_expr(false) => let code);
+        ret!( NodeType::Loop { code: Box::new(code) } => start.0, span!(-1).1 );
+    },
+    [Token::For] => {
+        pos += 1;
+        parse!(parse_expr(true) => let left);
+        check_tok!(Of else "of");
+        parse!(parse_expr(false) => let iter);
+        parse!(parse_expr(false) => let code);
+        ret!( NodeType::For { code: Box::new(code), iter: Box::new(iter), left: Box::new(left) } => start.0, span!(-1).1 );
+    },
+    [Token::Func] => {
+        pos += 1;
+        check_tok!(Ident(func_name) else "function name");
+        check_tok!(LParen else "(");
+        let header_start = span!(-1).0;
+
+        let mut args: Vec<FuncArg<ASTNode, ASTNode>> = vec![];
+        while_tok!(!= RParen: {
+            let mut is_ref = false;
+            if_tok!(== Ampersand: {
+                pos += 1;
+                is_ref = true;
+            });
+            check_tok!(Ident(arg_name) else "argument name");
+            let arg_area = CodeArea {
+                source: info.source.clone(),
+                range: span!(-1),
+            };
+            if let Some(id) = args.iter().position(|FuncArg {name: Located {inner, ..}, ..}| inner == &arg_name) {
+                return Err( SyntaxError::DuplicateArg {
+                    arg_name,
+                    first_used: args[id].name.area.clone(),
+                    used_again: arg_area,
+                } )
+            }
+            if arg_name == "self" && !args.is_empty() {
+                return Err( SyntaxError::SelfNotFirstArg {
+                    area: arg_area,
+                } )
+            }
+            let mut pat = None;
+            if_tok!(== Colon: {
+                pos += 1;
+                parse!(parse_expr(true) => let temp); pat = Some(temp);
+            });
+            let mut default = None;
+            if_tok!(== Assign: {
+                pos += 1;
+                parse!(parse_expr(true) => let temp); default = Some(temp);
+            });
+            args.push( FuncArg {
+                name: Located::from(arg_name, arg_area),
+                pattern: pat,
+                default,
+                is_ref,
+            } );
+            if !matches!(tok!(0), Token::RParen | Token::Comma) {
+                expected_err!(") or ,", tok!(0), span!(0), info )
+            }
+            skip_tok!(Comma);
+        });
+        let header_end = span!(-1).1;
+        let header_area = CodeArea {
+            source: info.source.clone(),
+            range: (header_start, header_end),
+        };
+
+        let mut ret_pattern = None;
+        if_tok!(== Arrow: {
+            pos += 1;
+            parse!(parse_expr(true) => let temp); ret_pattern = Some(Box::new(temp));
+        });
+
+        parse!(parse_expr(false) => let code);
+        ret!( NodeType::FuncDef { func_name, args, header_area, code: Box::new(code), ret_pattern } => start.0, span!(-1).1 );
+    },
+    [Token::Return] => {
+        pos += 1;
+        let mut node = None;
+        if_tok!(!= Eol: {
+            parse!(parse_expr(false) => let temp); node = Some(Box::new(temp));
+        });
+        ret!( NodeType::Return {
+            node
+        } => start.0, span!(-1).1 )
+    },
+    [Token::Break] => {
+        pos += 1;
+        let mut node = None;
+        if_tok!(!= Eol: {
+            parse!(parse_expr(false) => let temp); node = Some(Box::new(temp));
+        });
+        ret!( NodeType::Break {
+            node
+        } => start.0, span!(-1).1 )
+    },
+    [Token::Continue] => {
+        pos += 1;
+        ret!( NodeType::Continue => start.0, span!(-1).1 )
+    },
+    [Token::Struct] => {
+        pos += 1;
+        check_tok!(Ident(struct_name) else "struct name");
+        check_tok!(LBracket else "{");
+
+        let mut fields = FnvHashMap::default();
+        let mut field_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
+        while_tok!(!= RBracket: {
+            check_tok!(Ident(field) else "field name");
+            let last_area = CodeArea {
+                source: info.source.clone(),
+                range: span!(-1),
+            };
+            if fields.contains_key(&field) {
+                return Err( SyntaxError::DuplicateField {
+                    first_used: field_areas[&field].clone(),
+                    field_name: field,
+                    used_again: last_area,
+                } )
+            }
+            field_areas.insert(field.clone(), last_area);
+            check_tok!(Colon else ":");
+
+            let mut default = None;
+            parse!(parse_expr(true) => let field_type);
+            if_tok!(== Assign: {
+                pos += 1;
+                parse!(parse_expr(true) => let temp); default = Some(temp);
+            });
+
+            fields.insert(field, (field_type, default));
+            if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                expected_err!("} or ,", tok!(0), span!(0), info )
+            }
+            skip_tok!(Comma);
+        });
         
-                            if !$rot {
-                                match is_caret_type {
-                                    Some(false) => return Err( SyntaxError::VectorMismatch {
-                                        in_rot: false,
-                                        area: CodeArea {
-                                            source: info.source.clone(),
-                                            range: span!(0),
-                                        },
-                                    } ),
-                                    None => {is_caret_type = Some(true); format!("{:?}", is_caret_type);},
-                                    Some(true) => (),
-                                }
-                            } else {
-                                return Err( SyntaxError::VectorMismatch {
-                                    in_rot: true,
+        let def_area = CodeArea {
+            source: info.source.clone(),
+            range: (start.0, span!(-1).1),
+        };
+        ret!( NodeType::StructDef { struct_name, fields, field_areas, def_area } => start.0, span!(-1).1 );
+    },
+    [Token::Enum] => {
+        pos += 1;
+        check_tok!(Ident(enum_name) else "enum name");
+        check_tok!(LBracket else "{");
+
+        let mut variants = FnvHashMap::default();
+        let mut variant_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
+
+        while_tok!(!= RBracket: {
+            check_tok!(Ident(name) else "variant name");
+            let last_area = CodeArea {
+                source: info.source.clone(),
+                range: span!(-1),
+            };
+            if variants.contains_key(&name) {
+                return Err( SyntaxError::DuplicateEnumVariant {
+                    first_used: variant_areas[&name].clone(),
+                    variant_name: name,
+                    used_again: last_area,
+                } )
+            }
+            variant_areas.insert(name.clone(), last_area);
+
+            match tok!(0) {
+                Token::Comma => {
+                    variants.insert(name, VariantType::Unit);
+                }
+                Token::LParen => {
+                    pos += 1;
+                    let mut elements = vec![];
+                    while_tok!(!= RParen: {
+                        parse!(parse_expr(false) => let elem);
+                        elements.push( elem );
+                        if !matches!(tok!(0), Token::RParen | Token::Comma) {
+                            expected_err!(") or ,", tok!(0), span!(0), info )
+                        }
+                        skip_tok!(Comma);
+                    });
+                    variants.insert(name, VariantType::Tuple(elements));
+                }
+                Token::LBracket => {
+                    pos += 1;
+                    let mut fields = FnvHashMap::default();
+                    let mut field_areas: FnvHashMap<String, CodeArea> = FnvHashMap::default();
+                    while_tok!(!= RBracket: {
+                        check_tok!(Ident(field) else "field name");
+                        let last_area = CodeArea {
+                            source: info.source.clone(),
+                            range: span!(-1),
+                        };
+                        if fields.contains_key(&field) {
+                            return Err( SyntaxError::DuplicateFieldStructVariant {
+                                first_used: field_areas[&field].clone(),
+                                field_name: field,
+                                used_again: last_area,
+                            } )
+                        }
+                        field_areas.insert(field.clone(), last_area);
+                        check_tok!(Colon else ":");
+                        
+                        parse!(parse_expr(true) => let field_type);
+
+                        fields.insert(field, field_type);
+                        if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                            expected_err!("b } or ,", tok!(0), span!(0), info )
+                        }
+                        skip_tok!(Comma);
+                    });
+                    variants.insert(name, VariantType::Struct{ fields, field_areas } );
+                }
+                _ => (),
+            }
+            if !matches!(tok!(0), Token::RBracket | Token::Comma) {
+                expected_err!("{, (, }, or ,", tok!(0), span!(0), info )
+            }
+            skip_tok!(Comma);
+        });
+
+        let def_area = CodeArea {
+            source: info.source.clone(),
+            range: (start.0, span!(-1).1),
+        };
+        ret!( NodeType::EnumDef { enum_name, variants, variant_areas, def_area } => start.0, span!(-1).1 );
+    },
+    [Token::Module] => {
+        pos += 1;
+        check_tok!(Ident(module_name) else "module name");
+        
+        let def_area = CodeArea {
+            source: info.source.clone(),
+            range: (start.0, span!(-1).1),
+        };
+
+        ret!( NodeType::ModuleDef { module_name, def_area } => start.0, span!(-1).1 );
+    },
+    [Token::Import] => {
+        pos += 1;
+        let mut cached = false;
+        if_tok!(== QMark: {
+            pos += 1;
+            cached = true;
+        });
+        check_tok!(String(path) else "string");
+
+        ret!( NodeType::Import { path, cached } => start.0, span!(-1).1 );
+    },
+    [Token::Extract] => {
+        pos += 1;
+        parse!(parse_expr(false) => let value);
+
+        ret!( NodeType::Extract { value: Box::new(value) } => start.0, span!(-1).1 );
+    },
+    [Token::Throw] => {
+        pos += 1;
+        parse!(parse_expr(false) => let msg);
+
+        ret!( NodeType::Throw { msg: Box::new(msg) } => start.0, span!(-1).1 );
+    },
+    [Token::Dollar] => {
+        pos += 1;
+
+        ret!( NodeType::CurrentMcId => start.0, span!(-1).1 );
+    },
+    [Token::VectorSpecial] => {
+        pos += 1;
+        let mut is_caret_type = None;
+        macro_rules! parse_coord {
+            ($rot:expr) => {
+                match tok!(0) {
+                    Token::Tilde => {
+                        if !$rot {
+                            match is_caret_type {
+                                Some(true) => return Err( SyntaxError::VectorMismatch {
+                                    in_rot: false,
                                     area: CodeArea {
                                         source: info.source.clone(),
                                         range: span!(0),
                                     },
-                                } )
+                                } ),
+                                None => {is_caret_type = Some(false); format!("{:?}", is_caret_type);},
+                                Some(false) => (),
                             }
-        
-                            pos += 1;
-                            let value;
-                            if !matches!(tok!(0), Token::Tilde | Token::Caret | Token::Comma | Token::Backslash) {
-                                parse!(parse_expr(false) => value);
-                            } else {
-                                value = ASTNode {
-                                    node: NodeType::Value {
-                                        value: Value::Number(0.0),
+                        }
+    
+                        pos += 1;
+                        let value;
+                        if !matches!(tok!(0), Token::Tilde | Token::Caret | Token::Comma | Token::Backslash) {
+                            parse!(parse_expr(false) => value);
+                        } else {
+                            value = ASTNode {
+                                node: NodeType::Value {
+                                    value: Value::Number(0.0),
+                                },
+                                span: span!(-1),
+                            };
+                        }
+                        CoordType::Tilde(Box::new(value))
+                    }
+                    Token::Caret => {
+    
+                        if !$rot {
+                            match is_caret_type {
+                                Some(false) => return Err( SyntaxError::VectorMismatch {
+                                    in_rot: false,
+                                    area: CodeArea {
+                                        source: info.source.clone(),
+                                        range: span!(0),
                                     },
-                                    span: span!(-1),
-                                };
+                                } ),
+                                None => {is_caret_type = Some(true); format!("{:?}", is_caret_type);},
+                                Some(true) => (),
                             }
-                            CoordType::Caret(Box::new(value))
-                        }
-                        _ => {
-        
-                            if !$rot {
-                                match is_caret_type {
-                                    Some(true) => return Err( SyntaxError::VectorMismatch {
-                                        in_rot: false,
-                                        area: CodeArea {
-                                            source: info.source.clone(),
-                                            range: span!(0),
-                                        },
-                                    } ),
-                                    None => {is_caret_type = Some(false); format!("{:?}", is_caret_type);},
-                                    Some(false) => (),
-                                }
-                            }
-        
-                            parse!(parse_expr(false) => let value);
-                            CoordType::Absolute(Box::new(value))
-                        }
-                    }
-                }
-            }
-
-            let x = parse_coord!(false);
-            let y = parse_coord!(false);
-            let z = parse_coord!(false);
-            let mut rot = None;
-            if_tok!(== Comma: {
-                pos += 1;
-                let h = parse_coord!(true);
-                let v = parse_coord!(true);
-                rot = Some((h, v))
-            });
-            check_tok!(Backslash else "\\");
-
-            ret!( NodeType::McVector { x, y, z, rot } => start.0, span!(-1).1 );
-        },
-        Token::Selector(s) => {
-            pos += 1;
-
-            let mut args: Vec<(String, CodeArea, ASTNode)> = vec![];
-
-            if_tok!(== LSqBracket: {
-                pos += 1;
-
-                let type_allowed = matches!(s, SelectorType::Executor | SelectorType::Entities);
-
-                while_tok!(!= RSqBracket: {
-                    check_tok!(Ident(arg_name) else "selector argument name or ]");
-                    let arg_area = CodeArea {
-                        source: info.source.clone(),
-                        range: span!(-1),
-                    };
-
-                    if !valid_selector_arg(arg_name.clone()) {
-                        return Err( SyntaxError::NonexistentSelectorArg {
-                            arg_name,
-                            used: arg_area,
-                        } )
-                    }
-                    if !type_allowed && arg_name == "type" {
-                        return Err( SyntaxError::TypeSelectorArg {
-                            used: arg_area,
-                        } )
-                    };
-                    
-                    
-                    if selector_arg_unique(arg_name.clone()) {
-                        if let Some(id) = args.iter().position(|(e, _, _)| e == &arg_name) {
-                            return Err( SyntaxError::DuplicateSelectorArg {
-                                arg_name,
-                                first_used: args[id].1.clone(),
-                                used_again: arg_area,
+                        } else {
+                            return Err( SyntaxError::VectorMismatch {
+                                in_rot: true,
+                                area: CodeArea {
+                                    source: info.source.clone(),
+                                    range: span!(0),
+                                },
                             } )
                         }
+    
+                        pos += 1;
+                        let value;
+                        if !matches!(tok!(0), Token::Tilde | Token::Caret | Token::Comma | Token::Backslash) {
+                            parse!(parse_expr(false) => value);
+                        } else {
+                            value = ASTNode {
+                                node: NodeType::Value {
+                                    value: Value::Number(0.0),
+                                },
+                                span: span!(-1),
+                            };
+                        }
+                        CoordType::Caret(Box::new(value))
                     }
-
-                    check_tok!(Assign else "=");
-                    parse!(parse_expr(true) => let val);
-
-                    args.push((arg_name, arg_area, val));
-
-                    if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                        expected_err!("] or ,", tok!(0), span!(0), info )
+                    _ => {
+    
+                        if !$rot {
+                            match is_caret_type {
+                                Some(true) => return Err( SyntaxError::VectorMismatch {
+                                    in_rot: false,
+                                    area: CodeArea {
+                                        source: info.source.clone(),
+                                        range: span!(0),
+                                    },
+                                } ),
+                                None => {is_caret_type = Some(false); format!("{:?}", is_caret_type);},
+                                Some(false) => (),
+                            }
+                        }
+    
+                        parse!(parse_expr(false) => let value);
+                        CoordType::Absolute(Box::new(value))
                     }
-                    skip_tok!(Comma);
-                });
-            });
-
-            ret!( NodeType::Selector { selector_type: s.clone(), args } => start.0, span!(-1).1 );
-            
-        }
-        unary_op if is_unary(unary_op) => {
-            pos += 1;
-            let prec = unary_prec(unary_op);
-            let mut next_prec = if prec + 1 < prec_amount() {prec + 1} else {1000000};
-            while next_prec != 1000000 {
-                if prec_type(next_prec) == OpType::Unary {
-                    next_prec += 1
-                } else {
-                    break
                 }
-                if next_prec == prec_amount() { next_prec = 1000000 }
             }
-            let value;
-            if next_prec != 1000000 { parse!(parse_op (next_prec) => value); }
-            else { parse!(parse_value => value); }
-            ret!( NodeType::Unary {
-                op: unary_op.clone(),
-                node: Box::new(value),
-            } => start.0, span!(-1).1 )
-        },
-        _ => expected_err!("expression", tok!(0), span!(0), info)
+        }
+
+        let x = parse_coord!(false);
+        let y = parse_coord!(false);
+        let z = parse_coord!(false);
+        let mut rot = None;
+        if_tok!(== Comma: {
+            pos += 1;
+            let h = parse_coord!(true);
+            let v = parse_coord!(true);
+            rot = Some((h, v))
+        });
+        check_tok!(Backslash else "\\");
+
+        ret!( NodeType::McVector { x, y, z, rot } => start.0, span!(-1).1 );
+    },
+    [Token::Selector(s)] => {
+        pos += 1;
+
+        let mut args: Vec<(String, CodeArea, ASTNode)> = vec![];
+
+        if_tok!(== LSqBracket: {
+            pos += 1;
+
+            let type_allowed = matches!(s, SelectorType::Executor | SelectorType::Entities);
+
+            while_tok!(!= RSqBracket: {
+                check_tok!(Ident(arg_name) else "selector argument name or ]");
+                let arg_area = CodeArea {
+                    source: info.source.clone(),
+                    range: span!(-1),
+                };
+
+                if !valid_selector_arg(arg_name.clone()) {
+                    return Err( SyntaxError::NonexistentSelectorArg {
+                        arg_name,
+                        used: arg_area,
+                    } )
+                }
+                if !type_allowed && arg_name == "type" {
+                    return Err( SyntaxError::TypeSelectorArg {
+                        used: arg_area,
+                    } )
+                };
+                
+                
+                if selector_arg_unique(arg_name.clone()) {
+                    if let Some(id) = args.iter().position(|(e, _, _)| e == &arg_name) {
+                        return Err( SyntaxError::DuplicateSelectorArg {
+                            arg_name,
+                            first_used: args[id].1.clone(),
+                            used_again: arg_area,
+                        } )
+                    }
+                }
+
+                check_tok!(Assign else "=");
+                parse!(parse_expr(true) => let val);
+
+                args.push((arg_name, arg_area, val));
+
+                if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
+                    expected_err!("] or ,", tok!(0), span!(0), info )
+                }
+                skip_tok!(Comma);
+            });
+        });
+
+        ret!( NodeType::Selector { selector_type: s.clone(), args } => start.0, span!(-1).1 );
+        
+    },
+    
+    !Unary {
+        pos += 1;
+        let prec = unary_prec(unary_op);
+        let mut next_prec = if prec + 1 < prec_amount() {prec + 1} else {1000000};
+        while next_prec != 1000000 {
+            if prec_type(next_prec) == OpType::Unary {
+                next_prec += 1
+            } else {
+                break
+            }
+            if next_prec == prec_amount() { next_prec = 1000000 }
+        }
+        let value;
+        if next_prec != 1000000 { parse!(parse_op (next_prec) => value); }
+        else { parse!(parse_value => value); }
+        ret!( NodeType::Unary {
+            op: unary_op.clone(),
+            node: Box::new(value),
+        } => start.0, span!(-1).1 )
+    }
+
+    !else {
+        expected_err!("expression", tok!(0), span!(0), info)
     }
 }
 
@@ -1906,16 +2017,18 @@ impl Hash for NodeType {
                 args.hash(state);
                 args_area.hash(state);
             },
-            NodeType::FuncDef { func_name, args, header_area, code } => {
+            NodeType::FuncDef { func_name, args, header_area, code, ret_pattern } => {
                 func_name.hash(state);
                 args.hash(state);
                 header_area.hash(state);
                 code.hash(state);
+                ret_pattern.hash(state);
             },
-            NodeType::Lambda { args, header_area, code } => {
+            NodeType::Lambda { args, header_area, code, ret_pattern } => {
                 args.hash(state);
                 header_area.hash(state);
                 code.hash(state);
+                ret_pattern.hash(state);
             },
             NodeType::Array { elements } => {
                 elements.hash(state);
@@ -2058,6 +2171,7 @@ impl NodeType {
             NodeType::Call { .. } => "Call",
             NodeType::FuncDef { .. } => "FuncDef",
             NodeType::Lambda { .. } => "Lambda",
+            NodeType::FuncPattern { .. } => "FuncPattern",
             NodeType::Array { .. } => "Array",
             NodeType::Tuple { .. } => "Tuple",
             NodeType::Index { .. } => "Index",

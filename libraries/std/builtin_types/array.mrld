@@ -15,7 +15,7 @@ impl array {
     },
     max: (
         self,
-        f: function = x => x,
+        f: (_) -> number = x => x,
     ) => {
         let max = self[0];
 
@@ -28,7 +28,7 @@ impl array {
     },
     min: (
         self,
-        f: function = x => x,
+        f: (_) -> number = x => x,
     ) => {
         let max = self[0];
 
@@ -88,7 +88,7 @@ impl array {
     },
     map: (
         self,
-        f: function,
+        f: (_) -> _,
     ) => {
         let out = [];
         for i of self
@@ -97,7 +97,7 @@ impl array {
     },
     filter: (
         self,
-        f: function,
+        f: (_) -> bool,
     ) => {
         let out = [];
         for i of self
@@ -107,7 +107,7 @@ impl array {
     },
     partition: (
         self,
-        f: function,
+        f: (_) -> bool,
     ) => {
         let a = [];
         let b = [];
@@ -130,7 +130,7 @@ impl array {
     },
     l_fold: (
         self,
-        f: function,
+        f: (_, _) -> _,
     ) => {
         let acum = self[0];
         for iter of 1..self.length {
@@ -140,7 +140,7 @@ impl array {
     },
     r_fold: (
         self,
-        f: function,
+        f: (_, _) -> _,
     ) => {
         let acum = self[-1];
         for iter of (self.length - 1)..(-1)..0 {
@@ -150,7 +150,7 @@ impl array {
     },
     any: (
         self,
-        f: function,
+        f: (_) -> bool,
     ) => {
         let out = [];
         for i of self
@@ -160,7 +160,7 @@ impl array {
     },
     all: (
         self,
-        f: function,
+        f: (_) -> bool,
     ) => {
         let out = [];
         for i of self
@@ -170,7 +170,7 @@ impl array {
     },
     sorted: (
         self,
-        comp: function = (a, b) => a <= b,
+        comp: (_, _) -> bool = (a, b) => a <= b,
     ) => {
         if self.length <= 1
             return self;
@@ -181,7 +181,7 @@ impl array {
     },
     sort: (
         self,
-        comp: function = (a, b) => a <= b,
+        comp: (_, _) -> bool = (a, b) => a <= b,
     ) => {
         self = self.sorted(comp);
     },

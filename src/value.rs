@@ -2,17 +2,26 @@ use std::{collections::HashSet, hash::Hash};
 
 use fnv::FnvHashMap;
 
-use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, error::RuntimeError, lexer::SelectorType};
+use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, lexer::SelectorType};
 
+
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct FuncArg<T, P> {
+    pub name: Located<String>,
+    pub pattern: Option<P>,
+    pub default: Option<T>,
+    pub is_ref: bool,
+}
 
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Function {
-    pub args: Vec<(Located<String>, Option<ValuePos>, Option<ValuePos>, bool)>,
+    pub args: Vec<FuncArg<ValuePos, Located<Pattern>>>,
     pub code: Box<ASTNode>,
     pub parent_scope: ScopePos,
     pub header_area: CodeArea,
     pub self_arg: Option<Box<ASTNode>>,
+    pub ret_pattern: Option<Located<Pattern>>,
 }
 
 
@@ -41,12 +50,16 @@ impl ValueType {
     }
 }
 
+
+
+
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Type(ValueType),
 
     Either(Box<Pattern>, Box<Pattern>),
-    Not(Box<Pattern>),
     
     Any,
 
@@ -55,7 +68,11 @@ pub enum Pattern {
     Array(Box<Pattern>, Option<usize>),
     Tuple(Vec<Pattern>),
     Dict(FnvHashMap<String, Pattern>),
+
+    Func(Vec<Pattern>, Box<Pattern>)
+
 }
+
 
 impl Pattern {
     pub fn to_str(&self, globals: &Globals) -> String {
@@ -63,7 +80,6 @@ impl Pattern {
             Pattern::Any => format!("_"),
             Pattern::Type(t) => t.to_str(globals),
             Pattern::Either(a, b) => format!("({} | {})", a.to_str(globals), b.to_str(globals)),
-            Pattern::Not(a) => format!("!{}", a.to_str(globals)),
             Pattern::Array(t, n) => match n {
                 Some(n) => format!("array[{}, {}]", t.to_str(globals), n),
                 None => format!("array[{}]", t.to_str(globals)),
@@ -71,35 +87,133 @@ impl Pattern {
             Pattern::Option(o) => format!("#[{}]", o.to_str(globals)),
             Pattern::Tuple(arr) => format!("tuple[{}]", arr.iter().map(|el| el.to_str(globals)).collect::<Vec<String>>().join(", ")),
             Pattern::Dict(map) => format!("dict[{{{}}}]", map.iter().map(|(k, p)| format!("{}: {}", k, p.to_str(globals))).collect::<Vec<String>>().join(", ")),
+            Pattern::Func(args, ret) =>
+                format!("({}) -> {}", args.iter().map(|el| el.to_str(globals)).collect::<Vec<String>>().join(", "), ret.to_str(globals)),
         }
     }
+
+    pub fn in_pat(&self, other: &Pattern) -> bool {
+        match (self, other) {
+            (_, Pattern::Any) => true,
+
+
+            (Pattern::Either(a, b), _) => a.in_pat(other) && b.in_pat(other),
+        
+
+
+            (Pattern::Type(a), Pattern::Type(b)) => a == b,
+
+            (Pattern::Array(a, n1), Pattern::Array(b, n2)) => {
+                if a.in_pat(b) {
+                    match n2 {
+                        Some(n2) => {
+                            if let Some(n1) = n1 {
+                                n1 == n2
+                            } else {
+                                false
+                            }
+                        },
+                        None => true,
+                    }
+                } else {
+                    false
+                }
+            }
+            (Pattern::Array(_, _), Pattern::Type(ValueType::Builtin(BuiltinType::Array))) => true,
+            (Pattern::Type(ValueType::Builtin(BuiltinType::Array)), Pattern::Array(p, n)) => {
+                if let None = n {
+                    Pattern::Any.in_pat(p)
+                } else {
+                    false
+                }
+            },
+
+
+            (Pattern::Tuple(v1), Pattern::Tuple(v2)) => {
+                if v1.len() != v2.len() {return false}
+                for (a, b) in v1.iter().zip(v2) {
+                    if !a.in_pat(b) {
+                        return false
+                    }
+                }
+                true
+            }
+            (Pattern::Tuple(_), Pattern::Type(ValueType::Builtin(BuiltinType::Tuple))) => true,
+
+
+            (Pattern::Option(a), Pattern::Option(b)) => a.in_pat(b),
+            (Pattern::Option(_), Pattern::Type(ValueType::Builtin(BuiltinType::Option))) => true,
+            (Pattern::Type(ValueType::Builtin(BuiltinType::Option)), Pattern::Option(p)) => Pattern::Any.in_pat(p),
+
+
+
+            (Pattern::Dict(m1), Pattern::Dict(m2)) => {
+                if m1.len() != m2.len() {return false}
+                for (k, p1) in m1 {
+                    match m2.get(k) {
+                        Some(p2) => {
+                            if !p1.in_pat(p2) {
+                                return false
+                            }
+                        },
+                        None => return false,
+                    }
+                }
+                true
+            },
+            (Pattern::Dict(_), Pattern::Type(ValueType::Builtin(BuiltinType::Dict))) => true,
+            
+
+            (Pattern::Func(v1, r1), Pattern::Func(v2, r2)) => {
+                if v1.len() != v2.len() {return false}
+                if !r1.in_pat(r2) {return false}
+                for (a, b) in v1.iter().zip(v2) {
+                    if !b.in_pat(a) {
+                        return false
+                    }
+                }
+                true
+            }
+            (Pattern::Func(_, _), Pattern::Type(ValueType::Builtin(BuiltinType::Function))) => true,
+
+            (_, Pattern::Either(a, b)) => self.in_pat(a) || self.in_pat(b),
+
+            _ => false,
+        }
+    }
+    
 }
 
 
-impl Pattern {
-    pub fn hash<H: std::hash::Hasher>(&self, state: &mut H, globals: &Globals) {
+impl Hash for Pattern {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             Pattern::Any => core::mem::discriminant(self).hash(state),
             Pattern::Type(t) => t.hash(state),
             Pattern::Either(a, b) => {
-                a.hash(state, globals);
-                b.hash(state, globals);
+                a.hash(state);
+                b.hash(state);
             },
-            Pattern::Not(a) => a.hash(state, globals),
-            Pattern::Option(o) => o.hash(state, globals),
+            Pattern::Option(o) => o.hash(state),
             Pattern::Array(t, n) => {
-                t.hash(state, globals);
+                t.hash(state);
                 n.hash(state);
             }
             Pattern::Tuple(arr) => for i in arr {
-                i.hash(state, globals)
+                i.hash(state)
             },
             Pattern::Dict(map) => {
                 for (k, v) in map {
                     k.hash(state);
-                    v.hash(state, globals);
+                    v.hash(state);
                 }
             },
+            Pattern::Func(args, ret) => {
+                for i in args {
+                    i.hash(state)
+                };
+                ret.hash(state);
+            }
         }
     }
 }
@@ -297,7 +411,27 @@ impl Value {
                 None => format!("#"),
             },
             Value::Builtin(b) => format!("<builtin: {}>", builtin_to_name(*b)),
-            Value::Function( Function {args, ..} )=> format!("({}) => ...", args.iter().map(|(Located {inner, ..}, ..)| inner.clone()).collect::<Vec<String>>().join(", ")),
+            Value::Function( Function {args, ret_pattern, ..} ) => format!("({}) {} ...", args.iter().map(| FuncArg {
+                name: Located {inner, ..},
+                pattern, ..
+            } | format!(
+                "{}{}",
+                inner,
+                match pattern {
+                    Some(Located{inner: p, ..}) => format!(": {}", p.to_str(globals)),
+                    None => "".to_string(),
+                }
+            ))
+                .collect::<Vec<String>>().join(", "), match ret_pattern {
+                    Some(Located{inner: p, ..}) => format!("-> {}", p.to_str(globals)),
+                    
+                    
+                    // format!("-> {}", match &globals.get(*v).value {
+                    //     Value::Type(t) => Pattern::Type(t.clone()).to_str(globals),
+                    //     other => other.to_str(globals, visited),
+                    // }),
+                    None => format!("=>"),
+                }),
             Value::Array(arr) => {
                 if visited.contains(&self) {
                     return "[...]".to_string()
@@ -462,69 +596,95 @@ impl Value {
         }
     }
 
-    pub fn matches_pat(&self, p: &Pattern, globals: &Globals) -> Result<bool, RuntimeError> {
+    pub fn matches_pat(&self, p: &Pattern, globals: &Globals) -> bool {
         match p {
-            Pattern::Any => Ok( true ),
-            Pattern::Type(t) => Ok( self.typ() == t.clone() ),
-            Pattern::Either(a, b) => Ok( self.matches_pat(a, globals)? || self.matches_pat(b, globals)? ),
-            Pattern::Not(a) => Ok( !self.matches_pat(a, globals)? ),
+            Pattern::Any => true,
+            Pattern::Type(t) => ( self.typ() == t.clone() ),
+            Pattern::Either(a, b) => self.matches_pat(a, globals) || self.matches_pat(b, globals),
             Pattern::Array(inner, n) => {
                 match self {
                     Value::Array(arr) => {
                         match n {
-                            Some(n) => if *n != arr.len() {return Ok(false)}
+                            Some(n) => if *n != arr.len() {return false}
                             None => (),
                         }
                         for i in arr {
-                            if !globals.get(*i).value.matches_pat(inner, globals)? {
-                                return Ok(false)
+                            if !globals.get(*i).value.matches_pat(inner, globals) {
+                                return false
                             }
                         }
-                        Ok(true)
+                        true
                     },
-                    _ => Ok(false),
+                    _ => false,
                 }
             },
             Pattern::Tuple(v) => {
                 match self {
                     Value::Tuple(arr) => {
-                        if arr.len() != v.len() {return Ok(false)}
+                        if arr.len() != v.len() {return false}
                         for (i, p) in arr.iter().zip(v) {
-                            if !globals.get(*i).value.matches_pat(p, globals)? {
-                                return Ok(false)
+                            if !globals.get(*i).value.matches_pat(p, globals) {
+                                return false
                             }
                         }
-                        Ok(true)
+                        true
                     },
-                    _ => Ok(false),
+                    _ => false,
                 }
             },
             Pattern::Dict(p_map) => {
                 match self {
                     Value::Dictionary(map) => {
-                        if p_map.len() != map.len() {return Ok(false)}
+                        if p_map.len() != map.len() {return false}
                         for (k, p) in p_map {
                             match map.get(k) {
                                 Some(v) => {
-                                    if !globals.get(*v).value.matches_pat(p, globals)? {
-                                        return Ok(false)
+                                    if !globals.get(*v).value.matches_pat(p, globals) {
+                                        return false
                                     }
                                 },
-                                None => return Ok(false),
+                                None => return false,
                             }
                         }
-                        Ok(true)
+                        true
                     },
-                    _ => Ok(false),
+                    _ => false,
                 }
             },
             Pattern::Option(p) => {
                 match self {
                     Value::Option(o) => match o {
-                        None => Ok(true),
+                        None => true,
                         Some(id) => globals.get(*id).value.matches_pat(p, globals),
                     }
-                    _ => Ok(false),
+                    _ => false,
+                }
+            },
+            Pattern::Func(v, ret) => {
+                match self {
+                    Value::Function( Function {
+                        args,
+                        ret_pattern,
+                        ..
+                    } ) => {
+
+                        if v.len() != args.len() {return false}
+
+                        if let Some(Located{inner: p, ..}) = ret_pattern {
+                            if !p.in_pat(ret) {return false}
+                        } else {
+                            if !Pattern::Any.in_pat(ret) {return false}
+                        }
+
+                        for (FuncArg { pattern: a, .. }, b) in args.iter().zip(v) {
+                            if let Some(Located{inner: a, ..}) = a {
+                                if !b.in_pat(a) {return false}
+                            }
+                        }
+
+                        true
+                    },
+                    _ => false,
                 }
             },
         }
@@ -539,11 +699,14 @@ impl Value {
                 ..
             }) => {
                 scopes.insert(*parent_scope);
-                for (_, t, d, _) in args {
-                    if let Some(id) = t {
-                        values.insert(*id);
-                        globals.get(*id).value.get_references(globals, values, scopes);
-                    }
+                for FuncArg {
+                    default: d,
+                    ..
+                } in args {
+                    // if let Some(id) = t {
+                    //     values.insert(*id);
+                    //     globals.get(*id).value.get_references(globals, values, scopes);
+                    // }
                     if let Some(id) = d {
                         values.insert(*id);
                         globals.get(*id).value.get_references(globals, values, scopes);
@@ -796,7 +959,7 @@ pub mod value_ops {
         match (&a.value, &b.value) {
             (v, Value::Type(t)) => Ok( v.typ() == t.clone() ),
 
-            (v, Value::Pattern(p)) => Ok( v.matches_pat(p, globals)? ),
+            (v, Value::Pattern(p)) => Ok( v.matches_pat(p, globals) ),
             
             (_, value) => {
                 Err( RuntimeError::TypeMismatch {
@@ -1021,12 +1184,10 @@ pub mod value_ops {
     pub fn not(a: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match &a.value {
             Value::Boolean(b) => Ok(Value::Boolean(!b)),
-            Value::Pattern(p) => Ok(Value::Pattern(Pattern::Not(Box::new(p.clone())))),
-            Value::Type(t) => Ok(Value::Pattern(Pattern::Not(Box::new(Pattern::Type(t.clone()))))),
             
             value => {
                 Err( RuntimeError::TypeMismatch {
-                    expected: "bool, pattern, or type".to_string(),
+                    expected: "bool".to_string(),
                     found: format!("{}", value.type_str(globals)),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
@@ -1370,8 +1531,30 @@ pub mod value_ops {
             } ),
 
 
+            (Value::Type(t1), Value::Type(t2)) => {
+                Ok(Value::Boolean(
+                    Pattern::Type(t1.clone()).in_pat(&Pattern::Type(t2.clone()))
+                ))
+            },
+            (Value::Type(t), Value::Pattern(p)) => {
+                Ok(Value::Boolean(
+                    Pattern::Type(t.clone()).in_pat(p)
+                ))
+            },
+            (Value::Pattern(p), Value::Type(t)) => {
+                Ok(Value::Boolean(
+                    p.in_pat(&Pattern::Type(t.clone()))
+                ))
+            },
+            (Value::Pattern(p1), Value::Pattern(p2)) => {
+                Ok(Value::Boolean(
+                    p1.in_pat(p2)
+                ))
+            },
+
+
             (v1, v2) => Err( RuntimeError::TypeMismatch {
-                expected: "_ and array, string and dictionary, or string and string".to_string(),
+                expected: "_ and array, string and dictionary/string, or type/pattern and type/pattern".to_string(),
                 found: format!("{} and {}", v1.type_str(globals), v2.type_str(globals)),
                 area,
                 defs: vec![(v1.type_str(globals), a.def_area.clone()), (v2.type_str(globals), b.def_area.clone())],
@@ -1410,7 +1593,7 @@ impl Value {
                 }
             },
             Value::Type(v) => v.hash(state),
-            Value::Pattern(v) => v.hash(state, globals.unwrap()),
+            Value::Pattern(v) => v.hash(state),
             Value::Range(v) => v.hash(state),
             Value::McFunc(v) => v.hash(state),
             Value::McVector(v) => v.hash(state, globals.unwrap()),

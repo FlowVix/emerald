@@ -11,7 +11,7 @@ impl option {
         case #(inner) -> inner,
         case # -> or,
     },
-    map: (self, f: function) => match self {
+    map: (self, f: (_) -> _) => match self {
         case #(inner) -> #( f(inner) ),
         case # -> #,
     },
