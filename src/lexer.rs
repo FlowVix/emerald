@@ -3,7 +3,7 @@ use logos::Logos;
 
 fn convert_string(s: &str) -> String {
     s
-        .replace("\r", "")
+        .replace('\r', "")
         .replace("\\n", "\n")
         .replace("\\r", "\r")
         .replace("\\\"", "\"")
@@ -340,6 +340,9 @@ impl Token {
 }
 
 use std::hash::Hash;
+
+
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for Token {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {

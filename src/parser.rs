@@ -131,7 +131,14 @@ pub enum NodeType {
     Import { path: String, cached: bool },
     MCCall { base: Box<ASTNode> },
     CurrentMcId,
-    McVector { x: CoordType<Box<ASTNode>>, y: CoordType<Box<ASTNode>>, z: CoordType<Box<ASTNode>>, rot: Option<(CoordType<Box<ASTNode>>, CoordType<Box<ASTNode>>)> },
+    
+    #[allow(clippy::type_complexity)]
+    McVector {
+        x: CoordType<Box<ASTNode>>,
+        y: CoordType<Box<ASTNode>>,
+        z: CoordType<Box<ASTNode>>,
+        rot: Option<(CoordType<Box<ASTNode>>, CoordType<Box<ASTNode>>)>
+    },
     Extract { value: Box<ASTNode> },
     
     Selector { selector_type: SelectorType, args: Vec<(String, CodeArea, ASTNode)> },
@@ -219,7 +226,7 @@ selector_args!{
         match value {
             Value::Dictionary(map) => {
                 let mut valid = true;
-                for (_, id) in map {
+                for id in map.values() {
                     if !(matches!(globals.get(*id).value, Value::Range(_)) || matches!(globals.values[*id].value, Value::Number(_))) {
                         valid = false;
                         break;
@@ -813,24 +820,22 @@ unit_parse_helper!{
     [Token::Ident(name)] => {
         pos += 1;
 
-        match tok!(0) {
-            Token::FatArrow => {
-                pos += 1;
-                let arg_area = CodeArea {
-                    source: info.source.clone(),
-                    range: start,
-                };
-                parse!(parse_expr(false) => let code);
-                ret!( NodeType::Lambda { args: vec![
-                    FuncArg {
-                        name: Located::from(name.to_string(), arg_area.clone()),
-                        pattern: None,
-                        default: None,
-                        is_ref: false,
-                    }
-                ], header_area: arg_area, code: Box::new(code), ret_pattern: None } => start.0, span!(-1).1 );
-            }
-            _ => (),
+        #[allow(clippy::op_ref)]
+        if tok!(0) == &Token::FatArrow {
+            pos += 1;
+            let arg_area = CodeArea {
+                source: info.source.clone(),
+                range: start,
+            };
+            parse!(parse_expr(false) => let code);
+            ret!( NodeType::Lambda { args: vec![
+                FuncArg {
+                    name: Located::from(name.to_string(), arg_area.clone()),
+                    pattern: None,
+                    default: None,
+                    is_ref: false,
+                }
+            ], header_area: arg_area, code: Box::new(code), ret_pattern: None } => start.0, span!(-1).1 );
         }
 
         ret!( NodeType::Var { var_name: name.clone() } => start );
@@ -1852,7 +1857,7 @@ fn parse_expr(
 ) -> Result<(ASTNode, usize), SyntaxError> {
     
 
-    return parse_op(tokens, pos, info, if skip_assignment {1} else {0})
+    parse_op(tokens, pos, info, if skip_assignment {1} else {0})
 }
 
 
@@ -1946,6 +1951,7 @@ pub fn parse(
 
 
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for VariantType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
@@ -1966,6 +1972,7 @@ impl Hash for VariantType {
 }
 
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for NodeType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {

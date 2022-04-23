@@ -8,7 +8,7 @@ use convert_case::{Case, Casing};
 use fnv::FnvHashMap;
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector, ValueIter, FuncArg}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_names, builtin_type_names, builtin_type_from_str}};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector, ValueIter, FuncArg}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_type_from_str, BUILTIN_NAMES, BUILTIN_TYPE_NAMES}};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -202,20 +202,20 @@ impl Globals {
     }
 
     pub fn init_global(&mut self, scope_id: ScopePos, source: EmeraldSource) {
-        for i in builtin_names() {
+        for i in BUILTIN_NAMES {
             let id = self.insert_value(
-                Value::Builtin(name_to_builtin(&i)),
+                Value::Builtin(name_to_builtin(i)),
                 CodeArea {
                     source: source.clone(),
                     range: (0, 0)
                 },
             );
-            self.set_var(scope_id, i, id);
+            self.set_var(scope_id, i.to_string(), id);
         }
 
-        for i in builtin_type_names() {
+        for i in BUILTIN_TYPE_NAMES {
             let id = self.insert_value(
-                Value::Type(ValueType::Builtin(builtin_type_from_str(&i))),
+                Value::Type(ValueType::Builtin(builtin_type_from_str(i))),
                 CodeArea {
                     source: source.clone(),
                     range: (0, 0)
@@ -420,34 +420,34 @@ impl Globals {
             }
         }
 
-        for (_, ImplData { members, .. }) in &self.struct_impls {
-            for (_, v) in members {
+        for ImplData { members, .. } in self.struct_impls.values() {
+            for v in members.values() {
                 self.mark_value(*v, &mut collector);
             }
         }
-        for (_, ImplData { members, .. }) in &self.enum_impls {
-            for (_, v) in members {
+        for ImplData { members, .. } in self.enum_impls.values() {
+            for v in members.values() {
                 self.mark_value(*v, &mut collector);
             }
         }
-        for (_, ImplData { members, .. }) in &self.builtin_impls {
-            for (_, v) in members {
+        for ImplData { members, .. } in self.builtin_impls.values() {
+            for v in members.values() {
                 self.mark_value(*v, &mut collector);
             }
         }
-        for (_, ImplData { members, .. }) in &self.module_impls {
-            for (_, v) in members {
+        for ImplData { members, .. } in self.module_impls.values() {
+            for v in members.values() {
                 self.mark_value(*v, &mut collector);
             }
         }
         for e in &self.exports {
-            for (_, v) in e {
+            for v in e.values() {
                 self.mark_value(*v, &mut collector);
             }
         }
 
-        for (_, map) in &self.import_caches {
-            for (_, v) in map {
+        for map in self.import_caches.values() {
+            for v in map.values() {
                 self.mark_value(*v, &mut collector);
             }
         }
@@ -482,7 +482,7 @@ impl Globals {
     pub fn mark_scope(&self, scope_id: ScopePos, collector: &mut Collector) {
         let mut var_checks = Vec::new();
         collector.marked_scopes.remove(&scope_id);
-        for (_, id) in &self.get_scope(scope_id).vars {
+        for id in self.get_scope(scope_id).vars.values() {
             var_checks.push(*id);
         }
         for id in var_checks {
@@ -493,7 +493,7 @@ impl Globals {
             None => (),
         }
         for i in &self.get_scope(scope_id).extra_prot {
-            if collector.marked_scopes.contains(&i) { self.mark_scope(*i, collector) }
+            if collector.marked_scopes.contains(i) { self.mark_scope(*i, collector) }
         }
     }
 
@@ -696,7 +696,7 @@ pub fn do_assign(
                 other => {
                     return Err( RuntimeError::DestructureTypeMismatch {
                         tried: "array".to_string(),
-                        found: format!("{}", other.type_str(globals)),
+                        found: other.type_str(globals),
                         area1: area!(source.clone(), left.span),
                         area2: globals.get(right).def_area.clone(),
                     } )
@@ -723,7 +723,7 @@ pub fn do_assign(
                 other => {
                     return Err( RuntimeError::DestructureTypeMismatch {
                         tried: "tuple".to_string(),
-                        found: format!("{}", other.type_str(globals)),
+                        found: other.type_str(globals),
                         area1: area!(source.clone(), left.span),
                         area2: globals.get(right).def_area.clone(),
                     } )
@@ -740,8 +740,8 @@ pub fn do_assign(
                         },
                         (None, None) => (),
                         (i, v) => return Err( RuntimeError::DestructureOptionMismatch {
-                            tried: (if let Some(_) = i { "#(...)" } else { "#" } ).to_string(),
-                            found: (if let Some(_) = v { "#(...)" } else { "#" } ).to_string(),
+                            tried: if i.is_some() { "#(...)" } else { "#" }.to_string(),
+                            found: if v.is_some() { "#(...)" } else { "#" }.to_string(),
                             area1: area!(source.clone(), left.span),
                             area2: globals.get(right).def_area.clone(),
                         } )
@@ -750,7 +750,7 @@ pub fn do_assign(
                 other => {
                     return Err( RuntimeError::DestructureTypeMismatch {
                         tried: "option".to_string(),
-                        found: format!("{}", other.type_str(globals)),
+                        found: other.type_str(globals),
                         area1: area!(source.clone(), left.span),
                         area2: globals.get(right).def_area.clone(),
                     } )
@@ -778,7 +778,7 @@ pub fn do_assign(
                 other => {
                     return Err( RuntimeError::DestructureTypeMismatch {
                         tried: "dict".to_string(),
-                        found: format!("{}", other.type_str(globals)),
+                        found: other.type_str(globals),
                         area1: area!(source.clone(), left.span),
                         area2: globals.get(right).def_area.clone(),
                     } )
@@ -821,7 +821,7 @@ pub fn do_assign(
                         other => {
                             return Err( RuntimeError::DestructureTypeMismatch {
                                 tried: globals.custom_structs[*id].name.clone(),
-                                found: format!("{}", other.type_str(globals)),
+                                found: other.type_str(globals),
                                 area1: area!(source.clone(), left.span),
                                 area2: globals.get(right).def_area.clone(),
                             } )
@@ -871,15 +871,15 @@ pub fn do_assign(
                                 VariantType::Unit => {
                                     match &enum_type.variants[variant_name] {
                                         VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
-                                            expected: format!("tuple"),
-                                            found: format!("unit"),
+                                            expected: "tuple".to_string(),
+                                            found: "unit".to_string(),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
                                         } ), Pop: 1),
                                         VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
-                                            expected: format!("struct"),
-                                            found: format!("unit"),
+                                            expected: "struct".to_string(),
+                                            found: "unit".to_string(),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
@@ -890,15 +890,15 @@ pub fn do_assign(
                                 VariantType::Tuple(_) => {
                                     match &enum_type.variants[variant_name] {
                                         VariantType::Unit => ret!(Err( RuntimeError::IncorrectVariantType {
-                                            expected: format!("unit"),
-                                            found: format!("tuple"),
+                                            expected: "unit".to_string(),
+                                            found: "tuple".to_string(),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
                                         } ), Pop: 1),
                                         VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
-                                            expected: format!("struct"),
-                                            found: format!("tuple"),
+                                            expected: "struct".to_string(),
+                                            found: "tuple".to_string(),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
@@ -909,15 +909,15 @@ pub fn do_assign(
                                 VariantType::Struct { .. } => {
                                     match &enum_type.variants[variant_name] {
                                         VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
-                                            expected: format!("tuple"),
-                                            found: format!("struct"),
+                                            expected: "tuple".to_string(),
+                                            found: "struct".to_string(),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
                                         } ), Pop: 1),
                                         VariantType::Unit { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
-                                            expected: format!("unit"),
-                                            found: format!("struct"),
+                                            expected: "unit".to_string(),
+                                            found: "struct".to_string(),
                                             variant_name: variant_name.clone(),
                                             used: variant_area.clone(),
                                             variant_def: enum_type.variant_areas[variant_name].clone(),
@@ -932,14 +932,14 @@ pub fn do_assign(
                                 VariantType::Unit => {
                                     match value_variant {
                                         InstanceVariant::Tuple(_) => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
-                                            expected: format!("unit"),
-                                            found: format!("tuple"),
+                                            expected: "unit".to_string(),
+                                            found: "tuple".to_string(),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
                                         } ), Pop: 1),
                                         InstanceVariant::Struct { .. } => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
-                                            expected: format!("unit"),
-                                            found: format!("struct"),
+                                            expected: "unit".to_string(),
+                                            found: "struct".to_string(),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
                                         } ), Pop: 1),
@@ -949,14 +949,14 @@ pub fn do_assign(
                                 VariantType::Tuple(arr) => {
                                     match value_variant {
                                         InstanceVariant::Unit => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
-                                            expected: format!("tuple"),
-                                            found: format!("unit"),
+                                            expected: "tuple".to_string(),
+                                            found: "unit".to_string(),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
                                         } ), Pop: 1),
                                         InstanceVariant::Struct { .. } => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
-                                            expected: format!("tuple"),
-                                            found: format!("struct"),
+                                            expected: "tuple".to_string(),
+                                            found: "struct".to_string(),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
                                         } ), Pop: 1),
@@ -980,14 +980,14 @@ pub fn do_assign(
                                 VariantType::Struct { fields, .. } => {
                                     match value_variant {
                                         InstanceVariant::Unit => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
-                                            expected: format!("struct"),
-                                            found: format!("unit"),
+                                            expected: "struct".to_string(),
+                                            found: "unit".to_string(),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
                                         } ), Pop: 1),
                                         InstanceVariant::Tuple(_) => ret!(Err( RuntimeError::DestructureIncorrectVariantType  {
-                                            expected: format!("struct"),
-                                            found: format!("tuple"),
+                                            expected: "struct".to_string(),
+                                            found: "tuple".to_string(),
                                             expected_area: area!(source.clone(), left.span),
                                             found_area: globals.get(right).def_area.clone(),
                                         } ), Pop: 1),
@@ -1013,7 +1013,7 @@ pub fn do_assign(
                         other => {
                             return Err( RuntimeError::DestructureTypeMismatch {
                                 tried: globals.custom_enums[*id].name.clone(),
-                                found: format!("{}", other.type_str(globals)),
+                                found: other.type_str(globals),
                                 area1: area!(source.clone(), left.span),
                                 area2: globals.get(right).def_area.clone(),
                             } )
@@ -1120,10 +1120,10 @@ fn run_func(
         Some(
             Exit::Break(_, span)
         ) => {
-            let bruh = span.clone();
+            let bruh = span;
             return Err(
                 RuntimeError::BreakUsedOutside {
-                    break_area: area!(source.clone(), bruh),
+                    break_area: area!(source.clone(), *bruh),
                     outer_area: area!(source.clone(), func.code.span),
                 }
             )
@@ -1131,10 +1131,10 @@ fn run_func(
         Some(
             Exit::Continue(span)
         ) => {
-            let bruh = span.clone();
+            let bruh = span;
             return Err(
                 RuntimeError::ContinueUsedOutside {
-                    continue_area: area!(source.clone(), bruh),
+                    continue_area: area!(source.clone(), *bruh),
                     outer_area: area!(source.clone(), func.code.span),
                 }
             )
@@ -1173,7 +1173,7 @@ pub fn execute(
     if globals.values.len() > 50000 + globals.last_amount {
     // if true {
         globals.collect(scope_id);
-        println!("collect: {} {} {}", globals.values.len(), globals.scopes.len(), globals.protected.len());
+        // println!("collect: {} {} {}", globals.values.len(), globals.scopes.len(), globals.protected.len());
     }
 
     globals.push_protected();
@@ -1216,7 +1216,7 @@ pub fn execute(
                 },
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "type or pattern".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), pattern.span),
                     defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
                 } ), Pop: 1)
@@ -1528,7 +1528,7 @@ pub fn execute(
                 }),
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "number or range".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), area!(source.clone(), base.span))],
                 } ), Pop: 1)
@@ -1578,7 +1578,7 @@ pub fn execute(
             );
             for i in statements {
                 ret_id = execute!(i => scope_id);
-                if globals.exits.len() > 0 {
+                if !globals.exits.is_empty() {
                     ret!( Ok( ret_id ), Pop: 1 );
                 }
             }
@@ -1809,7 +1809,7 @@ pub fn execute(
             }
 
 
-            match globals.get_method(iter_id, &format!("_iter_")) {
+            match globals.get_method(iter_id, "_iter_") {
                 Some(f) => {
                     let next_f = run_func!(vec![iter_id], &f);
                     let next_val = globals.get(next_f).value.clone();
@@ -1827,7 +1827,7 @@ pub fn execute(
                                     }
                                     other => ret!(Err( RuntimeError::TypeMismatch {
                                         expected: "option".to_string(),
-                                        found: format!("{}", other.type_str(globals)),
+                                        found: other.type_str(globals),
                                         area: globals.get(next).def_area.clone(),
                                         defs: vec![(other.type_str(globals), globals.get(next).def_area.clone())],
                                     } ), Pop: 1)
@@ -1835,14 +1835,14 @@ pub fn execute(
                             }
                         }
                         _ => {
-                            for i in value_ops::iter(&globals.get(next_f), globals.get(next_f).def_area.clone(), globals)? {
+                            for i in value_ops::iter(globals.get(next_f), globals.get(next_f).def_area.clone(), globals)? {
                                 for_loop!(i);
                             }
                         }
                     }
                 },
                 None => {
-                    for i in value_ops::iter(&globals.get(iter_id), area!(source.clone(), iter.span), globals)? {
+                    for i in value_ops::iter(globals.get(iter_id), area!(source.clone(), iter.span), globals)? {
                         for_loop!(i);
                     }
                 }
@@ -1894,7 +1894,7 @@ pub fn execute(
                             Value::Pattern(p) => p,
                             other => ret!(Err( RuntimeError::TypeMismatch {
                                 expected: "type or pattern".to_string(),
-                                found: format!("{}", other.type_str(globals)),
+                                found: other.type_str(globals),
                                 area: area!(source.clone(), n.span),
                                 defs: vec![(other.type_str(globals), globals.get(n_id).def_area.clone())],
                             } ), Pop: 1)
@@ -1932,7 +1932,7 @@ pub fn execute(
                         Value::Pattern(p) => p,
                         other => ret!(Err( RuntimeError::TypeMismatch {
                             expected: "type or pattern".to_string(),
-                            found: format!("{}", other.type_str(globals)),
+                            found: other.type_str(globals),
                             area: area!(source.clone(), r.span),
                             defs: vec![(other.type_str(globals), globals.get(r_id).def_area.clone())],
                         } ), Pop: 1)
@@ -1978,7 +1978,7 @@ pub fn execute(
                             Value::Pattern(p) => p,
                             other => ret!(Err( RuntimeError::TypeMismatch {
                                 expected: "type or pattern".to_string(),
-                                found: format!("{}", other.type_str(globals)),
+                                found: other.type_str(globals),
                                 area: area!(source.clone(), n.span),
                                 defs: vec![(other.type_str(globals), globals.get(n_id).def_area.clone())],
                             } ), Pop: 1)
@@ -2016,7 +2016,7 @@ pub fn execute(
                         Value::Pattern(p) => p,
                         other => ret!(Err( RuntimeError::TypeMismatch {
                             expected: "type or pattern".to_string(),
-                            found: format!("{}", other.type_str(globals)),
+                            found: other.type_str(globals),
                             area: area!(source.clone(), r.span),
                             defs: vec![(other.type_str(globals), globals.get(r_id).def_area.clone())],
                         } ), Pop: 1)
@@ -2083,7 +2083,7 @@ pub fn execute(
 
             let v = &globals.get(base_clone).value.clone();
             
-            match globals.get_method(base_clone, &format!("_index_")) {
+            match globals.get_method(base_clone, "_index_") {
                 Some(f) => Ok( {
                     let mut arg_ids = vec![];
                     for i in args {
@@ -2102,7 +2102,7 @@ pub fn execute(
                             ret!(Err(
                                 RuntimeError::IndexArgCount {
                                     provided: args.len(),
-                                    expected: format!("1"),
+                                    expected: "1".to_string(),
                                     index_area: args_area.clone(),
                                     val_area: area!(source.clone(), base.span),
                                     typ: v.type_str(globals),
@@ -2126,7 +2126,7 @@ pub fn execute(
                             }
                             other => ret!(Err( RuntimeError::TypeMismatch {
                                 expected: "number".to_string(),
-                                found: format!("{}", other.type_str(globals)),
+                                found: other.type_str(globals),
                                 area: area!(source.clone(), index.span),
                                 defs: vec![(other.type_str(globals), globals.get(index_id).def_area.clone())],
                             } ), Pop: 1)
@@ -2137,7 +2137,7 @@ pub fn execute(
                             ret!(Err(
                                 RuntimeError::IndexArgCount {
                                     provided: args.len(),
-                                    expected: format!("1"),
+                                    expected: "1".to_string(),
                                     index_area: area!(source.clone(), start_node.span),
                                     val_area: area!(source.clone(), base.span),
                                     typ: v.type_str(globals),
@@ -2158,7 +2158,7 @@ pub fn execute(
                             }
                             other => ret!(Err( RuntimeError::TypeMismatch {
                                 expected: "string".to_string(),
-                                found: format!("{}", other.type_str(globals)),
+                                found: other.type_str(globals),
                                 area: area!(source.clone(), index.span),
                                 defs: vec![(other.type_str(globals), globals.get(index_id).def_area.clone())],
                             } ), Pop: 1)
@@ -2184,7 +2184,7 @@ pub fn execute(
                                     },
                                     other => ret!(Err( RuntimeError::TypeMismatch {
                                         expected: "type or pattern".to_string(),
-                                        found: format!("{}", other.type_str(globals)),
+                                        found: other.type_str(globals),
                                         area: area!(source.clone(), pat.span),
                                         defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
                                     } ), Pop: 1)
@@ -2205,7 +2205,7 @@ pub fn execute(
                                     },
                                     other => ret!(Err( RuntimeError::TypeMismatch {
                                         expected: "type or pattern".to_string(),
-                                        found: format!("{}", other.type_str(globals)),
+                                        found: other.type_str(globals),
                                         area: area!(source.clone(), pat.span),
                                         defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
                                     } ), Pop: 1)
@@ -2227,7 +2227,7 @@ pub fn execute(
                                     }
                                     other => ret!(Err( RuntimeError::TypeMismatch {
                                         expected: "number".to_string(),
-                                        found: format!("{}", other.type_str(globals)),
+                                        found: other.type_str(globals),
                                         area: area!(source.clone(), l.span),
                                         defs: vec![(other.type_str(globals), globals.get(l_id).def_area.clone())],
                                     } ), Pop: 1)
@@ -2240,10 +2240,10 @@ pub fn execute(
                             l => ret!(Err(
                                 RuntimeError::IndexArgCount {
                                     provided: l,
-                                    expected: format!("1 or 2"),
+                                    expected: "1 or 2".to_string(),
                                     index_area: args_area.clone(),
                                     val_area: area!(source.clone(), base.span),
-                                    typ: format!("array type"),
+                                    typ: "array type".to_string(),
                                 }
                             ), Pop: 1)
                         }
@@ -2259,7 +2259,7 @@ pub fn execute(
                                 Value::Pattern(p) => v.push( p.clone() ),
                                 other => ret!(Err( RuntimeError::TypeMismatch {
                                     expected: "type or pattern".to_string(),
-                                    found: format!("{}", other.type_str(globals)),
+                                    found: other.type_str(globals),
                                     area: area!(source.clone(), pat.span),
                                     defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
                                 } ), Pop: 1)
@@ -2301,7 +2301,7 @@ pub fn execute(
                                     },
                                     other => ret!(Err( RuntimeError::TypeMismatch {
                                         expected: "dict".to_string(),
-                                        found: format!("{}", other.type_str(globals)),
+                                        found: other.type_str(globals),
                                         area: area!(source.clone(), dict.span),
                                         defs: vec![(other.type_str(globals), globals.get(dict_id).def_area.clone())],
                                     } ), Pop: 1)
@@ -2310,17 +2310,17 @@ pub fn execute(
                             l => ret!(Err(
                                 RuntimeError::IndexArgCount {
                                     provided: l,
-                                    expected: format!("1"),
+                                    expected: "1".to_string(),
                                     index_area: args_area.clone(),
                                     val_area: area!(source.clone(), base.span),
-                                    typ: format!("dict type"),
+                                    typ: "dict type".to_string(),
                                 }
                             ), Pop: 1)
                         }
                     },
                     other => ret!(Err( RuntimeError::TypeMismatch {
                         expected: "array, dict, or array type".to_string(),
-                        found: format!("{}", other.type_str(globals)),
+                        found: other.type_str(globals),
                         area: area!(source.clone(), base.span),
                         defs: vec![(other.type_str(globals), globals.get(base_clone).def_area.clone())],
                     } ), Pop: 1)
@@ -2511,7 +2511,7 @@ pub fn execute(
         NodeType::Propagate { base } => {
             let prop_value = execute!(base => scope_id);
 
-            match globals.get_method(prop_value, &format!("_try_")) {
+            match globals.get_method(prop_value, "_try_") {
                 Some(f) => Ok( {
                     run_func!(vec![prop_value], &f)
                 } ),
@@ -2530,7 +2530,7 @@ pub fn execute(
                         }
                         other => ret!(Err( RuntimeError::TypeMismatch {
                             expected: "option".to_string(),
-                            found: format!("{}", other.type_str(globals)),
+                            found: other.type_str(globals),
                             area: area!(source, base.span),
                             defs: vec![(other.type_str(globals), area!(source, base.span))],
                         } ), Pop: 1)
@@ -2628,7 +2628,7 @@ pub fn execute(
                     }
                     if id_map.len() != struct_type.fields.len() {
                         let mut missing = vec![];
-                        for (k, _) in &struct_type.fields {
+                        for k in struct_type.fields.keys() {
                             if !id_map.contains_key(k) { missing.push(k.clone()) }
                         }
                         ret!(Err( RuntimeError::MissingStructFields {
@@ -2670,15 +2670,15 @@ pub fn execute(
                         VariantType::Unit => {
                             match &enum_type.variants[variant_name] {
                                 VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
-                                    expected: format!("tuple"),
-                                    found: format!("unit"),
+                                    expected: "tuple".to_string(),
+                                    found: "unit".to_string(),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
                                 } ), Pop: 1),
                                 VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
-                                    expected: format!("struct"),
-                                    found: format!("unit"),
+                                    expected: "struct".to_string(),
+                                    found: "unit".to_string(),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
@@ -2698,15 +2698,15 @@ pub fn execute(
                         VariantType::Tuple(values) => {
                             match &enum_type.variants[variant_name] {
                                 VariantType::Unit => ret!(Err( RuntimeError::IncorrectVariantType {
-                                    expected: format!("unit"),
-                                    found: format!("tuple"),
+                                    expected: "unit".to_string(),
+                                    found: "tuple".to_string(),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
                                 } ), Pop: 1),
                                 VariantType::Struct { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
-                                    expected: format!("struct"),
-                                    found: format!("tuple"),
+                                    expected: "struct".to_string(),
+                                    found: "tuple".to_string(),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
@@ -2763,15 +2763,15 @@ pub fn execute(
                         } => {
                             match &enum_type.variants[variant_name] {
                                 VariantType::Tuple(_) => ret!(Err( RuntimeError::IncorrectVariantType {
-                                    expected: format!("tuple"),
-                                    found: format!("struct"),
+                                    expected: "tuple".to_string(),
+                                    found: "struct".to_string(),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
                                 } ), Pop: 1),
                                 VariantType::Unit { .. } => ret!(Err( RuntimeError::IncorrectVariantType {
-                                    expected: format!("unit"),
-                                    found: format!("struct"),
+                                    expected: "unit".to_string(),
+                                    found: "struct".to_string(),
                                     variant_name: variant_name.clone(),
                                     used: variant_area.clone(),
                                     variant_def: enum_type.variant_areas[variant_name].clone(),
@@ -2812,7 +2812,7 @@ pub fn execute(
                                     }
                                     if id_map.len() != field_types.len() {
                                         let mut missing = vec![];
-                                        for (k, _) in field_types {
+                                        for k in field_types.keys() {
                                             if !id_map.contains_key(k) { missing.push(k.clone()) }
                                         }
                                         ret!(Err( RuntimeError::MissingStructVariantFields {
@@ -2935,7 +2935,7 @@ pub fn execute(
                                 let temp = globals.get(*id).def_area.clone();
                                 ret!(Err( RuntimeError::TypeMismatch {
                                     expected: "type".to_string(),
-                                    found: format!("{}", other.type_str(globals)),
+                                    found: other.type_str(globals),
                                     area: name_area.clone(),
                                     defs: vec![(other.type_str(globals), temp)],
                                 } ), Pop: 1)
@@ -2960,10 +2960,10 @@ pub fn execute(
             match &globals.get(base_id).value.clone() {
                 Value::Type(t) => {
                     let impld = match t {
-                        ValueType::Builtin(b) => globals.builtin_impls.get(b).clone(),
-                        ValueType::CustomStruct(id) => globals.struct_impls.get(id).clone(),
-                        ValueType::CustomEnum(id) => globals.enum_impls.get(id).clone(),
-                        ValueType::Module(id) => globals.module_impls.get(id).clone(),
+                        ValueType::Builtin(b) => globals.builtin_impls.get(b),
+                        ValueType::CustomStruct(id) => globals.struct_impls.get(id),
+                        ValueType::CustomEnum(id) => globals.enum_impls.get(id),
+                        ValueType::Module(id) => globals.module_impls.get(id),
                     };
                     match impld {
                         None => Err( RuntimeError::NoAssociatedMember {
@@ -2983,7 +2983,7 @@ pub fn execute(
                 }
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "type".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
                 } ), Pop: 1)
@@ -2991,15 +2991,15 @@ pub fn execute(
         },
         NodeType::Import { path, cached } => {
 
-            let mut buf;
-            match &source {
+
+            let mut buf = match &source {
                 EmeraldSource::String(_) => ret!(Err( RuntimeError::CantImportInEval {
                     import_area: area!(source.clone(), start_node.span),
                 } ), Pop: 1),
                 EmeraldSource::File(f) => {
-                    buf = f.clone();
+                    f.clone()
                 },
-            }
+            };
             
             buf.pop();
             buf.push(path);
@@ -3030,17 +3030,14 @@ pub fn execute(
             let mut tokens_iter = lexer::Token
                 ::lexer(&code);
             let mut tokens = vec![];
-            loop {
-                match tokens_iter.next() {
-                    Some(t) => tokens.push((
-                        t,
-                        (
-                            tokens_iter.span().start,
-                            tokens_iter.span().end,
-                        )
-                    )),
-                    None => break,
-                }
+            while let Some(t) = tokens_iter.next() {
+                tokens.push((
+                    t,
+                    (
+                        tokens_iter.span().start,
+                        tokens_iter.span().end,
+                    )
+                ))
             }
             tokens.push((
                 lexer::Token::Eof,
@@ -3109,7 +3106,7 @@ pub fn execute(
                 },
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "dict".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), value.span),
                     defs: vec![(other.type_str(globals), globals.get(val).def_area.clone())],
                 } ), Pop: 1)
@@ -3121,7 +3118,7 @@ pub fn execute(
             let base_clone = proteclone!(base_raw => @);
 
 
-            match globals.get_method(base_clone, &format!("_call_")) {
+            match globals.get_method(base_clone, "_call_") {
                 Some(f) => Ok( {
 
                     let mut arg_ids = vec![];
@@ -3165,15 +3162,14 @@ pub fn execute(
                                 ), Pop: 1)
                             }
         
-                            let mut counter = 0;
         
                             let mut arg_ids = vec![];
-                            for FuncArg {
+                            for (counter, FuncArg {
                                 name: s,
                                 default: d,
                                 is_ref,
                                 ..
-                            } in params {
+                            }) in params.iter().enumerate() {
                                 let arg_id = if counter >= args.len() {
                                     if let Some(d) = d {
                                         globals.clone_value(*d, None)
@@ -3191,7 +3187,6 @@ pub fn execute(
                                     if s.inner == "self" || *is_ref { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) }
                                 };
                                 arg_ids.push( arg_id );
-                                counter += 1;
                             }
         
         
@@ -3216,7 +3211,7 @@ pub fn execute(
                         }
                         other => ret!(Err( RuntimeError::TypeMismatch {
                             expected: "function, builtin, or type".to_string(),
-                            found: format!("{}", other.type_str(globals)),
+                            found: other.type_str(globals),
                             area: area!(source.clone(), base.span),
                             defs: vec![(other.type_str(globals), globals.get(base_clone).def_area.clone())],
                         } ), Pop: 1)
@@ -3263,7 +3258,7 @@ pub fn execute(
                 }
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "mc_func or string".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), base.span),
                     defs: vec![(other.type_str(globals), globals.get(base_id).def_area.clone())],
                 } ), Pop: 1)
@@ -3284,7 +3279,7 @@ pub fn execute(
                 Value::Number(_) => (),
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), x.get_inner().span),
                     defs: vec![(other.type_str(globals), globals.get(x_val_id).def_area.clone())],
                 } ), Pop: 1),
@@ -3294,7 +3289,7 @@ pub fn execute(
                 Value::Number(_) => (),
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), y.get_inner().span),
                     defs: vec![(other.type_str(globals), globals.get(y_val_id).def_area.clone())],
                 } ), Pop: 1),
@@ -3304,7 +3299,7 @@ pub fn execute(
                 Value::Number(_) => (),
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), z.get_inner().span),
                     defs: vec![(other.type_str(globals), globals.get(z_val_id).def_area.clone())],
                 } ), Pop: 1),
@@ -3328,7 +3323,7 @@ pub fn execute(
                         Value::Number(_) => (),
                         other => ret!(Err( RuntimeError::TypeMismatch {
                             expected: "number".to_string(),
-                            found: format!("{}", other.type_str(globals)),
+                            found: other.type_str(globals),
                             area: area!(source.clone(), h.get_inner().span),
                             defs: vec![(other.type_str(globals), globals.get(h_val_id).def_area.clone())],
                         } ), Pop: 1),
@@ -3338,7 +3333,7 @@ pub fn execute(
                         Value::Number(_) => (),
                         other => ret!(Err( RuntimeError::TypeMismatch {
                             expected: "number".to_string(),
-                            found: format!("{}", other.type_str(globals)),
+                            found: other.type_str(globals),
                             area: area!(source.clone(), v.get_inner().span),
                             defs: vec![(other.type_str(globals), globals.get(v_val_id).def_area.clone())],
                         } ), Pop: 1),
@@ -3380,11 +3375,11 @@ pub fn execute(
             match msg_val {
                 Value::String(s) => ret!(Err( RuntimeError::Throw {
                     area: area!(source.clone(), start_node.span),
-                    msg: s.clone(),
+                    msg: s,
                 } ), Pop: 1),
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "string".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), msg.span),
                     defs: vec![(other.type_str(globals), globals.get(msg_val_id).def_area.clone())],
                 } ), Pop: 1),
@@ -3405,10 +3400,10 @@ pub fn execute(
                 let iter_id = protecute!(i => scope_id);
 
 
-                let iter = match globals.get_method(iter_id, &format!("_iter_")) {
+                let iter = match globals.get_method(iter_id, "_iter_") {
                     Some(f) => IterType::Custom(f, iter_id),
                     None => IterType::Regular(
-                        value_ops::iter(&globals.get(iter_id), area!(source.clone(), i.span), globals)?
+                        value_ops::iter(globals.get(iter_id), area!(source.clone(), i.span), globals)?
                     )
                 };
 
@@ -3419,6 +3414,7 @@ pub fn execute(
             let mut v_vec: Vec<Value> = vec![];
             let mut result_vec: Vec<ValuePos> = vec![];
 
+            #[allow(clippy::too_many_arguments)]
             fn comp(
                 expr: &ASTNode,
                 cond: &Option<Box<ASTNode>>,
@@ -3532,14 +3528,14 @@ pub fn execute(
                                     }
                                     other => return Err( RuntimeError::TypeMismatch {
                                         expected: "option".to_string(),
-                                        found: format!("{}", other.type_str(globals)),
+                                        found: other.type_str(globals),
                                         area: globals.get(next).def_area.clone(),
                                         defs: vec![(other.type_str(globals), globals.get(next).def_area.clone())],
                                     } )
                                 }
                             },
                             _ => {
-                                for i in value_ops::iter(&globals.get(next_f), globals.get(next_f).def_area.clone(), globals)? {
+                                for i in value_ops::iter(globals.get(next_f), globals.get(next_f).def_area.clone(), globals)? {
                                     for_loop!(i);
                                 }
                             }
@@ -3551,7 +3547,7 @@ pub fn execute(
                 Ok(())
             }
 
-            comp(expr, cond, &mut iters, scope_id, globals, &source, 0, &mut v_vec, &mut result_vec, start_node)?;
+            comp(expr, cond, &mut iters, scope_id, globals, source, 0, &mut v_vec, &mut result_vec, start_node)?;
 
             Ok( globals.insert_value(
                 Value::Array(result_vec),
@@ -3569,7 +3565,7 @@ pub fn execute(
                     Value::Pattern(p) => v.push( p.clone() ),
                     other => ret!(Err( RuntimeError::TypeMismatch {
                         expected: "type or pattern".to_string(),
-                        found: format!("{}", other.type_str(globals)),
+                        found: other.type_str(globals),
                         area: area!(source.clone(), pat.span),
                         defs: vec![(other.type_str(globals), globals.get(pat_id).def_area.clone())],
                     } ), Pop: 1)
@@ -3581,7 +3577,7 @@ pub fn execute(
                 Value::Pattern(p) => p.clone(),
                 other => ret!(Err( RuntimeError::TypeMismatch {
                     expected: "type or pattern".to_string(),
-                    found: format!("{}", other.type_str(globals)),
+                    found: other.type_str(globals),
                     area: area!(source.clone(), ret_pattern.span),
                     defs: vec![(other.type_str(globals), globals.get(ret_id).def_area.clone())],
                 } ), Pop: 1)

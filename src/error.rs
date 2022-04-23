@@ -295,9 +295,9 @@ pub struct ErrorReport {
     note: Option<String>,
 }
 
-impl Into<EmeraldSource> for CodeArea {
-    fn into(self) -> EmeraldSource {
-        self.source
+impl From<CodeArea> for EmeraldSource {
+    fn from(area: CodeArea) -> Self {
+        area.source
     }
 }
 
@@ -325,15 +325,15 @@ impl RainbowColorGenerator {
         let x = c * (1.0 - (h1.rem_euclid(2.0) - 1.0).abs());
         
         let (r, g, b) =
-            if 0.0 <= h1 && h1 < 1.0 {
+            if (0.0..1.0).contains(&h1) {
                 (c, x, 0.0)
-            } else if 1.0 <= h1 && h1 < 2.0 {
+            } else if (1.0..2.0).contains(&h1) {
                 (x, c, 0.0)
-            } else if 2.0 <= h1 && h1 < 3.0 {
+            } else if (2.0..3.0).contains(&h1) {
                 (0.0, c, x)
-            } else if 3.0 <= h1 && h1 < 4.0 {
+            } else if (3.0..4.0).contains(&h1) {
                 (0.0, x, c)
-            } else if 4.0 <= h1 && h1 < 5.0 {
+            } else if (4.0..5.0).contains(&h1) {
                 (x, 0.0, c)
             } else {
                 (c, 0.0, x)
@@ -412,8 +412,8 @@ impl ToReport for SyntaxError {
                 source: used_again.clone(),
                 message: format!("Duplicate argument name '{}' in function definition", arg_name),
                 labels: vec![
-                    (first_used.clone(), format!("Argument name first used here")),
-                    (used_again.clone(), format!("Used again here")),
+                    (first_used.clone(), "Argument name first used here".to_string()),
+                    (used_again.clone(), "Used again here".to_string()),
                 ],
                 note: None,
             },
@@ -437,8 +437,8 @@ impl ToReport for SyntaxError {
                 source: used_again.clone(),
                 message: format!("Duplicate field name '{}' in struct", field_name),
                 labels: vec![
-                    (first_used.clone(), format!("Field name first used here")),
-                    (used_again.clone(), format!("Used again here")),
+                    (first_used.clone(), "Field name first used here".to_string()),
+                    (used_again.clone(), "Used again here".to_string()),
                 ],
                 note: None,
             },
@@ -450,8 +450,8 @@ impl ToReport for SyntaxError {
                 source: used_again.clone(),
                 message: format!("Duplicate field name '{}' in impl", field_name),
                 labels: vec![
-                    (first_used.clone(), format!("Field name first used here")),
-                    (used_again.clone(), format!("Used again here")),
+                    (first_used.clone(), "Field name first used here".to_string()),
+                    (used_again.clone(), "Used again here".to_string()),
                 ],
                 note: None,
             },
@@ -463,8 +463,8 @@ impl ToReport for SyntaxError {
                 source: used_again.clone(),
                 message: format!("Duplicate field name '{}' in struct variant", field_name),
                 labels: vec![
-                    (first_used.clone(), format!("Field name first used here")),
-                    (used_again.clone(), format!("Used again here")),
+                    (first_used.clone(), "Field name first used here".to_string()),
+                    (used_again.clone(), "Used again here".to_string()),
                 ],
                 note: None,
             },
@@ -476,8 +476,8 @@ impl ToReport for SyntaxError {
                 source: used_again.clone(),
                 message: format!("Duplicate key '{}' in dict", key_name),
                 labels: vec![
-                    (first_used.clone(), format!("Key first used here")),
-                    (used_again.clone(), format!("Used again here")),
+                    (first_used.clone(), "Key first used here".to_string()),
+                    (used_again.clone(), "Used again here".to_string()),
                 ],
                 note: None,
             },
@@ -485,9 +485,9 @@ impl ToReport for SyntaxError {
                 area,
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("'self' must be the first argument"),
+                message: "'self' must be the first argument".to_string(),
                 labels: vec![
-                    (area.clone(), format!("Argument 'self' defined here"))
+                    (area.clone(), "Argument 'self' defined here".to_string())
                 ],
                 note: None,
             },
@@ -498,7 +498,7 @@ impl ToReport for SyntaxError {
                 source: area.clone(),
                 message: (if *in_rot {"Cannot use caret coords in rotation"} else {"Cannot mix caret coords and relative/absolute coords"}).to_string(),
                 labels: vec![
-                    (area.clone(), format!("Coord used here"))
+                    (area.clone(), "Coord used here".to_string())
                 ],
                 note: None,
             },
@@ -510,8 +510,8 @@ impl ToReport for SyntaxError {
                 source: used_again.clone(),
                 message: format!("Duplicate variant name '{}' in enum definition", variant_name),
                 labels: vec![
-                    (first_used.clone(), format!("Variant name first used here")),
-                    (used_again.clone(), format!("Used again here")),
+                    (first_used.clone(), "Variant name first used here".to_string()),
+                    (used_again.clone(), "Used again here".to_string()),
                 ],
                 note: None,
             },
@@ -523,8 +523,8 @@ impl ToReport for SyntaxError {
                 source: used_again.clone(),
                 message: format!("The target selector argument '{}' can only be used once", arg_name),
                 labels: vec![
-                    (first_used.clone(), format!("Argument first used here")),
-                    (used_again.clone(), format!("Used again here")),
+                    (first_used.clone(), "Argument first used here".to_string()),
+                    (used_again.clone(), "Used again here".to_string()),
                 ],
                 note: None,
             },
@@ -535,7 +535,7 @@ impl ToReport for SyntaxError {
                 source: used.clone(),
                 message: format!("Target selector argument '{}' doesn't exist", arg_name),
                 labels: vec![
-                    (used.clone(), format!("Argument used here")),
+                    (used.clone(), "Argument used here".to_string()),
                 ],
                 note: None,
             },
@@ -543,9 +543,9 @@ impl ToReport for SyntaxError {
                 used,
             } => ErrorReport {
                 source: used.clone(),
-                message: format!("Target selector argument 'type' can only be used in @e and @s"),
+                message: "Target selector argument 'type' can only be used in @e and @s".to_string(),
                 labels: vec![
-                    (used.clone(), format!("Argument used here")),
+                    (used.clone(), "Argument used here".to_string()),
                 ],
                 note: None,
             },
@@ -610,7 +610,7 @@ impl ToReport for RuntimeError {
                 message: format!("Required argument '{}' was not provided", arg_name),
                 labels: vec![
                     (arg_area.clone(), format!("Argument '{}' defined here", arg_name.fg(colors.next()))),
-                    (call_area.clone(), format!("Argument was not provided here"))
+                    (call_area.clone(), "Argument was not provided here".to_string())
                 ],
                 note: None,
             },
@@ -642,10 +642,10 @@ impl ToReport for RuntimeError {
                 outer_area,
             } => ErrorReport {
                 source: break_area.clone(),
-                message: format!("Break used outside of loop"),
+                message: "Break used outside of loop".to_string(),
                 labels: vec![
-                    (break_area.clone(), format!("Break was used here")),
-                    (outer_area.clone(), format!("Reached here")),
+                    (break_area.clone(), "Break was used here".to_string()),
+                    (outer_area.clone(), "Reached here".to_string()),
                 ],
                 note: None,
             },
@@ -654,10 +654,10 @@ impl ToReport for RuntimeError {
                 outer_area,
             } => ErrorReport {
                 source: continue_area.clone(),
-                message: format!("Continue used outside of loop"),
+                message: "Continue used outside of loop".to_string(),
                 labels: vec![
-                    (continue_area.clone(), format!("Continue was used here")),
-                    (outer_area.clone(), format!("Reached here")),
+                    (continue_area.clone(), "Continue was used here".to_string()),
+                    (outer_area.clone(), "Reached here".to_string()),
                 ],
                 note: None,
             },
@@ -665,9 +665,9 @@ impl ToReport for RuntimeError {
                 return_area,
             } => ErrorReport {
                 source: return_area.clone(),
-                message: format!("Return reached outside program"),
+                message: "Return reached outside program".to_string(),
                 labels: vec![
-                    (return_area.clone(), format!("Return was used here")),
+                    (return_area.clone(), "Return was used here".to_string()),
                 ],
                 note: None,
             },
@@ -675,9 +675,9 @@ impl ToReport for RuntimeError {
                 break_area,
             } => ErrorReport {
                 source: break_area.clone(),
-                message: format!("Break reached outside program"),
+                message: "Break reached outside program".to_string(),
                 labels: vec![
-                    (break_area.clone(), format!("Break was used here")),
+                    (break_area.clone(), "Break was used here".to_string()),
                 ],
                 note: None,
             },
@@ -685,9 +685,9 @@ impl ToReport for RuntimeError {
                 continue_area,
             } => ErrorReport {
                 source: continue_area.clone(),
-                message: format!("Continue reached outside program"),
+                message: "Continue reached outside program".to_string(),
                 labels: vec![
-                    (continue_area.clone(), format!("Continue was used here")),
+                    (continue_area.clone(), "Continue was used here".to_string()),
                 ],
                 note: None,
             },
@@ -715,8 +715,8 @@ impl ToReport for RuntimeError {
                 source: used.clone(),
                 message: format!("Nonexistent struct field {}", field_name),
                 labels: vec![
-                    (used.clone(), format!("Field name used here")),
-                    (struct_def.clone(), format!("Struct defined here")),
+                    (used.clone(), "Field name used here".to_string()),
+                    (struct_def.clone(), "Struct defined here".to_string()),
                 ],
                 note: None,
             },
@@ -726,12 +726,12 @@ impl ToReport for RuntimeError {
                 struct_def
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("Missing struct fields"),
+                message: "Missing struct fields".to_string(),
                 labels: vec![
                     (area.clone(), format!("Missing struct fields {} here", fields.iter().map(
                         |f| format!("{}", f.fg(colors.next()))
                     ).collect::<Vec<String>>().join(", "))),
-                    (struct_def.clone(), format!("Struct defined here")),
+                    (struct_def.clone(), "Struct defined here".to_string()),
                 ],
                 note: None,
             },
@@ -753,9 +753,9 @@ impl ToReport for RuntimeError {
                 area,
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("Can't instance non-struct"),
+                message: "Can't instance non-struct".to_string(),
                 labels: vec![
-                    (area.clone(), format!("This isn't a struct type"))
+                    (area.clone(), "This isn't a struct type".to_string())
                 ],
                 note: None,
             },
@@ -763,9 +763,9 @@ impl ToReport for RuntimeError {
                 area,
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("Can't instance variant of non-enum"),
+                message: "Can't instance variant of non-enum".to_string(),
                 labels: vec![
-                    (area.clone(), format!("This isn't an enum type"))
+                    (area.clone(), "This isn't an enum type".to_string())
                 ],
                 note: None,
             },
@@ -803,7 +803,7 @@ impl ToReport for RuntimeError {
                 // area2
             } => ErrorReport {
                 source: type_area.clone(),
-                message: format!("Pattern mismatch"),
+                message: "Pattern mismatch".to_string(),
                 labels: vec![
                     (pattern_area.clone(), format!("Pattern defined as {} here", pattern.fg(colors.next()))),
                     (type_area.clone(), format!("This {} is not {}", typ.fg(colors.next()), pattern.fg(colors.next()))),
@@ -829,7 +829,7 @@ impl ToReport for RuntimeError {
                 source: area.clone(),
                 message: format!("File at path '{}' was not found", path),
                 labels: vec![
-                    (area.clone(), format!("Import used here"))
+                    (area.clone(), "Import used here".to_string())
                 ],
                 note: None,
             },
@@ -841,11 +841,11 @@ impl ToReport for RuntimeError {
                 for i in &labels {
                     println!("{:#?}", i.0);
                 }
-                labels.insert(0, (import_area.clone(), format!("Import used here")));
+                labels.insert(0, (import_area.clone(), "Import used here".to_string()));
 
                 ErrorReport {
                     source: import_area.clone(),
-                    message: format!("Error parsing this import"),
+                    message: "Error parsing this import".to_string(),
                     labels,
                     note: None,
                 }
@@ -854,9 +854,9 @@ impl ToReport for RuntimeError {
                 import_area,
             } => ErrorReport {
                 source: import_area.clone(),
-                message: format!("Can't import in eval"),
+                message: "Can't import in eval".to_string(),
                 labels: vec![
-                    (import_area.clone(), format!("Import used here"))
+                    (import_area.clone(), "Import used here".to_string())
                 ],
                 note: None,
             },
@@ -867,7 +867,7 @@ impl ToReport for RuntimeError {
                 area2,
             } => ErrorReport {
                 source: area1.clone(),
-                message: format!("Equality assertion failed"),
+                message: "Equality assertion failed".to_string(),
                 labels: vec![
                     (area1.clone(), format!("Found {} here", value1.fg(colors.next()))),
                     (area2.clone(), format!("Found {} here", value2.fg(colors.next()))),
@@ -940,8 +940,8 @@ impl ToReport for RuntimeError {
                 source: used.clone(),
                 message: format!("Nonexistent enum variant {}", variant_name),
                 labels: vec![
-                    (used.clone(), format!("Variant name used here")),
-                    (enum_def.clone(), format!("Enum defined here")),
+                    (used.clone(), "Variant name used here".to_string()),
+                    (enum_def.clone(), "Enum defined here".to_string()),
                 ],
                 note: None,
             },
@@ -953,7 +953,7 @@ impl ToReport for RuntimeError {
                 variant_def,
             } => ErrorReport {
                 source: used.clone(),
-                message: format!("Wrong enum variant type"),
+                message: "Wrong enum variant type".to_string(),
                 labels: vec![
                     (used.clone(), format!("Expected {} variant, found {} variant", expected.fg(colors.next()), found.fg(colors.next()))),
                     (variant_def.clone(), format!("Variant {} defined as {} type here", variant_name.fg(colors.next()), expected.fg(colors.next()))),
@@ -984,7 +984,7 @@ impl ToReport for RuntimeError {
                 source: used.clone(),
                 message: format!("Nonexistent struct variant field {}", field_name),
                 labels: vec![
-                    (used.clone(), format!("Field name used here")),
+                    (used.clone(), "Field name used here".to_string()),
                     (variant_def.clone(), format!("Variant {} defined here", variant_name.fg(colors.next()))),
                 ],
                 note: None,
@@ -996,7 +996,7 @@ impl ToReport for RuntimeError {
                 variant_def,
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("Missing struct variant fields"),
+                message: "Missing struct variant fields".to_string(),
                 labels: vec![
                     (area.clone(), format!("Missing struct fields {} here", fields.iter().map(
                         |f| format!("{}", f.fg(colors.next()))
@@ -1026,7 +1026,7 @@ impl ToReport for RuntimeError {
                 found_area,
             } => ErrorReport {
                 source: found_area.clone(),
-                message: format!("Wrong enum variant type to destructure"),
+                message: "Wrong enum variant type to destructure".to_string(),
                 labels: vec![
                     (expected_area.clone(), format!("Tried to destructure into {} variant here", expected.fg(colors.next()))),
                     (found_area.clone(), format!("Found {} variant here", found.fg(colors.next()))),
@@ -1051,7 +1051,7 @@ impl ToReport for RuntimeError {
                 arg_name,
             } => ErrorReport {
                 source: value_area.clone(),
-                message: format!("Incorrect selector argument type"),
+                message: "Incorrect selector argument type".to_string(),
                 labels: vec![
                     (value_area.clone(), format!("Selector argument {} takes a {}", arg_name.fg(colors.next()), expected.fg(colors.next()))),
                 ],
@@ -1062,9 +1062,9 @@ impl ToReport for RuntimeError {
                 area
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("{}", msg),
+                message: msg.to_string(),
                 labels: vec![
-                    (area.clone(), format!("Thrown here")),
+                    (area.clone(), "Thrown here".to_string()),
                 ],
                 note: None,
             },
@@ -1074,7 +1074,7 @@ impl ToReport for RuntimeError {
                 area,
             } => ErrorReport {
                 source: area.clone(),
-                message: format!("{}", msg),
+                message: msg.to_string(),
                 labels: labels.iter().map(
                     |(s, a)|
                     (a.clone(), s.clone())
@@ -1088,16 +1088,16 @@ impl ToReport for RuntimeError {
 
 impl RuntimeError {
     pub fn is_destructure_error(&self) -> bool {
-        match self {
+        matches!(
+            self,
             RuntimeError::EqualAssertionFailed { .. } |
             RuntimeError::DestructureTypeMismatch { .. } |
             RuntimeError::DestructureOptionMismatch { .. } |
             RuntimeError::DestructureVariantMismatch { .. } |
             RuntimeError::DestructureLengthMismatch { .. } |
             RuntimeError::DestructureIncorrectVariantType { .. } |
-            RuntimeError::DestructureNonExistentKeyField { .. } => true,
-            _ => false,
-        }
+            RuntimeError::DestructureNonExistentKeyField { .. }
+        )
     }
 }
 

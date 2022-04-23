@@ -11,7 +11,6 @@ mod generator;
 
 use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
-use ansi_term;
 use ariadne::Source;
 use error::{ToReport, RuntimeError};
 use fnv::FnvHashMap;
@@ -53,6 +52,7 @@ impl ariadne::Span for CodeArea {
     }
 }
 
+#[derive(Default)]
 pub struct EmeraldCache {
     files: HashMap<EmeraldSource, Source>
 }
@@ -80,11 +80,6 @@ impl ariadne::Cache<EmeraldSource> for EmeraldCache {
     }
 }
 
-impl Default for EmeraldCache {
-    fn default() -> Self {
-        Self { files: HashMap::new() }
-    }
-}
 
 macro_rules! area {
     ($source:expr, $area:expr) => {
@@ -101,17 +96,14 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     let mut tokens_iter = lexer::Token
         ::lexer(&code);
     let mut tokens = vec![];
-    loop {
-        match tokens_iter.next() {
-            Some(t) => tokens.push((
-                t,
-                (
-                    tokens_iter.span().start,
-                    tokens_iter.span().end,
-                )
-            )),
-            None => break,
-        }
+    while let Some(t) = tokens_iter.next() {
+        tokens.push((
+            t,
+            (
+                tokens_iter.span().start,
+                tokens_iter.span().end,
+            )
+        ))
     }
     tokens.push((
         lexer::Token::Eof,
@@ -130,15 +122,22 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             
             globals.init_global(base_scope, source.clone());
 
+
+            use std::time::Instant;
+            let start = Instant::now();
             let mut result = execute(
                 &node,
                 base_scope,
                 &mut globals,
                 &source,
             );
+            let duration = start.elapsed();
+
+            println!("Time elapsed in expensive_function() is: {:?}", duration);
+
             // println!("collect: {} {} {}", globals.values.len(), globals.scopes.len(), globals.protected.len());
             
-            if let Ok(_) = result {
+            if result.is_ok() {
                 result = match globals.exits.last() {
                     Some(
                         Exit::Return(_, span)
@@ -174,16 +173,16 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             match result {
                 Ok(pos) => {
                     if print_return {
-                        println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint(format!("{}", globals.get(pos).value.to_str(&globals, &mut vec![]))))
+                        println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint( globals.get(pos).value.to_str(&globals, &mut vec![]) ))
                     }
 
                     generate_datapack(&globals);
 
-                    return true
+                    true
                 },
                 Err(e) => {
                     e.to_report().print_error(cache, &globals);
-                    return false
+                    false
                 },
             }
 
@@ -191,7 +190,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
         Err(e) => {
             let gaga = e.to_report();
             gaga.print_error(cache, &globals);
-            return false
+            false
         },
     }
 
@@ -239,7 +238,7 @@ fn main() {
                 .read_line(&mut input_str)
                 .expect("Failed to read line");
             
-            let input_str = input_str.replace("\r", "");
+            let input_str = input_str.replace('\r', "");
             let mut input_str = input_str.chars();
             input_str.next_back();
             if run(repl_code.clone() + input_str.as_str(), EmeraldSource::String(repl_code.clone() + input_str.as_str()), true) {

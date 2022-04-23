@@ -53,13 +53,12 @@ macro_rules! builtin_types {
                 _ => unreachable!(),
             }
         }
-        pub fn builtin_type_names() -> Vec<String> {
-            let mut list = vec![];
+
+        pub const BUILTIN_TYPE_NAMES: &[&str] = &[
             $(
-                list.push(stringify!($type_name).to_string());
+                stringify!($type_name),
             )*
-            list
-        }
+        ];
 
     };
 }
@@ -118,13 +117,11 @@ macro_rules! builtins {
         //         )*
         //     }
         // }
-        pub fn builtin_names() -> Vec<String> {
-            let mut list = vec![];
+        pub const BUILTIN_NAMES: &[&str] = &[
             $(
-                list.push(stringify!($func_name).to_string());
+                stringify!($func_name),
             )*
-            list
-        }
+        ];
         pub fn name_to_builtin(s: &str) -> Builtin {
             match s {
                 $(
@@ -307,7 +304,7 @@ builtins!{
     }
 
     [Input]: input(s: String) {
-        print!("{}", format!("{}", s));
+        print!("{}", s);
         io::stdout().flush().unwrap();
         let mut input_str = String::new();
         io::stdin()
@@ -315,8 +312,8 @@ builtins!{
             .expect("Failed to read line");
         Value::String(
             input_str
-                .replace("\r", "")
-                .replace("\n", "")
+                .replace('\r', "")
+                .replace('\n', "")
         )
     }
 

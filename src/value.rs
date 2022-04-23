@@ -37,14 +37,17 @@ impl ValueType {
     pub fn to_str(&self, globals: &Globals) -> String {
         match self {
             ValueType::Builtin(b) => builtin_type_str(b.clone()),
-            ValueType::CustomStruct(id) => match &globals.custom_structs[*id] {
-                CustomStruct { name, .. } => name.to_string()
+            ValueType::CustomStruct(id) => {
+                let CustomStruct { name, .. } = &globals.custom_structs[*id];
+                name.to_string()
             },
-            ValueType::CustomEnum(id) => match &globals.custom_enums[*id] {
-                CustomEnum { name, .. } => name.to_string()
+            ValueType::CustomEnum(id) => {
+                let CustomEnum { name, .. } = &globals.custom_enums[*id];
+                name.to_string()
             },
-            ValueType::Module(id) => match &globals.modules[*id] {
-                Module { name, .. } => name.to_string()
+            ValueType::Module(id) => {
+                let Module { name, .. } = &globals.modules[*id];
+                name.to_string()
             },
         }
     }
@@ -77,7 +80,7 @@ pub enum Pattern {
 impl Pattern {
     pub fn to_str(&self, globals: &Globals) -> String {
         match self {
-            Pattern::Any => format!("_"),
+            Pattern::Any => "_".to_string(),
             Pattern::Type(t) => t.to_str(globals),
             Pattern::Either(a, b) => format!("({} | {})", a.to_str(globals), b.to_str(globals)),
             Pattern::Array(t, n) => match n {
@@ -121,7 +124,7 @@ impl Pattern {
             }
             (Pattern::Array(_, _), Pattern::Type(ValueType::Builtin(BuiltinType::Array))) => true,
             (Pattern::Type(ValueType::Builtin(BuiltinType::Array)), Pattern::Array(p, n)) => {
-                if let None = n {
+                if n.is_none() {
                     Pattern::Any.in_pat(p)
                 } else {
                     false
@@ -185,6 +188,7 @@ impl Pattern {
 }
 
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for Pattern {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
@@ -301,6 +305,7 @@ pub struct Range {
     pub step: f64,
 }
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for Range {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.start.map(|v| v.to_bits()).hash(state);
@@ -393,10 +398,10 @@ impl Value {
         match self {
             Value::Number(n) => n.to_string(),
             Value::Boolean(b) => b.to_string(),
-            Value::String(s) => if visited.len() > 0 {
+            Value::String(s) => if !visited.is_empty() {
                 format!("\"{}\"", s)
             } else {
-                format!("{}", s)
+                s.clone()
             },
             Value::Option(o) => match o {
                 Some(v) => {
@@ -408,7 +413,7 @@ impl Value {
                     visited.pop();
                     out_str
                 },
-                None => format!("#"),
+                None => "#".to_string(),
             },
             Value::Builtin(b) => format!("<builtin: {}>", builtin_to_name(*b)),
             Value::Function( Function {args, ret_pattern, ..} ) => format!("({}) {} ...", args.iter().map(| FuncArg {
@@ -430,14 +435,14 @@ impl Value {
                     //     Value::Type(t) => Pattern::Type(t.clone()).to_str(globals),
                     //     other => other.to_str(globals, visited),
                     // }),
-                    None => format!("=>"),
+                    None => "=>".to_string(),
                 }),
             Value::Array(arr) => {
                 if visited.contains(&self) {
                     return "[...]".to_string()
                 }
                 visited.push( self );
-                let out_str = "[".to_string() + &arr.into_iter().map(
+                let out_str = "[".to_string() + &arr.iter().map(
                     |i| globals.get(*i).value.to_str(globals, visited)
                 ).collect::<Vec<String>>().join(", ") + "]";
                 visited.pop();
@@ -448,7 +453,7 @@ impl Value {
                     return "(...)".to_string()
                 }
                 visited.push( self );
-                let out_str = "(".to_string() + &arr.into_iter().map(
+                let out_str = "(".to_string() + &arr.iter().map(
                     |i| globals.get(*i).value.to_str(globals, visited)
                 ).collect::<Vec<String>>().join(", ") + ")";
                 visited.pop();
@@ -459,7 +464,7 @@ impl Value {
                     return "{...}".to_string()
                 }
                 visited.push( self );
-                let out_str = "{".to_string() + &map.into_iter().map(
+                let out_str = "{".to_string() + &map.iter().map(
                     |(k, v)| format!("{}: {}", k, globals.get(*v).value.to_str(globals, visited))
                 ).collect::<Vec<String>>().join(", ") + "}";
                 visited.pop();
@@ -467,27 +472,29 @@ impl Value {
             },
             Value::Type(v) => match v {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
-                ValueType::CustomStruct(pos) => match &globals.custom_structs[*pos] {
-                    CustomStruct { name, .. } => format!("<struct {:?}: {}>", pos, name)
+                ValueType::CustomStruct(pos) => {
+                    let CustomStruct { name, .. } = &globals.custom_structs[*pos];
+                    format!("<struct {:?}: {}>", pos, name)
                 },
-                ValueType::CustomEnum(pos) => match &globals.custom_enums[*pos] {
-                    CustomEnum { name, .. } => format!("<enum {:?}: {}>", pos, name)
+                ValueType::CustomEnum(pos) => {
+                    let CustomEnum { name, .. } = &globals.custom_enums[*pos];
+                    format!("<enum {:?}: {}>", pos, name)
                 },
-                ValueType::Module(pos) => match &globals.modules[*pos] {
-                    Module { name, .. } => format!("<mod {:?}: {}>", pos, name)
+                ValueType::Module(pos) => {
+                    let Module { name, .. } = &globals.modules[*pos];
+                    format!("<mod {:?}: {}>", pos, name)
                 },
             },
             Value::StructInstance { struct_id, fields } => {
 
-                let name = match &globals.custom_structs[*struct_id] {
-                    CustomStruct { name, .. } => name,
-                };
+                let CustomStruct { name, .. } = &globals.custom_structs[*struct_id];
+                let name = name;
 
                 if visited.contains(&self) {
                     return name.clone() + "::{...}"
                 }
                 visited.push( self );
-                let out_str = "{".to_string() + &fields.into_iter().map(
+                let out_str = "{".to_string() + &fields.iter().map(
                     |(k, v)| format!("{}: {}", k, globals.get(*v).value.to_str(globals, visited))
                 ).collect::<Vec<String>>().join(", ") + "}";
                 visited.pop();
@@ -498,9 +505,8 @@ impl Value {
                 variant_name,
                 variant
             } => {
-                let name = match &globals.custom_enums[*enum_id] {
-                    CustomEnum { name, .. } => name,
-                };
+                let CustomEnum { name, .. } = &globals.custom_enums[*enum_id];
+                let name = name;
 
                 match variant {
                     InstanceVariant::Unit => format!("{}:{}", name, variant_name),
@@ -509,7 +515,7 @@ impl Value {
                             return format!("{}:{} (...)", name, variant_name)
                         }
                         visited.push( self );
-                        let out_str = "(".to_string() + &arr.into_iter().map(
+                        let out_str = "(".to_string() + &arr.iter().map(
                             |i| globals.get(*i).value.to_str(globals, visited)
                         ).collect::<Vec<String>>().join(", ") + ")";
                         visited.pop();
@@ -520,7 +526,7 @@ impl Value {
                             return format!("{}:{} {{...}} ", name, variant_name)
                         }
                         visited.push( self );
-                        let out_str = "{".to_string() + &fields.into_iter().map(
+                        let out_str = "{".to_string() + &fields.iter().map(
                             |(k, v)| format!("{}: {}", k, globals.get(*v).value.to_str(globals, visited))
                         ).collect::<Vec<String>>().join(", ") + "}";
                         visited.pop();
@@ -546,7 +552,7 @@ impl Value {
                     )
                 }
             }
-            Value::McFunc(_) => format!("!{{...}}"),
+            Value::McFunc(_) => "!{{...}}".to_string(),
             Value::McVector(v) => {
                 match v {
                     McVector::Pos(
@@ -585,7 +591,7 @@ impl Value {
                     return out_str + "[...]"
                 }
                 visited.push( self );
-                if s.args.len() > 0 {
+                if !s.args.is_empty() {
                     out_str += &("[".to_string() + &s.args.iter().map(
                         |(s, v)| format!("{} = {}", s, globals.get(*v).value.to_str(globals, visited))
                     ).collect::<Vec<String>>().join(", ") + "]")[..];
@@ -672,9 +678,7 @@ impl Value {
 
                         if let Some(Located{inner: p, ..}) = ret_pattern {
                             if !p.in_pat(ret) {return false}
-                        } else {
-                            if !Pattern::Any.in_pat(ret) {return false}
-                        }
+                        } else if !Pattern::Any.in_pat(ret) {return false}
 
                         for (FuncArg { pattern: a, .. }, b) in args.iter().zip(v) {
                             if let Some(Located{inner: a, ..}) = a {
@@ -726,19 +730,17 @@ impl Value {
                 }
             },
             Value::Dictionary(map) => {
-                for (_, i) in map {
+                for i in map.values() {
                     values.insert(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
             },
-            Value::Option(o) => {
-                if let Some(i) = o {
-                    values.insert(*i);
-                    globals.get(*i).value.get_references(globals, values, scopes);
-                }
+            Value::Option(Some(i)) => {
+                values.insert(*i);
+                globals.get(*i).value.get_references(globals, values, scopes);
             },
             Value::StructInstance { fields, .. } => {
-                for (_, i) in fields {
+                for i in fields.values() {
                     values.insert(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
@@ -753,7 +755,7 @@ impl Value {
                         }
                     },
                     InstanceVariant::Struct { fields } => {
-                        for (_, i) in fields {
+                        for i in fields.values() {
                             values.insert(*i);
                             globals.get(*i).value.get_references(globals, values, scopes);
                         }
@@ -797,14 +799,14 @@ impl Iterator for ValueIter {
 
         match self {
             ValueIter::List(v, i) => {
-                let ret = v.get(*i).map(|v| v.clone());
+                let ret = v.get(*i).cloned();
                 *i += 1;
                 ret
             },
             ValueIter::Range { start, step, end, current } => {
                 let ret = *current;
                 *current += *step;
-                return if let Some(e) = *end {
+                if let Some(e) = *end {
                     if if *start <= e {
                         ret < e
                     } else {
@@ -835,7 +837,7 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "bool".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
                 } )
@@ -855,7 +857,7 @@ pub mod value_ops {
             
             Value::Range(Range { start, end, step }) => Ok(
                 {
-                    if let None = start {
+                    if start.is_none() {
                         return Err( RuntimeError::CannotIter {
                             typ: a.value.type_str(globals),
                             area,
@@ -873,7 +875,7 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "array, range, string, or dict".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
                 } )
@@ -946,7 +948,7 @@ pub mod value_ops {
             (_, value) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "type".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), b.def_area.clone())],
                 } )
@@ -964,7 +966,7 @@ pub mod value_ops {
             (_, value) => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "type or pattern".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), b.def_area.clone())],
                 } )
@@ -1077,8 +1079,8 @@ pub mod value_ops {
             (Value::Range(r), Value::Number(mult)) |
             (Value::Number(mult), Value::Range(r)) => {
                 let new_range = Range {
-                    start: if let Some(n) = r.start {Some(n * mult)} else { None },
-                    end: if let Some(n) = r.end {Some(n * mult)} else { None },
+                    start: r.start.map(|n| n * mult),
+                    end: r.end.map(|n| n * mult),
                     step: r.step * mult,
                 };
                 Ok(Value::Range(new_range))
@@ -1158,7 +1160,7 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
                 } )
@@ -1172,7 +1174,7 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
                 } )
@@ -1188,7 +1190,7 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "bool".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
                 } )
@@ -1368,7 +1370,7 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
                 } )
@@ -1386,7 +1388,7 @@ pub mod value_ops {
             value => {
                 Err( RuntimeError::TypeMismatch {
                     expected: "number".to_string(),
-                    found: format!("{}", value.type_str(globals)),
+                    found: value.type_str(globals),
                     area,
                     defs: vec![(value.type_str(globals), a.def_area.clone())],
                 } )
@@ -1525,7 +1527,7 @@ pub mod value_ops {
 
             (value, Value::Dictionary(_) | Value::String(_)) => Err( RuntimeError::TypeMismatch {
                 expected: "string".to_string(),
-                found: format!("{}", value.type_str(globals)),
+                found: value.type_str(globals),
                 area: a.def_area.clone(),
                 defs: vec![(value.type_str(globals), a.def_area.clone())],
             } ),
