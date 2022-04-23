@@ -78,12 +78,23 @@ impl MC {
         }!;
     },
     for_loop: (r: range | ScoreRange, f: (MCInt) -> _) => {
+
+        if r.start == # || r.end == # { throw "Cannot have unbounded ranges in a runtime loop"; }
+        let start = match r.start {
+            case #(v) -> v,
+            case v -> v,
+        };
+        let end = match r.end {
+            case #(v) -> v,
+            case v -> v,
+        };
+
         let i = MCInt::new(0);
-        i = r.start;
-        (i < r.end).then(!{
+        i = start;
+        (i < end).then(!{
             f(i);
             i += r.step;
-            (i < r.end).then($);
+            (i < end).then($);
         });
     },
     after: (time: number, f: mc_func) => {

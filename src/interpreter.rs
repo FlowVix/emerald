@@ -174,7 +174,7 @@ impl Globals {
 
     pub fn new() -> (Self, ScopePos) {
         let mut scopes = SlotMap::with_key();
-        let base_scope = scopes.insert(Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![], func_id: McFuncID::default() });
+        let base_scope = scopes.insert(Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![], func_id: 0 });
         (
             Self {
                 values: SlotMap::with_key(),
@@ -195,7 +195,7 @@ impl Globals {
                 import_trace: vec![],
                 exports: vec![],
                 import_caches: HashMap::new(),
-                mcfuncs: vec![],
+                mcfuncs: vec![vec![]],
             },
             base_scope,
         )
@@ -1589,10 +1589,10 @@ pub fn execute(
                 BlockType::Regular { .. } => execute!(code => globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id)),
                 BlockType::McFunc => {
                     let derived = globals.derive_scope_mcfunc(scope_id);
-                    globals.mcfuncs.push(vec![]);
+                    let id = globals.mcfuncs.len() - 1;
                     execute!(code => derived);
                     globals.insert_value(
-                        Value::McFunc(globals.mcfuncs.len()),
+                        Value::McFunc(id),
                         area!(source.clone(), node.span),
                     )
                 },

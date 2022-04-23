@@ -53,42 +53,42 @@ impl RuntimeCondition {
                             },
                             MCFloat -> {
                                 let diff = right - left;
-                                match comp {
-                                    case CompType:Equal -> diff.is_0().then(f),
-                                    case CompType:Greater -> diff.is_negative().then(f),
-                                    case CompType:GreaterEq -> (diff.is_negative() || diff.is_0()).then(f),
-                                    case CompType:Lesser -> diff.is_over_0().then(f),
-                                    case CompType:LesserEq -> diff.is_positive().then(f),
-                                }
+                                if match comp {
+                                    case CompType:Equal -> diff.is_0(),
+                                    case CompType:Greater -> diff.is_negative(),
+                                    case CompType:GreaterEq -> (diff.is_negative() || diff.is_0()),
+                                    case CompType:Lesser -> diff.is_over_0(),
+                                    case CompType:LesserEq -> diff.is_positive(),
+                                } {f!;}
                             },
                         }
                     },
                     MCFloat -> {
                         let diff = left - right;
                         
-                        match comp {
-                            case CompType:Equal -> diff.is_0().then(f),
-                            case CompType:Greater -> diff.is_over_0().then(f),
-                            case CompType:GreaterEq -> diff.is_positive().then(f),
-                            case CompType:Lesser -> diff.is_negative().then(f),
-                            case CompType:LesserEq -> (diff.is_negative() || diff.is_0()).then(f),
-                        }
+                        if match comp {
+                            case CompType:Equal -> diff.is_0(),
+                            case CompType:Greater -> diff.is_over_0(),
+                            case CompType:GreaterEq -> diff.is_positive(),
+                            case CompType:Lesser -> diff.is_negative(),
+                            case CompType:LesserEq -> diff.is_negative() || diff.is_0(),
+                        } {f!;}
                     }
                 }
             },
             case RuntimeCondition:And (left, right) -> {
-                left.then(!{
-                    right.then(f);
-                });
+                if left {
+                    if right {f!;}
+                }
             },
             case RuntimeCondition:Or (left, right) -> {
                 let cond_check = MCInt::new(0);
                 let add = !{
                     cond_check += 1;
                 }
-                left.then(add);
-                right.then(add);
-                (cond_check > 0).then(f);
+                if left {add!;}
+                if right {add!;}
+                if cond_check > 0 {f!;}
             },
             case RuntimeCondition:IsBlock { pos, id } -> {
                 command("execute if block " + string(pos.x) + " " + string(pos.y) + " " + string(pos.z) + " " + id + " run " + f.str);

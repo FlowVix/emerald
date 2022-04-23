@@ -42,17 +42,17 @@ impl MCInt {
     length: (self) => {
         let s = self.clone();
         let l = MCInt::new(0);
-        MC::while_loop(=> s > 0, !{
+        while s > 0 {
             l += 1;
             s /= 10;
-        });
+        }
         return l;
     },
     trimmed: (self) => {
         let s = self.clone();
-        MC::while_loop(=> s > 0 && s % 10 == 0, !{
+        while s > 0 && s % 10 == 0 {
             s /= 10;
-        });
+        }
         return s;
     },
     to_float: (self) => {
@@ -163,14 +163,14 @@ impl MCInt {
     to_const: (self, r: range, f: (number) -> _) => {
         let score = self.clone();
         for i of r {
-            (score == i).then(!{f(i);});
+            if score == i {f(i);}
         }
     },
     abs: (self) => {
         let r = self.clone();
-        (self < 0).then(!{
+        if self < 0 {
             r *= -1;
-        });
+        }
         return r;
     },
 

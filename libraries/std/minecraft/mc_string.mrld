@@ -18,16 +18,16 @@ impl MCString {
             MCInt -> {
                 let s = MCString::new();
                 let _v = v.abs();
-                MC::do_while_loop(=> _v > 0, !{
+                MC::do_while_loop(() -> RuntimeCondition _v > 0, !{
                     let d = _v % 10;
                     d.to_const(0..10, i => {
                         command("data modify storage mrld str_" + string(s.id) + " prepend value \"" + string(i) + "\"");
                     });
                     _v /= 10;
                 });
-                (v < 0).then(!{
+                if v < 0 {
                     command("data modify storage mrld str_" + string(s.id) + " prepend value \"-\"");
-                });
+                }
                 return s;
             },
             MCFloat -> {
@@ -36,14 +36,14 @@ impl MCString {
                 let d_abs = v.decimals.abs();
                 let d = d_abs.trimmed();
                 let n = d_abs.length();
-                (n > 0).then(!{
+                if n > 0 {
                     n *= -1; n += 8;
-                });
+                }
                 s.push(MCString::from("0").repeat(n));
                 s.push(MCString::from(d));
-                v.is_negative().then(!{
+                if v.is_negative() {
                     command("data modify storage mrld str_" + string(s.id) + " prepend value \"-\"");
-                });
+                }
                 return s;
             },
             MCString -> {

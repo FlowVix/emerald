@@ -1,10 +1,10 @@
 
 
 
-let a = 0;
-while a < 100000 {
-    a += 1;
-}
-print(a);
+
+extract import? "libraries/std/lib.mrld";
 
 
+MC::for_loop(...6, i => {
+    MC::print([i]);
+});

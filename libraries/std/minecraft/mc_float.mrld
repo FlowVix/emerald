@@ -17,13 +17,13 @@ let {
 export let MCFloat = MCFloat;
 
 func carry(w: MCInt, d: MCInt, mult: #[MCInt]) {
-    (d > BOUND).then(!{
+    if d > BOUND {
         w += match mult {
             case #(mult) -> d / 100000000 * mult,
             case # -> d / 100000000,
         }
         d %= 100000000;
-    });
+    }
 }
 
 
@@ -51,23 +51,23 @@ impl MCFloat {
     print: (self) => MC::print([self]),
 
     adjust: (self) => {
-        (self.whole > 0 && self.decimals < 0).then(!{
+        if self.whole > 0 && self.decimals < 0 {
             self.whole -= 1;
             self.decimals += 100000000;
-        });
-        (self.whole < 0 && self.decimals > 0).then(!{
+        }
+        if self.whole < 0 && self.decimals > 0 {
             self.whole += 1;
             self.decimals -= 100000000;
-        });
+        }
 
-        (self.decimals > BOUND).then(!{
+        if self.decimals > BOUND {
             self.whole += self.decimals / 100000000;
             self.decimals %= 100000000;
-        });
-        (self.decimals < -BOUND).then(!{
+        }
+        if self.decimals < -BOUND {
             self.whole += self.decimals / 100000000;
             self.decimals %= 100000000;
-        });
+        }
     },
     is_over_0: (self) => {
         self.whole > 0 || self.decimals > 0;
@@ -146,14 +146,14 @@ impl MCFloat {
                     let wh = w.clone();
                     let exp = MCInt::new(0);
                     let pow10 = MCInt::new(1);
-                    MC::while_loop(=> wh > 0, !{
+                    while wh > 0 {
                         let last_digit = wh % 10;
                         let dec = d.clone();
                         let temp = pow10.clone();
                         MC::for_loop(0..exp, i => {
                             dec *= 10;
                             temp /= 10;
-                            carry(result.whole, dec, last_digit * temp);
+                            carry(result.whole, dec, #(last_digit * temp));
                         });
                         dec *= last_digit;
                         carry(result.whole, dec, #);
@@ -162,7 +162,7 @@ impl MCFloat {
                         wh /= 10;
                         exp += 1;
                         pow10 *= 10;
-                    });
+                    }
                 }
 
                 w_d_mult(_self.whole, _other.decimals);
@@ -171,16 +171,16 @@ impl MCFloat {
                 let d1 = _self.decimals.clone();
                 let d2 = _other.decimals.clone();
                 let pow = MCInt::new(10000000);
-                MC::while_loop(=> pow > 0, !{
+                while pow > 0 {
                     let last_digit = d1 / pow % 10;
                     // MC::print([": ", last_digit]);
                     d2 /= 10;
                     result.decimals += d2 * last_digit;
                     carry(result.whole, result.decimals, #);
                     pow /= 10;
-                });
+                }
 
-                negate.then(!{ result.whole *= -1; result.decimals *= -1; });
+                if negate { result.whole *= -1; result.decimals *= -1; }
                 self.set(result);
             }
         }
@@ -202,16 +202,16 @@ impl MCFloat {
                 let result = MCFloat::new(0);
                 let increment = MCFloat::new(1);
                 let i = MCInt::new(0);
-                MC::while_loop(=> i < 9 && _other.is_over_0(), !{
-                    MC::while_loop(=> _self.is_positive(), !{
+                while i < 9 && _other.is_over_0() {
+                    while _self.is_positive() {
                         _self.subtract(_other);
                         result.add(increment);
-                    });
+                    }
                     _self.add(_other); result.subtract(increment);
                     _other.div10(); increment.div10();
                     i += 1;
-                });
-                negate.then(!{ result.whole *= -1; result.decimals *= -1; });
+                }
+                if negate { result.whole *= -1; result.decimals *= -1; }
                 self.set(result);
             }
         }
