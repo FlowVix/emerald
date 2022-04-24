@@ -84,22 +84,22 @@ pub struct Collector {
     pub marked_scopes: HashSet<ScopePos>,
 }
 
-impl Collector {
-    pub fn new(globals: &Globals) -> Self {
-        let mut marked_scopes = HashSet::new();
-        let mut marked_values = HashSet::new();
-        for (i, _) in &globals.values {
-            marked_values.insert(i);
-        }
-        for (i, _) in &globals.scopes {
-            marked_scopes.insert(i);
-        }
-        Self {
-            marked_values,
-            marked_scopes,
-        }
-    }
-}
+// impl Collector {
+//     pub fn new(globals: &Globals) -> Self {
+//         let mut marked_scopes = HashSet::new();
+//         let mut marked_values = HashSet::new();
+//         for (i, _) in &globals.values {
+//             marked_values.insert(i);
+//         }
+//         for (i, _) in &globals.scopes {
+//             marked_scopes.insert(i);
+//         }
+//         Self {
+//             marked_values,
+//             marked_scopes,
+//         }
+//     }
+// }
 
 
 #[derive(Debug, Clone)]
@@ -128,8 +128,8 @@ pub struct Register<K, V> {
 
 
 pub struct Globals {
-    pub values: SlotMap<ValuePos, StoredValue>,
-    pub scopes: SlotMap<ScopePos, Scope>,
+    pub values: SlotMap<ValuePos, (StoredValue, bool)>,
+    pub scopes: SlotMap<ScopePos, (Scope, bool)>,
 
     pub custom_structs: SlotMap<TypePos, CustomStruct>,
     pub custom_enums: SlotMap<TypePos, CustomEnum>,
@@ -178,12 +178,12 @@ impl Globals {
 
     pub fn new(interner: Rodeo) -> (Self, ScopePos) {
         let mut scopes = SlotMap::with_key();
-        let base_scope = scopes.insert( Scope {
+        let base_scope = scopes.insert( (Scope {
             vars: HashMap::new(),
             parent_id: None,
             extra_prot: vec![],
             func_id: 0
-        } );
+        }, false) );
         (
             Self {
                 values: SlotMap::with_key(),
@@ -274,10 +274,10 @@ impl Globals {
         value: Value,
         def_area: CodeArea,
     ) -> ValuePos {
-        self.values.insert( StoredValue {
+        self.values.insert( (StoredValue {
             value,
             def_area,
-        } )
+        }, false) )
     }
     pub fn set_value(
         &mut self,
@@ -314,13 +314,13 @@ impl Globals {
     }
     pub fn get(&self, id: ValuePos) -> &StoredValue {
         return match self.values.get(id) {
-            Some(v) => v,
+            Some(v) => &v.0,
             None => panic!("bad value fuck you"),
         }
     }
     pub fn get_mut(&mut self, id: ValuePos) -> &mut StoredValue {
         return match self.values.get_mut(id) {
-            Some(v) => v,
+            Some(v) => &mut v.0,
             None => panic!("bad mutable value fuck you"),
         }
     }
@@ -342,10 +342,10 @@ impl Globals {
 
 
     pub fn get_scope(&self, scope_id: ScopePos) -> &Scope {
-        self.scopes.get(scope_id).unwrap()
+        &self.scopes.get(scope_id).unwrap().0
     }
     pub fn get_scope_mut(&mut self, scope_id: ScopePos) -> &mut Scope {
-        self.scopes.get_mut(scope_id).unwrap()
+        &mut self.scopes.get_mut(scope_id).unwrap().0
     }
 
 
@@ -353,27 +353,27 @@ impl Globals {
         &mut self,
         scope: Scope,
     ) -> ScopePos {
-        self.scopes.insert( scope )
+        self.scopes.insert( (scope, false) )
     }
     fn derive_scope(&mut self, scope_id: ScopePos, mc_func_id: McFuncID) -> ScopePos {
-        let pos = self.scopes.insert(Scope {
+        let pos = self.scopes.insert((Scope {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
             extra_prot: vec![],
             func_id: mc_func_id,
-        });
+        }, false));
         self.protect_scope(pos);
         pos
     }
     fn derive_scope_mcfunc(&mut self, scope_id: ScopePos) -> ScopePos {
         self.mcfuncs.push(vec![]);
 
-        let pos = self.scopes.insert( Scope {
+        let pos = self.scopes.insert( (Scope {
             vars: HashMap::new(),
             parent_id: Some(scope_id),
             extra_prot: vec![],
             func_id: self.mcfuncs.len() - 1,
-        });
+        }, false));
         self.protect_scope(pos);
         pos
     }
@@ -415,106 +415,118 @@ impl Globals {
 
 
     pub fn collect(&mut self, scope_id: ScopePos) {
-        let mut collector = Collector::new(self);
 
-        self.mark_scope(scope_id, &mut collector);
+        self.mark_scope(scope_id);
 
-        for prot in &self.protected {
+        for prot in &self.protected.clone() {
             for id in &prot.values {
-                self.mark_value(*id, &mut collector);
+                self.mark_value(*id);
             }
             for id in &prot.scopes {
-                if collector.marked_scopes.contains(id) {
-                    self.mark_scope(*id, &mut collector);
+                if !self.scopes.get(*id).unwrap().1 {
+                    self.mark_scope(*id);
                 }
             }
         }
 
-        for (_, s) in &self.custom_structs {
-            if collector.marked_scopes.contains(&s.def_scope) {
-                self.mark_scope(s.def_scope, &mut collector);
+        for (_, s) in &self.custom_structs.clone() {
+            if !self.scopes.get(s.def_scope).unwrap().1 {
+                self.mark_scope(s.def_scope);
             }
         }
-        for (_, s) in &self.custom_enums {
-            if collector.marked_scopes.contains(&s.def_scope) {
-                self.mark_scope(s.def_scope, &mut collector);
+        for (_, s) in &self.custom_enums.clone() {
+            if !self.scopes.get(s.def_scope).unwrap().1 {
+                self.mark_scope(s.def_scope);
             }
         }
 
-        for ImplData { members, .. } in self.struct_impls.values() {
+        for ImplData { members, .. } in self.struct_impls.clone().values() {
             for v in members.values() {
-                self.mark_value(*v, &mut collector);
+                self.mark_value(*v);
             }
         }
-        for ImplData { members, .. } in self.enum_impls.values() {
+        for ImplData { members, .. } in self.enum_impls.clone().values() {
             for v in members.values() {
-                self.mark_value(*v, &mut collector);
+                self.mark_value(*v);
             }
         }
-        for ImplData { members, .. } in self.builtin_impls.values() {
+        for ImplData { members, .. } in self.builtin_impls.clone().values() {
             for v in members.values() {
-                self.mark_value(*v, &mut collector);
+                self.mark_value(*v);
             }
         }
-        for ImplData { members, .. } in self.module_impls.values() {
+        for ImplData { members, .. } in self.module_impls.clone().values() {
             for v in members.values() {
-                self.mark_value(*v, &mut collector);
+                self.mark_value(*v);
             }
         }
-        for e in &self.exports {
+        for e in &self.exports.clone() {
             for v in e.values() {
-                self.mark_value(*v, &mut collector);
+                self.mark_value(*v);
             }
         }
 
-        for map in self.import_caches.values() {
+        for map in self.import_caches.clone().values() {
             for v in map.values() {
-                self.mark_value(*v, &mut collector);
+                self.mark_value(*v);
             }
         }
 
-        for i in collector.marked_scopes {
-            self.scopes.remove(i);
+        self.values.retain(|_, (_, marked)| *marked);
+        for (_, marked) in self.values.values_mut() {
+            *marked = false;
         }
-        for i in collector.marked_values {
-            self.values.remove(i);
+        self.scopes.retain(|_, (_, marked)| *marked);
+        for (_, marked) in self.scopes.values_mut() {
+            *marked = false;
         }
+
+        // for i in collector.marked_scopes {
+        //     self.scopes.remove(i);
+        // }
+        // for i in collector.marked_values {
+        //     self.values.remove(i);
+        // }
 
         self.last_amount = self.values.len();
 
     }
 
-    pub fn mark_value(&self, value_id: ValuePos, collector: &mut Collector) {
-        if collector.marked_values.remove(&value_id) {
+    pub fn mark_value(&mut self, value_id: ValuePos) {
+
+        if !self.values.get(value_id).unwrap().1 {
+            self.values.get_mut(value_id).unwrap().1 = true;
+
             let mut value_ids: HashSet<ValuePos> = HashSet::new();
             let mut scope_ids: HashSet<ScopePos> = HashSet::new();
+
             self.get(value_id).value.get_references(self, &mut value_ids, &mut scope_ids);
             for i in scope_ids {
-                if collector.marked_scopes.contains(&i) {
-                    self.mark_scope(i, collector);
+                if !self.scopes.get(i).unwrap().1 {
+                    self.mark_scope(i);
                 }
             }
             for i in value_ids {
-                collector.marked_values.remove(&i);
+                self.values.get_mut(i).unwrap().1 = true;
             }
         }
     }
 
-    pub fn mark_scope(&self, scope_id: ScopePos, collector: &mut Collector) {
+    pub fn mark_scope(&mut self, scope_id: ScopePos) {
         let mut var_checks = Vec::new();
-        collector.marked_scopes.remove(&scope_id);
+        self.scopes.get_mut(scope_id).unwrap().1 = true;
         for id in self.get_scope(scope_id).vars.values() {
             var_checks.push(*id);
         }
         for id in var_checks {
-            self.mark_value(id, collector);
+            self.mark_value(id);
         }
         match self.get_scope(scope_id).parent_id {
-            Some(id) => if collector.marked_scopes.contains(&id) { self.mark_scope(id, collector) },
+            Some(id) => if !self.scopes.get(id).unwrap().1 { self.mark_scope(id) },
             None => (),
         }
-        for i in &self.get_scope(scope_id).extra_prot {
-            if collector.marked_scopes.contains(i) { self.mark_scope(*i, collector) }
+        for i in &self.get_scope(scope_id).extra_prot.clone() {
+            if !self.scopes.get(*i).unwrap().1 { self.mark_scope(*i) }
         }
     }
 
@@ -1193,7 +1205,7 @@ pub fn execute(
 
     // println!("node: {}", node.node.name());
     
-    if globals.values.len() > 50000 + globals.last_amount {
+    if globals.values.len() > 10000 + globals.last_amount {
     // if true {
         // println!("{}", globals.last_amount);
         globals.collect(scope_id);

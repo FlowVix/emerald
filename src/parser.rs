@@ -229,7 +229,7 @@ selector_args!{
             Value::Dictionary(map) => {
                 let mut valid = true;
                 for id in map.values() {
-                    if !(matches!(globals.get(*id).value, Value::Range(_)) || matches!(globals.values[*id].value, Value::Number(_))) {
+                    if !(matches!(globals.get(*id).value, Value::Range(_)) || matches!(globals.values[*id].0.value, Value::Number(_))) {
                         valid = false;
                         break;
                     }
