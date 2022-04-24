@@ -2,13 +2,14 @@
 
 
 use std::{collections::{HashMap, HashSet}, fs, path::PathBuf};
+use lasso::{Rodeo, Spur};
 use slotmap::{SlotMap, new_key_type};
 
 use convert_case::{Case, Casing};
 use fnv::FnvHashMap;
 use logos::Logos;
 
-use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector, ValueIter, FuncArg}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_type_from_str, BUILTIN_NAMES, BUILTIN_TYPE_NAMES}};
+use crate::{value::{Value, value_ops, Function, ValueType, Pattern, McVector, InstanceVariant, Range, Selector, ValueIter, FuncArg}, parser::{ASTNode, NodeType, BlockType, MatchArm, VariantType, check_selector_type, Located, ParseData}, EmeraldSource, error::RuntimeError, lexer::{Token, self}, CodeArea, builtins::{BuiltinType, builtin_type_from_str, BUILTIN_NAMES, BUILTIN_TYPE_NAMES}};
 use crate::builtins::{run_builtin, name_to_builtin};
 
 #[derive(Debug, Clone)]
@@ -34,7 +35,7 @@ pub struct StoredValue {
 
 #[derive(Debug, Clone)]
 pub struct CustomStruct {
-    pub name: String,
+    pub name: Spur,
     pub fields: FnvHashMap<String, (ASTNode, Option<ASTNode>)>,
     pub field_areas: FnvHashMap<String, CodeArea>,
     pub def_area: CodeArea,
@@ -44,7 +45,7 @@ pub struct CustomStruct {
 
 #[derive(Debug, Clone)]
 pub struct CustomEnum {
-    pub name: String,
+    pub name: Spur,
     pub variants: FnvHashMap<String, VariantType>,
     pub variant_areas: FnvHashMap<String, CodeArea>,
     pub def_area: CodeArea,
@@ -54,7 +55,7 @@ pub struct CustomEnum {
 
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub name: String,
+    pub name: Spur,
     pub def_area: CodeArea,
 }
 
@@ -156,13 +157,15 @@ pub struct Globals {
 
     pub mcfuncs: Vec<Vec<String>>,
 
+    pub interner: Rodeo,
+
 }
 
 
 
 
 pub struct Scope {
-    pub vars: HashMap<String, ValuePos>,
+    pub vars: HashMap<Spur, ValuePos>,
     pub parent_id: Option<ScopePos>,
     pub extra_prot: Vec<ScopePos>,
     pub func_id: McFuncID,
@@ -170,11 +173,17 @@ pub struct Scope {
 
 
 
+
 impl Globals {
 
-    pub fn new() -> (Self, ScopePos) {
+    pub fn new(interner: Rodeo) -> (Self, ScopePos) {
         let mut scopes = SlotMap::with_key();
-        let base_scope = scopes.insert(Scope { vars: HashMap::new(), parent_id: None, extra_prot: vec![], func_id: 0 });
+        let base_scope = scopes.insert( Scope {
+            vars: HashMap::new(),
+            parent_id: None,
+            extra_prot: vec![],
+            func_id: 0
+        } );
         (
             Self {
                 values: SlotMap::with_key(),
@@ -196,12 +205,13 @@ impl Globals {
                 exports: vec![],
                 import_caches: HashMap::new(),
                 mcfuncs: vec![vec![]],
+                interner,
             },
             base_scope,
         )
     }
 
-    pub fn init_global(&mut self, scope_id: ScopePos, source: EmeraldSource) {
+    pub fn init_global(&mut self, scope_id: ScopePos, source: &EmeraldSource) {
         for i in BUILTIN_NAMES {
             let id = self.insert_value(
                 Value::Builtin(name_to_builtin(i)),
@@ -210,7 +220,8 @@ impl Globals {
                     range: (0, 0)
                 },
             );
-            self.set_var(scope_id, i.to_string(), id);
+            let v = self.interner.get_or_intern(i);
+            self.set_var(scope_id, v, id);
         }
 
         for i in BUILTIN_TYPE_NAMES {
@@ -221,7 +232,8 @@ impl Globals {
                     range: (0, 0)
                 },
             );
-            self.set_var(scope_id, i.to_case(Case::Snake).to_string(), id);
+            let v = self.interner.get_or_intern(i.to_case(Case::Snake));
+            self.set_var(scope_id, v, id);
         }
     }
 
@@ -369,7 +381,7 @@ impl Globals {
     pub fn set_var(
         &mut self,
         scope_id: ScopePos,
-        name: String,
+        name: Spur,
         val_id: ValuePos,
     ) {
         self.get_scope_mut(scope_id).vars.insert(name, val_id);
@@ -378,18 +390,27 @@ impl Globals {
     pub fn get_var(
         &self,
         scope_id: ScopePos,
-        name: &String,
+        name: &Spur,
     ) -> Option<ValuePos> {
-        let mut current_scope = scope_id;
+        let mut current_scope = self.get_scope(scope_id);
         loop {
-            match self.get_scope(current_scope).vars.get(name) {
+            match current_scope.vars.get(name) {
                 Some(id) => return Some(*id),
-                None => match self.get_scope(current_scope).parent_id {
-                    Some(p_id) => current_scope = p_id,
+                None => match current_scope.parent_id {
+                    Some(p_id) => current_scope = self.get_scope(p_id),
                     None => return None,
                 },
             }
         }
+        // let scope = self.get_scope(scope_id);
+        // match scope.vars.get(name) {
+        //     Some(id) => Some(*id),
+        //     None => match scope.parent_id {
+        //         Some(p_id) => self.get_var(p_id, name),
+        //         None => None,
+        //     },
+        // }
+        
     }
 
 
@@ -651,14 +672,14 @@ macro_rules! area {
 
 
 
-
+#[allow(clippy::too_many_arguments)]
 pub fn do_assign(
     left: &ASTNode,
     right: ValuePos,
     scope_id: ScopePos,
     globals: &mut Globals,
     source: &EmeraldSource,
-    list: &mut HashMap<(Option<ValuePos>, Option<String>), ValuePos>,
+    list: &mut HashMap<(Option<ValuePos>, Option<Spur>), ValuePos>,
     is_declaration: bool,
 ) -> Result<(), RuntimeError> {
     interpreter_util!(globals, source);
@@ -669,7 +690,7 @@ pub fn do_assign(
                 let left_id = protecute_raw!(left => scope_id);
                 list.insert((Some(left_id), None), proteclone!(right => @));
             } else {
-                list.insert((None, Some(var_name.clone())), proteclone!(right => @));
+                list.insert((None, Some(*var_name)), proteclone!(right => @));
             }
         },
         NodeType::Index {..} | NodeType::Member { .. } if !is_declaration => {
@@ -797,8 +818,8 @@ pub fn do_assign(
                         Value::StructInstance { struct_id, fields: value_fields } => {
                             if struct_id != id {
                                 return Err( RuntimeError::DestructureTypeMismatch {
-                                    tried: globals.custom_structs[*id].name.clone(),
-                                    found: globals.custom_structs[*struct_id].name.clone(),
+                                    tried: globals.interner.resolve(&globals.custom_structs[*id].name).to_string(),
+                                    found: globals.interner.resolve(&globals.custom_structs[*struct_id].name).to_string(),
                                     area1: area!(source.clone(), left.span),
                                     area2: globals.get(right).def_area.clone(),
                                 } )
@@ -807,7 +828,7 @@ pub fn do_assign(
                             for (k, v) in fields {
                                 if !value_fields.contains_key(k) {
                                     return Err( RuntimeError::DestructureNonExistentKeyField {
-                                        for_type: globals.custom_structs[*id].name.clone(),
+                                        for_type: globals.interner.resolve(&globals.custom_structs[*id].name).to_string(),
                                         what: "field".to_string(),
                                         name: k.clone(),
                                         area1: area!(source.clone(), left.span),
@@ -820,7 +841,7 @@ pub fn do_assign(
                         },
                         other => {
                             return Err( RuntimeError::DestructureTypeMismatch {
-                                tried: globals.custom_structs[*id].name.clone(),
+                                tried: globals.interner.resolve(&globals.custom_structs[*id].name).to_string(),
                                 found: other.type_str(globals),
                                 area1: area!(source.clone(), left.span),
                                 area2: globals.get(right).def_area.clone(),
@@ -850,8 +871,8 @@ pub fn do_assign(
                         } => {
                             if enum_id != id {
                                 return Err( RuntimeError::DestructureTypeMismatch {
-                                    tried: globals.custom_structs[*id].name.clone(),
-                                    found: globals.custom_structs[*enum_id].name.clone(),
+                                    tried: globals.interner.resolve(&globals.custom_structs[*id].name).to_string(),
+                                    found: globals.interner.resolve(&globals.custom_enums[*enum_id].name).to_string(),
                                     area1: area!(source.clone(), left.span),
                                     area2: globals.get(right).def_area.clone(),
                                 } )
@@ -995,7 +1016,7 @@ pub fn do_assign(
                                             for (k, v) in fields {
                                                 if !value_fields.contains_key(k) {
                                                     return Err( RuntimeError::DestructureNonExistentKeyField {
-                                                        for_type: globals.custom_enums[*id].name.clone(),
+                                                        for_type: globals.interner.resolve(&globals.custom_enums[*id].name).to_string(),
                                                         what: "struct variant field".to_string(),
                                                         name: k.clone(),
                                                         area1: area!(source.clone(), left.span),
@@ -1012,7 +1033,7 @@ pub fn do_assign(
                         },
                         other => {
                             return Err( RuntimeError::DestructureTypeMismatch {
-                                tried: globals.custom_enums[*id].name.clone(),
+                                tried: globals.interner.resolve(&globals.custom_enums[*id].name).to_string(),
                                 found: other.type_str(globals),
                                 area1: area!(source.clone(), left.span),
                                 area2: globals.get(right).def_area.clone(),
@@ -1091,7 +1112,7 @@ fn run_func(
             },
             None => (),
         }
-        globals.set_var(derived, inner.clone(), *arg_id);
+        globals.set_var(derived, inner, *arg_id);
     }
     
     globals.trace.push( area!(source.clone(), start_node.span) );
@@ -1169,9 +1190,12 @@ pub fn execute(
             }
         }
     }
+
+    // println!("node: {}", node.node.name());
     
     if globals.values.len() > 50000 + globals.last_amount {
     // if true {
+        // println!("{}", globals.last_amount);
         globals.collect(scope_id);
         // println!("collect: {} {} {}", globals.values.len(), globals.scopes.len(), globals.protected.len());
     }
@@ -1554,22 +1578,22 @@ pub fn execute(
             Ok(proteclone!(right_id => @))
         }
         NodeType::Var { var_name } => {
-            if var_name == "_" {
-                Ok( globals.insert_value(
-                    Value::Pattern(Pattern::Any),
-                    area!(source.clone(), start_node.span)
-                ) )
-            } else {
+            // if var_name == "_" {
+            //     Ok( globals.insert_value(
+            //         Value::Pattern(Pattern::Any),
+            //         area!(source.clone(), start_node.span)
+            //     ) )
+            // } else {
                 match globals.get_var(scope_id, var_name) {
                     Some(i) => Ok( i ),
                     None => Err(
                         RuntimeError::UndefinedVar {
-                            var_name: var_name.to_string(),
+                            var_name: globals.interner.resolve(var_name).to_string(),
                             area: area!(source.clone(), start_node.span),
                         }
                     ),
                 }
-            }
+            // }
         }
         NodeType::StatementList { statements } => {
             let mut ret_id = globals.insert_value(
@@ -1957,7 +1981,7 @@ pub fn execute(
                 } ),
                 area!(source.clone(), start_node.span)
             );
-            globals.set_var(scope_id, func_name.to_string(), value_id);
+            globals.set_var(scope_id, *func_name, value_id);
             Ok( clone!(value_id => @) )
         }
         NodeType::Lambda { args, code, header_area, ret_pattern } => {
@@ -2540,7 +2564,7 @@ pub fn execute(
         }
         NodeType::StructDef { struct_name, fields, field_areas, def_area } => {
             let type_id = globals.new_struct( CustomStruct {
-                name: struct_name.clone(),
+                name: *struct_name,
                 fields: fields.clone(),
                 def_area: def_area.clone(),
                 field_areas: field_areas.clone(),
@@ -2550,7 +2574,7 @@ pub fn execute(
                 Value::Type(ValueType::CustomStruct(type_id)),
                 area!(source.clone(), start_node.span)
             );
-            globals.set_var(scope_id, struct_name.to_string(), value_id);
+            globals.set_var(scope_id, *struct_name, value_id);
             Ok( value_id )
         }
         NodeType::EnumDef {
@@ -2560,7 +2584,7 @@ pub fn execute(
             def_area,
         } => {
             let type_id = globals.new_enum( CustomEnum {
-                name: enum_name.clone(),
+                name: *enum_name,
                 variants: variants.clone(),
                 def_area: def_area.clone(),
                 variant_areas: variant_areas.clone(),
@@ -2570,19 +2594,19 @@ pub fn execute(
                 Value::Type(ValueType::CustomEnum(type_id)),
                 area!(source.clone(), start_node.span)
             );
-            globals.set_var(scope_id, enum_name.to_string(), value_id);
+            globals.set_var(scope_id, *enum_name, value_id);
             Ok( value_id )
         }
         NodeType::ModuleDef { module_name, def_area } => {
             let type_id = globals.new_module( Module {
-                name: module_name.clone(),
+                name: *module_name,
                 def_area: def_area.clone(),
             });
             let value_id = globals.insert_value(
                 Value::Type(ValueType::Module(type_id)),
                 area!(source.clone(), start_node.span)
             );
-            globals.set_var(scope_id, module_name.to_string(), value_id);
+            globals.set_var(scope_id, *module_name, value_id);
             Ok( value_id )
         }
         NodeType::StructInstance { fields, base, field_areas } => {
@@ -2862,7 +2886,7 @@ pub fn execute(
                                                 if let Some( FuncArg {
                                                     name: Located {inner, ..}, ..
                                                 } ) = args.get(0) {
-                                                    if inner == "self" { globals.builtin_impls.get_mut(b).unwrap().methods.push(k.clone()) }
+                                                    if globals.interner.resolve(inner) == "self" { globals.builtin_impls.get_mut(b).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2881,7 +2905,7 @@ pub fn execute(
                                                 if let Some( FuncArg {
                                                     name: Located {inner, ..}, ..
                                                 } ) = args.get(0) {
-                                                    if inner == "self" { globals.struct_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                    if globals.interner.resolve(inner) == "self" { globals.struct_impls.get_mut(id).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2900,7 +2924,7 @@ pub fn execute(
                                                 if let Some( FuncArg {
                                                     name: Located {inner, ..}, ..
                                                 } ) = args.get(0) {
-                                                    if inner == "self" { globals.enum_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                    if globals.interner.resolve(inner) == "self" { globals.enum_impls.get_mut(id).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2919,7 +2943,7 @@ pub fn execute(
                                                 if let Some( FuncArg {
                                                     name: Located {inner, ..}, ..
                                                 } ) = args.get(0) {
-                                                    if inner == "self" { globals.module_impls.get_mut(id).unwrap().methods.push(k.clone()) }
+                                                    if globals.interner.resolve(inner) == "self" { globals.module_impls.get_mut(id).unwrap().methods.push(k.clone()) }
                                                 }
                                             }
                                         }
@@ -2950,7 +2974,7 @@ pub fn execute(
             }
             Err(
                 RuntimeError::UndefinedVar {
-                    var_name: name.to_string(),
+                    var_name: globals.interner.resolve(name).to_string(),
                     area: area!(source.clone(), start_node.span),
                 }
             )
@@ -3045,7 +3069,13 @@ pub fn execute(
             ));
 
             let mod_source = EmeraldSource::File(buf.clone());
-            let ast = crate::parser::parse(&tokens, &mod_source);
+
+            let data = ParseData {
+                source: mod_source.clone(),
+                tokens,
+            };
+
+            let ast = crate::parser::parse(&data, &mut globals.interner);
             match ast {
                 Ok((node, _)) => {
                     
@@ -3060,7 +3090,7 @@ pub fn execute(
 
                     globals.import_trace.push( area!(source.clone(), start_node.span) );
                     globals.exports.push( FnvHashMap::default() );
-                    globals.init_global(mod_scope_root, mod_source.clone());
+                    globals.init_global(mod_scope_root, &mod_source);
 
                     execute(
                         &node,
@@ -3101,7 +3131,8 @@ pub fn execute(
                 Value::Dictionary(map) => {
                     for (n, i) in map {
                         let _i = clone!(*i => @);
-                        globals.set_var(scope_id, n.clone(), _i);
+                        let n = globals.interner.get_or_intern(n);
+                        globals.set_var(scope_id, n, _i);
                     }
                 },
                 other => ret!(Err( RuntimeError::TypeMismatch {
@@ -3177,14 +3208,14 @@ pub fn execute(
                                         ret!(Err(
                                             RuntimeError::ArgumentNotProvided {
                                                 arg_area: s.area.clone(),
-                                                arg_name: s.inner.clone(),
+                                                arg_name: globals.interner.resolve(&s.inner).to_string(),
                                                 call_area: area!(source.clone(), start_node.span)
                                             }
                                         ), Pop: 1)
                                     }
                                 } else {
                                     let arg = &args[counter];
-                                    if s.inner == "self" || *is_ref { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) }
+                                    if globals.interner.resolve(&s.inner) == "self" || *is_ref { protecute_raw!(arg => scope_id) } else { protecute!(arg => scope_id) }
                                 };
                                 arg_ids.push( arg_id );
                             }

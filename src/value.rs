@@ -1,13 +1,14 @@
 use std::{collections::HashSet, hash::Hash};
 
 use fnv::FnvHashMap;
+use lasso::Spur;
 
 use crate::{parser::{ASTNode, Located}, interpreter::{ScopePos, ValuePos, Globals, TypePos, CustomStruct, McFuncID, CustomEnum, Module}, CodeArea, builtins::{BuiltinType, builtin_type_str, Builtin, builtin_to_name}, lexer::SelectorType};
 
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct FuncArg<T, P> {
-    pub name: Located<String>,
+    pub name: Located<Spur>,
     pub pattern: Option<P>,
     pub default: Option<T>,
     pub is_ref: bool,
@@ -39,15 +40,15 @@ impl ValueType {
             ValueType::Builtin(b) => builtin_type_str(b.clone()),
             ValueType::CustomStruct(id) => {
                 let CustomStruct { name, .. } = &globals.custom_structs[*id];
-                name.to_string()
+                globals.interner.resolve(name).to_string()
             },
             ValueType::CustomEnum(id) => {
                 let CustomEnum { name, .. } = &globals.custom_enums[*id];
-                name.to_string()
+                globals.interner.resolve(name).to_string()
             },
             ValueType::Module(id) => {
                 let Module { name, .. } = &globals.modules[*id];
-                name.to_string()
+                globals.interner.resolve(name).to_string()
             },
         }
     }
@@ -421,7 +422,7 @@ impl Value {
                 pattern, ..
             } | format!(
                 "{}{}",
-                inner,
+                globals.interner.resolve(inner),
                 match pattern {
                     Some(Located{inner: p, ..}) => format!(": {}", p.to_str(globals)),
                     None => "".to_string(),
@@ -474,24 +475,24 @@ impl Value {
                 ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
                 ValueType::CustomStruct(pos) => {
                     let CustomStruct { name, .. } = &globals.custom_structs[*pos];
-                    format!("<struct {:?}: {}>", pos, name)
+                    format!("<struct {:?}: {}>", pos, globals.interner.resolve(name))
                 },
                 ValueType::CustomEnum(pos) => {
                     let CustomEnum { name, .. } = &globals.custom_enums[*pos];
-                    format!("<enum {:?}: {}>", pos, name)
+                    format!("<enum {:?}: {}>", pos, globals.interner.resolve(name))
                 },
                 ValueType::Module(pos) => {
                     let Module { name, .. } = &globals.modules[*pos];
-                    format!("<mod {:?}: {}>", pos, name)
+                    format!("<mod {:?}: {}>", pos, globals.interner.resolve(name))
                 },
             },
             Value::StructInstance { struct_id, fields } => {
 
                 let CustomStruct { name, .. } = &globals.custom_structs[*struct_id];
-                let name = name;
+                let name = globals.interner.resolve(name).to_string();
 
                 if visited.contains(&self) {
-                    return name.clone() + "::{...}"
+                    return name + "::{...}"
                 }
                 visited.push( self );
                 let out_str = "{".to_string() + &fields.iter().map(
@@ -506,7 +507,7 @@ impl Value {
                 variant
             } => {
                 let CustomEnum { name, .. } = &globals.custom_enums[*enum_id];
-                let name = name;
+                let name = globals.interner.resolve(name).to_string();
 
                 match variant {
                     InstanceVariant::Unit => format!("{}:{}", name, variant_name),

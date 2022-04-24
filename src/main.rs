@@ -15,7 +15,9 @@ use ariadne::Source;
 use error::{ToReport, RuntimeError};
 use fnv::FnvHashMap;
 use interpreter::{execute, Globals, Exit};
+use lasso::Rodeo;
 use logos::Logos;
+use parser::ParseData;
 
 use crate::{parser::parse, generator::generate_datapack};
 
@@ -91,7 +93,6 @@ macro_rules! area {
 }
 
 
-
 fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     let mut tokens_iter = lexer::Token
         ::lexer(&code);
@@ -113,18 +114,25 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
     let cache = EmeraldCache::default();
     // cache.fetch(&source).unwrap();
 
-    let ast = parse(&tokens, &source);
+    let data = ParseData {
+        source: source.clone(),
+        tokens,
+    };
+    let mut interner = Rodeo::default();
+
+    let ast = parse(&data, &mut interner);
     
-    let (mut globals, base_scope) = Globals::new();
+    let (mut globals, base_scope) = Globals::new(interner);
     globals.exports.push( FnvHashMap::default() );
     match ast {
         Ok((node, _)) => {
             
-            globals.init_global(base_scope, source.clone());
+            globals.init_global(base_scope, &data.source);
 
 
             use std::time::Instant;
             let start = Instant::now();
+
             let mut result = execute(
                 &node,
                 base_scope,
@@ -133,7 +141,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             );
             let duration = start.elapsed();
 
-            println!("Time elapsed in expensive_function() is: {:?}", duration);
+            println!("penis: {:?}", duration);
 
             // println!("collect: {} {} {}", globals.values.len(), globals.scopes.len(), globals.protected.len());
             
@@ -211,6 +219,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
 fn main() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
+
 
     if true {
         let mut buf = PathBuf::new();

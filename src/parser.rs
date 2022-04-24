@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 use fnv::FnvHashMap;
+use lasso::{Rodeo, Spur};
 
 use crate::{CodeArea, lexer::{Token, SelectorType}, value::{Value, CoordType, Range, FuncArg}, interpreter::{Globals}, error::{SyntaxError, RuntimeError}, EmeraldSource};
 
@@ -8,8 +9,9 @@ use crate::{CodeArea, lexer::{Token, SelectorType}, value::{Value, CoordType, Ra
 
 type Tokens = Vec<(Token, (usize, usize))>;
 
-pub struct ParseInfo {
-    source: EmeraldSource,
+pub struct ParseData {
+    pub tokens: Tokens,
+    pub source: EmeraldSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]
@@ -52,7 +54,7 @@ pub enum NodeType {
 
     Declaration { left: Box<ASTNode>, right: Box<ASTNode> },
 
-    Var { var_name: String },
+    Var { var_name: Spur },
     StatementList { statements: Vec<ASTNode> },
     Block { code: Box<ASTNode>, typ: BlockType },
     If {cond: Box<ASTNode>, code: Box<ASTNode>, else_branch: Option<Box<ASTNode>>},
@@ -62,7 +64,7 @@ pub enum NodeType {
     Call { base: Box<ASTNode>, args: Vec<ASTNode>, args_area: CodeArea },
 
     FuncDef {
-        func_name: String,
+        func_name: Spur,
         args: Vec<FuncArg<ASTNode, ASTNode>>,
         header_area: CodeArea,
         code: Box<ASTNode>,
@@ -91,7 +93,7 @@ pub enum NodeType {
     UnboundedRange { base: Box<ASTNode> },
 
     StructDef {
-        struct_name: String,
+        struct_name: Spur,
         fields: FnvHashMap<String, (ASTNode, Option<ASTNode>)>,
         field_areas: FnvHashMap<String, CodeArea>,
         def_area: CodeArea
@@ -102,13 +104,13 @@ pub enum NodeType {
         fields: FnvHashMap<String, ASTNode>
     },
 
-    Impl { type_var: (String, CodeArea), fields: Vec<(String, ASTNode)> },
+    Impl { type_var: (Spur, CodeArea), fields: Vec<(String, ASTNode)> },
     Associated { base: Box<ASTNode>, assoc: String },
     
     Match {value: Box<ASTNode>, arms: Vec<(MatchArm, ASTNode)>},
 
     EnumDef {
-        enum_name: String,
+        enum_name: Spur,
         variants: FnvHashMap<String, VariantType>,
         variant_areas: FnvHashMap<String, CodeArea>,
         def_area: CodeArea,
@@ -121,7 +123,7 @@ pub enum NodeType {
     },
 
     ModuleDef {
-        module_name: String,
+        module_name: Spur,
         def_area: CodeArea
     },
 
@@ -280,21 +282,21 @@ selector_args!{
 
 
 macro_rules! expected_err {
-    ($exp:expr, $tok:expr, $area:expr, $info:expr) => {
+    ($exp:expr, $tok:expr, $area:expr, $data:expr) => {
         return Err( SyntaxError::Expected {
             expected: $exp.to_string(),
             found: $tok.name().to_string(),
-            area: CodeArea {source: $info.source.clone(), range: $area}
+            area: CodeArea {source: $data.source.clone(), range: $area}
         } )
     };
 }
 
 macro_rules! parse_util {
-    ($tokens:expr, $pos:expr, $info:expr) => {
+    ($data:expr, $pos:expr, $interner:expr) => {
         #[allow(unused_macros)]
         macro_rules! tok {
             ($index:expr) => {
-                &$tokens[{
+                &$data.tokens[{
                     let le_index = (($pos as i32) + $index);
                     if le_index < 0 {0} else {le_index}
                 } as usize].0
@@ -303,7 +305,7 @@ macro_rules! parse_util {
         #[allow(unused_macros)]
         macro_rules! span {
             ($index:expr) => {
-                $tokens[{
+                $data.tokens[{
                     let le_index = (($pos as i32) + $index);
                     if le_index < 0 {0} else {le_index}
                 } as usize].1
@@ -330,7 +332,7 @@ macro_rules! parse_util {
         macro_rules! check_tok {
             ($token:ident else $expected:literal) => {
                 if !matches!(tok!(0), Token::$token) {
-                    expected_err!($expected, tok!(0), span!(0), $info)
+                    expected_err!($expected, tok!(0), span!(0), $data)
                 }
                 $pos += 1;
             };
@@ -338,7 +340,7 @@ macro_rules! parse_util {
                 let $val;
                 if let Token::$token(v) = tok!(0) {
                     $val = v.clone();
-                } else { expected_err!($expected, tok!(0), span!(0), $info) }
+                } else { expected_err!($expected, tok!(0), span!(0), $data) }
                 $pos += 1;
             };
             ($token:ident($val:ident):$sp:ident else $expected:literal) => {
@@ -347,7 +349,7 @@ macro_rules! parse_util {
                 if let (Token::$token(v), sp) = (tok!(0), span!(0)) {
                     $val = v.clone();
                     $sp = sp.clone();
-                } else { expected_err!($expected, tok!(0), span!(0), $info) }
+                } else { expected_err!($expected, tok!(0), span!(0), $data) }
                 $pos += 1;
             };
         }
@@ -420,32 +422,32 @@ macro_rules! parse_util {
         #[allow(unused_macros)]
         macro_rules! parse {
             ($fn:ident => let $var:ident) => {
-                let parsed = $fn($tokens, $pos, $info)?;
+                let parsed = $fn($data, $pos, $interner)?;
                 $pos = parsed.1;
                 let $var = parsed.0;
             };
             ($fn:ident => $var:ident) => {
-                let parsed = $fn($tokens, $pos, $info)?;
+                let parsed = $fn($data, $pos, $interner)?;
                 $pos = parsed.1;
                 $var = parsed.0;
             };
             ($fn:ident => let mut $var:ident) => {
-                let parsed = $fn($tokens, $pos, $info)?;
+                let parsed = $fn($data, $pos, $interner)?;
                 $pos = parsed.1;
                 let mut $var = parsed.0;
             };
             ($fn:ident ($arg:expr) => let $var:ident) => {
-                let parsed = $fn($tokens, $pos, $info, $arg)?;
+                let parsed = $fn($data, $pos, $interner, $arg)?;
                 $pos = parsed.1;
                 let $var = parsed.0;
             };
             ($fn:ident ($arg:expr) => $var:ident) => {
-                let parsed = $fn($tokens, $pos, $info, $arg)?;
+                let parsed = $fn($data, $pos, $interner, $arg)?;
                 $pos = parsed.1;
                 $var = parsed.0;
             };
             ($fn:ident ($arg:expr) => let mut $var:ident) => {
-                let parsed = $fn($tokens, $pos, $info, $arg)?;
+                let parsed = $fn($data, $pos, $interner, $arg)?;
                 $pos = parsed.1;
                 let mut $var = parsed.0;
             };
@@ -569,7 +571,7 @@ operators!(
 //                 for_char: start_tok.0.name().to_string(),
 //                 not_found: end_tok.name().to_string(),
 //                 area: CodeArea {
-//                     source: info.source.clone(),
+//                     source: data.source.clone(),
 //                     range: start_tok.1,
 //                 }
 //             } )
@@ -584,7 +586,7 @@ operators!(
 macro_rules! unit_parse_helper {
     {
 
-        ($tokens:ident, $pos:ident, $info:ident, $start:ident, $unary_op:ident);
+        ($data:ident, $pos:ident, $interner:ident, $start:ident, $unary_op:ident);
 
         $(
             [$t:pat] => $b:block,
@@ -595,11 +597,11 @@ macro_rules! unit_parse_helper {
         !else $else:block
     } => {
         pub fn parse_unit(
-            $tokens: &Tokens,
+            $data: &ParseData,
             mut $pos: usize,
-            $info: &ParseInfo,
+            $interner: &mut Rodeo,
         ) -> Result<(ASTNode, usize), SyntaxError> {
-            parse_util!($tokens, $pos, $info);
+            parse_util!($data, $pos, $interner);
             let $start = span!(0);
 
             match tok!(0) {
@@ -626,7 +628,7 @@ macro_rules! unit_parse_helper {
 
 unit_parse_helper!{
 
-    (tokens, pos, info, start, unary_op);
+    (data, pos, interner, start, unary_op);
 
     [Token::Num(n)] => {
         pos += 1;
@@ -682,7 +684,7 @@ unit_parse_helper!{
                     for_char: "(".to_string(),
                     not_found: ")".to_string(),
                     area: CodeArea {
-                        source: info.source.clone(),
+                        source: data.source.clone(),
                         range: start,
                     }
                 } ),
@@ -714,7 +716,7 @@ unit_parse_helper!{
                         parse!(parse_expr(false) => let elem);
                         elements.push( elem );
                         if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                            expected_err!(") or ,", tok!(0), span!(0), info )
+                            expected_err!(") or ,", tok!(0), span!(0), data )
                         }
                         skip_tok!(Comma);
                     });
@@ -740,10 +742,10 @@ unit_parse_helper!{
                 });
                 check_tok!(Ident(arg_name) else "argument name");
                 let arg_area = CodeArea {
-                    source: info.source.clone(),
+                    source: data.source.clone(),
                     range: span!(-1),
                 };
-                if let Some(id) = args.iter().position(|FuncArg {name: Located {inner, ..}, ..}| inner == &arg_name) {
+                if let Some(id) = args.iter().position(|FuncArg {name: Located {inner, ..}, ..}| inner == &interner.get_or_intern(&arg_name)) {
                     return Err( SyntaxError::DuplicateArg {
                         arg_name,
                         first_used: args[id].name.area.clone(),
@@ -766,19 +768,19 @@ unit_parse_helper!{
                     parse!(parse_expr(true) => let temp); default = Some(temp);
                 });
                 args.push( FuncArg {
-                    name: Located::from(arg_name, arg_area),
+                    name: Located::from(interner.get_or_intern(arg_name), arg_area),
                     pattern: pat,
                     default,
                     is_ref,
                 } );
                 if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                    expected_err!(") or ,", tok!(0), span!(0), info )
+                    expected_err!(") or ,", tok!(0), span!(0), data )
                 }
                 skip_tok!(Comma);
             });
             let header_end = span!(-1).1;
             let header_area = CodeArea {
-                source: info.source.clone(),
+                source: data.source.clone(),
                 range: (header_start, header_end),
             };
 
@@ -799,7 +801,7 @@ unit_parse_helper!{
                 parse!(parse_expr(true) => let pat);
                 args.push( pat );
                 if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                    expected_err!(") or ,", tok!(0), span!(0), info )
+                    expected_err!(") or ,", tok!(0), span!(0), data )
                 }
                 skip_tok!(Comma);
             });
@@ -824,13 +826,13 @@ unit_parse_helper!{
         if tok!(0) == &Token::FatArrow {
             pos += 1;
             let arg_area = CodeArea {
-                source: info.source.clone(),
+                source: data.source.clone(),
                 range: start,
             };
             parse!(parse_expr(false) => let code);
             ret!( NodeType::Lambda { args: vec![
                 FuncArg {
-                    name: Located::from(name.to_string(), arg_area.clone()),
+                    name: Located::from(interner.get_or_intern(name), arg_area.clone()),
                     pattern: None,
                     default: None,
                     is_ref: false,
@@ -838,12 +840,12 @@ unit_parse_helper!{
             ], header_area: arg_area, code: Box::new(code), ret_pattern: None } => start.0, span!(-1).1 );
         }
 
-        ret!( NodeType::Var { var_name: name.clone() } => start );
+        ret!( NodeType::Var { var_name: interner.get_or_intern(name) } => start );
     },
     [Token::FatArrow] => {
         pos += 1;
         let header_area = CodeArea {
-            source: info.source.clone(),
+            source: data.source.clone(),
             range: start,
         };
         parse!(parse_expr(false) => let code);
@@ -863,7 +865,7 @@ unit_parse_helper!{
             while_tok!(!= RBracket: {
                 check_tok!(Ident(key) else "key name");
                 let last_area = CodeArea {
-                    source: info.source.clone(),
+                    source: data.source.clone(),
                     range: span!(-1),
                 };
                 if map.contains_key(&key) {
@@ -876,7 +878,7 @@ unit_parse_helper!{
                 areas.insert(key.clone(), last_area);
                 let mut value = ASTNode {
                     node: NodeType::Var {
-                        var_name: key.clone(),
+                        var_name: interner.get_or_intern(&key),
                     },
                     span: span!(-1),
                 };
@@ -887,7 +889,7 @@ unit_parse_helper!{
 
                 map.insert(key, value);
                 if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                    expected_err!("} or ,", tok!(0), span!(0), info )
+                    expected_err!("} or ,", tok!(0), span!(0), data )
                 }
                 skip_tok!(Comma);
             });
@@ -909,7 +911,7 @@ unit_parse_helper!{
         pos += 1;
         check_tok!(Ident(type_var) else "type to impl on");
         let type_var_area = CodeArea {
-            source: info.source.clone(),
+            source: data.source.clone(),
             range: span!(-1),
         };
         check_tok!(LBracket else "{");
@@ -920,7 +922,7 @@ unit_parse_helper!{
         while_tok!(!= RBracket: {
             check_tok!(Ident(field) else "field name");
             let last_area = CodeArea {
-                source: info.source.clone(),
+                source: data.source.clone(),
                 range: span!(-1),
             };
             if field_names.contains(&field) {
@@ -938,11 +940,11 @@ unit_parse_helper!{
             field_names.push(field.clone());
             fields.push((field, value));
             if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                expected_err!("} or ,", tok!(0), span!(0), info )
+                expected_err!("} or ,", tok!(0), span!(0), data )
             }
             skip_tok!(Comma);
         });
-        ret!( NodeType::Impl {type_var: (type_var, type_var_area), fields} => start );
+        ret!( NodeType::Impl {type_var: (interner.get_or_intern(type_var), type_var_area), fields} => start );
         
 
     },
@@ -972,7 +974,7 @@ unit_parse_helper!{
                             parse!(parse_expr(false) => let elem);
                             elements.push( elem );
                             if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                                expected_err!("] or ,", tok!(0), span!(0), info )
+                                expected_err!("] or ,", tok!(0), span!(0), data )
                             }
                             skip_tok!(Comma);
                         });
@@ -989,7 +991,7 @@ unit_parse_helper!{
                             parse!(parse_expr(false) => let iter);
                             sources.push((expr, iter));
                             if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                                expected_err!("] or ,", tok!(0), span!(0), info )
+                                expected_err!("] or ,", tok!(0), span!(0), data )
                             }
                             skip_tok!(Comma);
                             if matches!(tok!(0), Token::RSqBracket | Token::If) { break }
@@ -1016,7 +1018,7 @@ unit_parse_helper!{
                             _ => unreachable!(),
                         }
                     },
-                    _ => expected_err!("], for, or ,", tok!(0), span!(0), info )
+                    _ => expected_err!("], for, or ,", tok!(0), span!(0), data )
                 }
             }
         }
@@ -1055,7 +1057,7 @@ unit_parse_helper!{
 
             arms.push( (arm, expr) );
             if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                expected_err!("} or ,", tok!(0), span!(0), info )
+                expected_err!("} or ,", tok!(0), span!(0), data )
             }
             skip_tok!(Comma);
         });
@@ -1097,10 +1099,10 @@ unit_parse_helper!{
             });
             check_tok!(Ident(arg_name) else "argument name");
             let arg_area = CodeArea {
-                source: info.source.clone(),
+                source: data.source.clone(),
                 range: span!(-1),
             };
-            if let Some(id) = args.iter().position(|FuncArg {name: Located {inner, ..}, ..}| inner == &arg_name) {
+            if let Some(id) = args.iter().position(|FuncArg {name: Located {inner, ..}, ..}| inner == &interner.get_or_intern(&arg_name)) {
                 return Err( SyntaxError::DuplicateArg {
                     arg_name,
                     first_used: args[id].name.area.clone(),
@@ -1123,19 +1125,19 @@ unit_parse_helper!{
                 parse!(parse_expr(true) => let temp); default = Some(temp);
             });
             args.push( FuncArg {
-                name: Located::from(arg_name, arg_area),
+                name: Located::from(interner.get_or_intern(arg_name), arg_area),
                 pattern: pat,
                 default,
                 is_ref,
             } );
             if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                expected_err!(") or ,", tok!(0), span!(0), info )
+                expected_err!(") or ,", tok!(0), span!(0), data )
             }
             skip_tok!(Comma);
         });
         let header_end = span!(-1).1;
         let header_area = CodeArea {
-            source: info.source.clone(),
+            source: data.source.clone(),
             range: (header_start, header_end),
         };
 
@@ -1146,7 +1148,7 @@ unit_parse_helper!{
         });
 
         parse!(parse_expr(false) => let code);
-        ret!( NodeType::FuncDef { func_name, args, header_area, code: Box::new(code), ret_pattern } => start.0, span!(-1).1 );
+        ret!( NodeType::FuncDef { func_name: interner.get_or_intern(func_name), args, header_area, code: Box::new(code), ret_pattern } => start.0, span!(-1).1 );
     },
     [Token::Return] => {
         pos += 1;
@@ -1182,7 +1184,7 @@ unit_parse_helper!{
         while_tok!(!= RBracket: {
             check_tok!(Ident(field) else "field name");
             let last_area = CodeArea {
-                source: info.source.clone(),
+                source: data.source.clone(),
                 range: span!(-1),
             };
             if fields.contains_key(&field) {
@@ -1204,16 +1206,16 @@ unit_parse_helper!{
 
             fields.insert(field, (field_type, default));
             if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                expected_err!("} or ,", tok!(0), span!(0), info )
+                expected_err!("} or ,", tok!(0), span!(0), data )
             }
             skip_tok!(Comma);
         });
         
         let def_area = CodeArea {
-            source: info.source.clone(),
+            source: data.source.clone(),
             range: (start.0, span!(-1).1),
         };
-        ret!( NodeType::StructDef { struct_name, fields, field_areas, def_area } => start.0, span!(-1).1 );
+        ret!( NodeType::StructDef { struct_name: interner.get_or_intern(struct_name), fields, field_areas, def_area } => start.0, span!(-1).1 );
     },
     [Token::Enum] => {
         pos += 1;
@@ -1226,7 +1228,7 @@ unit_parse_helper!{
         while_tok!(!= RBracket: {
             check_tok!(Ident(name) else "variant name");
             let last_area = CodeArea {
-                source: info.source.clone(),
+                source: data.source.clone(),
                 range: span!(-1),
             };
             if variants.contains_key(&name) {
@@ -1249,7 +1251,7 @@ unit_parse_helper!{
                         parse!(parse_expr(false) => let elem);
                         elements.push( elem );
                         if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                            expected_err!(") or ,", tok!(0), span!(0), info )
+                            expected_err!(") or ,", tok!(0), span!(0), data )
                         }
                         skip_tok!(Comma);
                     });
@@ -1262,7 +1264,7 @@ unit_parse_helper!{
                     while_tok!(!= RBracket: {
                         check_tok!(Ident(field) else "field name");
                         let last_area = CodeArea {
-                            source: info.source.clone(),
+                            source: data.source.clone(),
                             range: span!(-1),
                         };
                         if fields.contains_key(&field) {
@@ -1279,7 +1281,7 @@ unit_parse_helper!{
 
                         fields.insert(field, field_type);
                         if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                            expected_err!("b } or ,", tok!(0), span!(0), info )
+                            expected_err!("b } or ,", tok!(0), span!(0), data )
                         }
                         skip_tok!(Comma);
                     });
@@ -1288,27 +1290,27 @@ unit_parse_helper!{
                 _ => (),
             }
             if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                expected_err!("{, (, }, or ,", tok!(0), span!(0), info )
+                expected_err!("{, (, }, or ,", tok!(0), span!(0), data )
             }
             skip_tok!(Comma);
         });
 
         let def_area = CodeArea {
-            source: info.source.clone(),
+            source: data.source.clone(),
             range: (start.0, span!(-1).1),
         };
-        ret!( NodeType::EnumDef { enum_name, variants, variant_areas, def_area } => start.0, span!(-1).1 );
+        ret!( NodeType::EnumDef { enum_name: interner.get_or_intern(enum_name), variants, variant_areas, def_area } => start.0, span!(-1).1 );
     },
     [Token::Module] => {
         pos += 1;
         check_tok!(Ident(module_name) else "module name");
         
         let def_area = CodeArea {
-            source: info.source.clone(),
+            source: data.source.clone(),
             range: (start.0, span!(-1).1),
         };
 
-        ret!( NodeType::ModuleDef { module_name, def_area } => start.0, span!(-1).1 );
+        ret!( NodeType::ModuleDef { module_name: interner.get_or_intern(module_name), def_area } => start.0, span!(-1).1 );
     },
     [Token::Import] => {
         pos += 1;
@@ -1350,7 +1352,7 @@ unit_parse_helper!{
                                 Some(true) => return Err( SyntaxError::VectorMismatch {
                                     in_rot: false,
                                     area: CodeArea {
-                                        source: info.source.clone(),
+                                        source: data.source.clone(),
                                         range: span!(0),
                                     },
                                 } ),
@@ -1380,7 +1382,7 @@ unit_parse_helper!{
                                 Some(false) => return Err( SyntaxError::VectorMismatch {
                                     in_rot: false,
                                     area: CodeArea {
-                                        source: info.source.clone(),
+                                        source: data.source.clone(),
                                         range: span!(0),
                                     },
                                 } ),
@@ -1391,7 +1393,7 @@ unit_parse_helper!{
                             return Err( SyntaxError::VectorMismatch {
                                 in_rot: true,
                                 area: CodeArea {
-                                    source: info.source.clone(),
+                                    source: data.source.clone(),
                                     range: span!(0),
                                 },
                             } )
@@ -1418,7 +1420,7 @@ unit_parse_helper!{
                                 Some(true) => return Err( SyntaxError::VectorMismatch {
                                     in_rot: false,
                                     area: CodeArea {
-                                        source: info.source.clone(),
+                                        source: data.source.clone(),
                                         range: span!(0),
                                     },
                                 } ),
@@ -1461,7 +1463,7 @@ unit_parse_helper!{
             while_tok!(!= RSqBracket: {
                 check_tok!(Ident(arg_name) else "selector argument name or ]");
                 let arg_area = CodeArea {
-                    source: info.source.clone(),
+                    source: data.source.clone(),
                     range: span!(-1),
                 };
 
@@ -1494,7 +1496,7 @@ unit_parse_helper!{
                 args.push((arg_name, arg_area, val));
 
                 if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                    expected_err!("] or ,", tok!(0), span!(0), info )
+                    expected_err!("] or ,", tok!(0), span!(0), data )
                 }
                 skip_tok!(Comma);
             });
@@ -1526,16 +1528,16 @@ unit_parse_helper!{
     }
 
     !else {
-        expected_err!("expression", tok!(0), span!(0), info)
+        expected_err!("expression", tok!(0), span!(0), data)
     }
 }
 
 fn parse_value(
-    tokens: &Tokens,
+    data: &ParseData,
     mut pos: usize,
-    info: &ParseInfo,
+    interner: &mut Rodeo,
 ) -> Result<(ASTNode, usize), SyntaxError> {
-    parse_util!(tokens, pos, info);
+    parse_util!(data, pos, interner);
     
     parse!(parse_unit => let mut value);
     let start = value.span;
@@ -1559,7 +1561,7 @@ fn parse_value(
                     parse!(parse_expr(false) => let arg);
                     args.push(arg);
                     if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                        expected_err!(") or ,", tok!(0), span!(0), info )
+                        expected_err!(") or ,", tok!(0), span!(0), data )
                     }
                     skip_tok!(Comma);
                 });
@@ -1569,7 +1571,7 @@ fn parse_value(
                         args,
                         base: Box::new(value),
                         args_area: CodeArea {
-                            source: info.source.clone(),
+                            source: data.source.clone(),
                             range: (area_start, area_end),
                         }
                     },
@@ -1584,7 +1586,7 @@ fn parse_value(
                     parse!(parse_expr(false) => let arg);
                     args.push(arg);
                     if !matches!(tok!(0), Token::RSqBracket | Token::Comma) {
-                        expected_err!(") or ,", tok!(0), span!(0), info )
+                        expected_err!(") or ,", tok!(0), span!(0), data )
                     }
                     skip_tok!(Comma);
                 });
@@ -1594,7 +1596,7 @@ fn parse_value(
                         args,
                         base: Box::new(value),
                         args_area: CodeArea {
-                            source: info.source.clone(),
+                            source: data.source.clone(),
                             range: (area_start, area_end),
                         }
                     },
@@ -1609,7 +1611,7 @@ fn parse_value(
                         member: Located {
                             inner: member_name,
                             area: CodeArea {
-                                source: info.source.clone(),
+                                source: data.source.clone(),
                                 range: span!(-1),
                             },
                         },
@@ -1647,7 +1649,7 @@ fn parse_value(
                     while_tok!(!= RBracket: {
                         check_tok!(Ident(field) else "field name");
                         let last_area = CodeArea {
-                            source: info.source.clone(),
+                            source: data.source.clone(),
                             range: span!(-1),
                         };
                         if fields.contains_key(&field) {
@@ -1660,7 +1662,7 @@ fn parse_value(
                         areas.insert(field.clone(), last_area);
                         let mut value = ASTNode {
                             node: NodeType::Var {
-                                var_name: field.clone(),
+                                var_name: interner.get_or_intern(&field),
                             },
                             span: span!(-1),
                         };
@@ -1671,7 +1673,7 @@ fn parse_value(
 
                         fields.insert(field, value);
                         if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                            expected_err!("} or ,", tok!(0), span!(0), info )
+                            expected_err!("} or ,", tok!(0), span!(0), data )
                         }
                         skip_tok!(Comma);
                     });
@@ -1708,7 +1710,7 @@ fn parse_value(
                 pos += 1;
                 check_tok!(Ident(name) else "variant name");
                 let variant_area = CodeArea {
-                    source: info.source.clone(),
+                    source: data.source.clone(),
                     range: span!(-1),
                 };
 
@@ -1720,7 +1722,7 @@ fn parse_value(
                             parse!(parse_expr(false) => let arg);
                             elements.push(arg);
                             if !matches!(tok!(0), Token::RParen | Token::Comma) {
-                                expected_err!(") or ,", tok!(0), span!(0), info )
+                                expected_err!(") or ,", tok!(0), span!(0), data )
                             }
                             skip_tok!(Comma);
                         });
@@ -1742,7 +1744,7 @@ fn parse_value(
                         while_tok!(!= RBracket: {
                             check_tok!(Ident(field) else "field name");
                             let last_area = CodeArea {
-                                source: info.source.clone(),
+                                source: data.source.clone(),
                                 range: span!(-1),
                             };
                             if fields.contains_key(&field) {
@@ -1755,7 +1757,7 @@ fn parse_value(
                             areas.insert(field.clone(), last_area);
                             let mut value = ASTNode {
                                 node: NodeType::Var {
-                                    var_name: field.clone(),
+                                    var_name: interner.get_or_intern(&field),
                                 },
                                 span: span!(-1),
                             };
@@ -1766,7 +1768,7 @@ fn parse_value(
 
                             fields.insert(field, value);
                             if !matches!(tok!(0), Token::RBracket | Token::Comma) {
-                                expected_err!("} or ,", tok!(0), span!(0), info )
+                                expected_err!("} or ,", tok!(0), span!(0), data )
                             }
                             skip_tok!(Comma);
                         });
@@ -1804,12 +1806,12 @@ fn parse_value(
 
 
 fn parse_op(
-    tokens: &Tokens,
+    data: &ParseData,
     mut pos: usize,
-    info: &ParseInfo,
+    interner: &mut Rodeo,
     prec: usize,
 ) -> Result<(ASTNode, usize), SyntaxError> {
-    parse_util!(tokens, pos, info);
+    parse_util!(data, pos, interner);
 
     let mut next_prec = if prec + 1 < prec_amount() {prec + 1} else {1000000};
     while next_prec != 1000000 {
@@ -1850,23 +1852,23 @@ fn parse_op(
 
 
 fn parse_expr(
-    tokens: &Tokens,
+    data: &ParseData,
     pos: usize,
-    info: &ParseInfo,
+    interner: &mut Rodeo,
     skip_assignment: bool,
 ) -> Result<(ASTNode, usize), SyntaxError> {
     
 
-    parse_op(tokens, pos, info, if skip_assignment {1} else {0})
+    parse_op(data, pos, interner, if skip_assignment {1} else {0})
 }
 
 
 fn parse_statement(
-    tokens: &Tokens,
+    data: &ParseData,
     mut pos: usize,
-    info: &ParseInfo,
+    interner: &mut Rodeo,
 ) -> Result<(ASTNode, usize), SyntaxError> {
-    parse_util!(tokens, pos, info);
+    parse_util!(data, pos, interner);
 
     
 
@@ -1896,7 +1898,7 @@ fn parse_statement(
                     _ => { parse!(parse_expr(false) => let _value); format!("{}", pos); panic!() },
                 }
             }
-            _ => expected_err!("let, func, struct, mod, or enum", tok!(0), span!(0), info ),
+            _ => expected_err!("let, func, struct, mod, or enum", tok!(0), span!(0), data ),
         }
     } else {
         parse!(parse_expr(false) => let value);
@@ -1913,11 +1915,11 @@ fn parse_statement(
 }
 
 fn parse_statements(
-    tokens: &Tokens,
+    data: &ParseData,
     mut pos: usize,
-    info: &ParseInfo,
+    interner: &mut Rodeo,
 ) -> Result<(ASTNode, usize), SyntaxError> {
-    parse_util!(tokens, pos, info);
+    parse_util!(data, pos, interner);
 
     let mut statements = vec![];
     let start = span!(0);
@@ -1935,16 +1937,13 @@ fn parse_statements(
 
 
 pub fn parse(
-    tokens: &Tokens,
-    source: &EmeraldSource,
+    data: &ParseData,
+    interner: &mut Rodeo,
 ) -> Result<(ASTNode, usize), SyntaxError> {
-    parse_util!(tokens, pos, info);
-    let info = ParseInfo {
-        source: source.clone(),
-    };
+    parse_util!(data, pos, interner);
     
 
-    parse_statements(tokens, 0, &info)
+    parse_statements(data, 0, interner)
 
 }
 
