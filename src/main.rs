@@ -8,6 +8,7 @@ mod interpreter;
 mod error;
 mod builtins;
 mod generator;
+mod optimize;
 
 use std::{io::{self, Write}, collections::HashMap, path::PathBuf, fs};
 
@@ -129,6 +130,8 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
             
             globals.init_global(base_scope, &data.source);
 
+            
+
 
             use std::time::Instant;
             let start = Instant::now();
@@ -140,6 +143,9 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                 &source,
             );
             let duration = start.elapsed();
+            // for (i, (v, _)) in &globals.values {
+            //     println!("{:?}: {:?}", i, v.value)
+            // }
 
             println!("penis: {:?}", duration);
 
@@ -184,7 +190,7 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
                         println!("{}", ansi_term::Color::RGB(255, 175, 0).bold().paint( globals.get(pos).value.to_str(&globals, &mut vec![]) ))
                     }
 
-                    generate_datapack(&globals);
+                    generate_datapack(&mut globals);
 
                     true
                 },
@@ -219,7 +225,6 @@ fn run(code: String, source: EmeraldSource, print_return: bool) -> bool {
 fn main() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
-
 
     if true {
         let mut buf = PathBuf::new();

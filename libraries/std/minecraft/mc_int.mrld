@@ -102,7 +102,7 @@ impl MCInt {
             number -> {
                 if other.is_int() {
                     let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
-                    command("scoreboard players set " + str + " " + string(other));
+                    on_load("scoreboard players set " + str + " " + string(other));
                     command("scoreboard players operation " + self.str() + " *= " + str);
                 } else {
                     self = (self.to_float() * MCFloat::new(other)).whole;
@@ -121,7 +121,7 @@ impl MCInt {
             number -> {
                 if other.is_int() {
                     let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
-                    command("scoreboard players set " + str + " " + string(other));
+                    on_load("scoreboard players set " + str + " " + string(other));
                     command("scoreboard players operation " + self.str() + " /= " + str);
                 } else {
                     self = (self.to_float() / MCFloat::new(other)).whole;
@@ -139,7 +139,7 @@ impl MCInt {
         if other is number {
             let other = floor(other);
             let str = (if (other < 0) "n_int_" + string(-other) else "int_" + string(other)) + " mrld_store";
-            command("scoreboard players set " + str + " " + string(other));
+            on_load("scoreboard players set " + str + " " + string(other));
             command("scoreboard players operation " + self.str() + " %= " + str);
         } else {
             command("scoreboard players operation " + self.str() + " %= " + other.str());
@@ -270,6 +270,14 @@ impl MCInt {
             step: 1,
         }
     },
+    
+    _unary_range_: (self) => {
+        return ScoreRange::{
+            start: 0,
+            end: self,
+            step: 1,
+        }
+    },
 
 }
 
@@ -280,8 +288,8 @@ impl ScoreRange {
             throw "Runtime ranges cannot have undefined ends";
         }
         return ScoreRange::{
-            start: r.start,
-            end: r.end,
+            start: r.start.unwrap(),
+            end: r.end.unwrap(),
             step: r.step,
         }
     },
@@ -293,6 +301,17 @@ impl ScoreRange {
             step: v,
         }
     },
+
+    _for_: (self, code) => {
+        let i = MCInt::new(0);
+        i = self.start;
+        (i < self.end).then(!{
+            code(i);
+            i += self.step;
+            (i < self.end).then($);
+        });
+    }
+
 }
 
 

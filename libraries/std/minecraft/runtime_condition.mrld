@@ -39,7 +39,7 @@ impl RuntimeCondition {
                                     }
                                 }
 
-                                command("execute if score " + left.str() + " " + cond + " run " + f.str);
+                                command_if("score " + left.str() + " " + cond, f);
                             },
                             MCInt -> {
                                 cond = match comp {
@@ -49,7 +49,7 @@ impl RuntimeCondition {
                                     case CompType:Lesser -> "< " + right.str(),
                                     case CompType:LesserEq -> "<= " + right.str(),
                                 }
-                                command("execute if score " + left.str() + " " + cond + " run " + f.str);
+                                command_if("score " + left.str() + " " + cond, f);
                             },
                             MCFloat -> {
                                 let diff = right - left;
@@ -91,7 +91,7 @@ impl RuntimeCondition {
                 if cond_check > 0 {f!;}
             },
             case RuntimeCondition:IsBlock { pos, id } -> {
-                command("execute if block " + string(pos.x) + " " + string(pos.y) + " " + string(pos.z) + " " + id + " run " + f.str);
+                command_if("block " + string(pos.x) + " " + string(pos.y) + " " + string(pos.z) + " " + id, f);
             },
         }
     },

@@ -2,12 +2,12 @@
 
 
 impl array {
-    is_empty: (self) => self.length == 0,
+    is_empty: (self) -> bool self.length == 0,
     push: (self, el) => self += [el],
     pop: (
         self,
         index: number = -1,
-    ) => {
+    ) -> _ {
         let index = index %% self.length;
         let popped = self[index];
         pop_index(self, index);
@@ -16,7 +16,7 @@ impl array {
     max: (
         self,
         f: (_) -> number = x => x,
-    ) => {
+    ) -> _ {
         let max = self[0];
 
         for i of self {
@@ -29,7 +29,7 @@ impl array {
     min: (
         self,
         f: (_) -> number = x => x,
-    ) => {
+    ) -> _ {
         let max = self[0];
 
         for i of self {
@@ -39,16 +39,16 @@ impl array {
 
         return max;
     },
-    contains: (self, el) => el in self,
+    contains: (self, el) -> bool el in self,
     interlace: (
         self,
         s: string = "",
-    ) => s.join(self),
+    ) -> string s.join(self),
     index: (
         self,
         el,
         from: number = 0,
-    ) => {
+    ) -> #[number] {
         for i of from..self.length {
             if self[i] == el
                 return #(i);
@@ -59,7 +59,7 @@ impl array {
         self,
         el,
         until: number = 0,
-    ) => {
+    ) -> #[number] {
         for i of (self.length - 1)..(-1)..until {
             if self[i] == el
                 return #(i);
@@ -69,7 +69,7 @@ impl array {
     index_all: (
         self,
         el,
-    ) => {
+    ) -> #[number] {
         let occurences = [];
         for i of ..self.length {
             if self[i] == el
@@ -78,7 +78,7 @@ impl array {
         return occurences;
     },
     clear: (self) => self = [],
-    reversed: (self) => {
+    reversed: (self) -> array {
         if self.length == 0
             return [];
         let ret = [];
@@ -89,7 +89,7 @@ impl array {
     map: (
         self,
         f: (_) -> _,
-    ) => {
+    ) -> array {
         let out = [];
         for i of self
             out.push(f(i));
@@ -98,7 +98,7 @@ impl array {
     filter: (
         self,
         f: (_) -> bool,
-    ) => {
+    ) -> array {
         let out = [];
         for i of self
             if f(i)
@@ -108,7 +108,7 @@ impl array {
     partition: (
         self,
         f: (_) -> bool,
-    ) => {
+    ) -> tuple[array, array] {
         let a = [];
         let b = [];
         for i of self {
@@ -121,7 +121,7 @@ impl array {
     },
     unique: (
         self,
-    ) => {
+    ) -> array {
         let appeared = [];
         for i of self
             if !(i in appeared)
@@ -131,7 +131,7 @@ impl array {
     l_fold: (
         self,
         f: (_, _) -> _,
-    ) => {
+    ) -> _ {
         let acum = self[0];
         for iter of 1..self.length {
             acum = f(acum, self[iter]);
@@ -141,7 +141,7 @@ impl array {
     r_fold: (
         self,
         f: (_, _) -> _,
-    ) => {
+    ) -> _ {
         let acum = self[-1];
         for iter of (self.length - 1)..(-1)..0 {
             acum = f(self[iter], acum);
@@ -151,7 +151,7 @@ impl array {
     any: (
         self,
         f: (_) -> bool,
-    ) => {
+    ) -> bool {
         let out = [];
         for i of self
             if f(i)
@@ -161,7 +161,7 @@ impl array {
     all: (
         self,
         f: (_) -> bool,
-    ) => {
+    ) -> bool {
         let out = [];
         for i of self
             if !f(i)
@@ -171,7 +171,7 @@ impl array {
     sorted: (
         self,
         comp: (_, _) -> bool = (a, b) => a <= b,
-    ) => {
+    ) -> array {
         if self.length <= 1
             return self;
         let arr = self;
@@ -187,7 +187,7 @@ impl array {
     },
     flatten: (
         self
-    ) => {
+    ) -> array {
         let output = [];
 
         for i of self {
@@ -204,7 +204,7 @@ impl array {
     enumerate: (
         self,
         dict_form: bool = false,
-    ) => {
+    ) -> array {
         if dict_form {
             return array(0..self.length).map(i => {
                 index: i,
@@ -213,7 +213,7 @@ impl array {
         }
         return array(0..self.length).map(i => (i, self[i]));
     },
-    rand: (self) => {
+    rand: (self) -> _ {
         return self[rand_int(0, self.length)];
     }
     

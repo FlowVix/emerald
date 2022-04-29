@@ -15,7 +15,7 @@ impl World {
     set_block: (pos: mc_vector, id: string) => {
         command("setblock " + string(pos.x) + " " + string(pos.y) + " " + string(pos.z) + " " + id);
     },
-    if_block: (pos: mc_vector, id: string) => {
+    is_block: (pos: mc_vector, id: string) => {
         return RuntimeCondition:IsBlock {pos, id};
     },
 }

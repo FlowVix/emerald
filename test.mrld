@@ -1,12 +1,21 @@
 
 
 
+extract import? "libraries/std/lib.mrld";
 
-
-let a = 0;
-while a < 100000 {
-    a += 1;
+impl MCFloat {
+    sqrt: (self) -> MCFloat {
+        let x = MCFloat::new(1);
+        let root_calc = !{
+            x = (x + self / x);
+            x /= 2;
+        }
+        for _ of 0..5 {
+            root_calc!;
+        }
+        return x;
+    }
 }
-print(a);
 
+MC::print([MCFloat::new(64).sqrt()]);
 

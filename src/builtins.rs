@@ -9,6 +9,7 @@ use crate::interpreter::ScopePos;
 use crate::parser::ASTNode;
 use crate::value::Value;
 use convert_case::{Case, Casing};
+use crate::generator::Command;
 
 use core::time;
 use std::collections::hash_map::DefaultHasher;
@@ -31,7 +32,7 @@ macro_rules! builtin_types {
             $type_name:ident,
         )*
     ) => {
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, Copy)]
         #[derive(Eq, Hash, PartialEq)]
         pub enum BuiltinType {
             $(
@@ -437,9 +438,49 @@ builtins!{
 
     }
 
-    [Command]: command(n: String) {
+    [Command]: command(cmd: String) {
         let id = globals.get_scope(scope_id).func_id;
-        globals.insert_command(id, n);
+        globals.insert_command(id, Command::Basic(cmd));
+        Value::unit()
+    }
+    [CommandIf]: command_if(cond: String, cmd @ cmd_area) {
+        let f_id = globals.get_scope(scope_id).func_id;
+        match cmd {
+            Value::String(s) => globals.insert_command(f_id, Command::IfCall(cond, Box::new(Command::Basic(s)))),
+            Value::McFunc(id) => globals.insert_command(f_id, Command::IfCall(cond, Box::new(Command::Call(id)))),
+            other => return Err( RuntimeError::TypeMismatch {
+                expected: "string or mc_func".to_string(),
+                found: other.type_str(globals),
+                area: cmd_area.clone(),
+                defs: vec![(other.type_str(globals), cmd_area)],
+            } ),
+        }
+        Value::unit()
+    }
+    [OnLoad]: on_load(cmd @ cmd_area) {
+        match cmd {
+            Value::String(s) => globals.on_load_command(Command::Basic(s)),
+            Value::McFunc(id) => globals.on_load_command(Command::Call(id)),
+            other => return Err( RuntimeError::TypeMismatch {
+                expected: "string or mc_func".to_string(),
+                found: other.type_str(globals),
+                area: cmd_area.clone(),
+                defs: vec![(other.type_str(globals), cmd_area)],
+            } ),
+        }
+        Value::unit()
+    }
+    [OnTick]: on_tick(cmd @ cmd_area) {
+        match cmd {
+            Value::String(s) => globals.on_tick_command(Command::Basic(s)),
+            Value::McFunc(id) => globals.on_tick_command(Command::Call(id)),
+            other => return Err( RuntimeError::TypeMismatch {
+                expected: "string or mc_func".to_string(),
+                found: other.type_str(globals),
+                area: cmd_area.clone(),
+                defs: vec![(other.type_str(globals), cmd_area)],
+            } ),
+        }
         Value::unit()
     }
 

@@ -202,6 +202,7 @@ impl MCFloat {
                 let result = MCFloat::new(0);
                 let increment = MCFloat::new(1);
                 let i = MCInt::new(0);
+                
                 while i < 9 && _other.is_over_0() {
                     while _self.is_positive() {
                         _self.subtract(_other);

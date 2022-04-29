@@ -29,6 +29,14 @@ impl Marker {
             string(pos.x) + " " + string(pos.y) + " " + string(pos.z)
         );
     },
+    rotate: (self, h: number, v: number) => {
+        command(
+            "execute as " +
+            self.entity.cmd_str() +
+            " at @s run tp @s ~ ~ ~ ~" +
+            string(h) + " ~" + string(v)
+        );
+    },
 
     here: (self, f: mc_func) => {
         command(

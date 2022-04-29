@@ -26,7 +26,7 @@ pub struct Function {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub enum ValueType {
     Builtin(BuiltinType),
     CustomStruct(TypePos),
@@ -35,19 +35,19 @@ pub enum ValueType {
 }
 
 impl ValueType {
-    pub fn to_str(&self, globals: &Globals) -> String {
+    pub fn to_str(self, globals: &Globals) -> String {
         match self {
-            ValueType::Builtin(b) => builtin_type_str(b.clone()),
+            ValueType::Builtin(b) => builtin_type_str(b),
             ValueType::CustomStruct(id) => {
-                let CustomStruct { name, .. } = &globals.custom_structs[*id];
+                let CustomStruct { name, .. } = &globals.custom_structs[id];
                 globals.interner.resolve(name).to_string()
             },
             ValueType::CustomEnum(id) => {
-                let CustomEnum { name, .. } = &globals.custom_enums[*id];
+                let CustomEnum { name, .. } = &globals.custom_enums[id];
                 globals.interner.resolve(name).to_string()
             },
             ValueType::Module(id) => {
-                let Module { name, .. } = &globals.modules[*id];
+                let Module { name, .. } = &globals.modules[id];
                 globals.interner.resolve(name).to_string()
             },
         }
@@ -472,7 +472,7 @@ impl Value {
                 out_str
             },
             Value::Type(v) => match v {
-                ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(t.clone())),
+                ValueType::Builtin(t) => format!("<type: {}>", builtin_type_str(*t)),
                 ValueType::CustomStruct(pos) => {
                     let CustomStruct { name, .. } = &globals.custom_structs[*pos];
                     format!("<struct {:?}: {}>", pos, globals.interner.resolve(name))
@@ -606,7 +606,7 @@ impl Value {
     pub fn matches_pat(&self, p: &Pattern, globals: &Globals) -> bool {
         match p {
             Pattern::Any => true,
-            Pattern::Type(t) => ( self.typ() == t.clone() ),
+            Pattern::Type(t) => ( self.typ() == *t ),
             Pattern::Either(a, b) => self.matches_pat(a, globals) || self.matches_pat(b, globals),
             Pattern::Array(inner, n) => {
                 match self {
@@ -960,7 +960,7 @@ pub mod value_ops {
     
     pub fn is_op_raw(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<bool, RuntimeError> {
         match (&a.value, &b.value) {
-            (v, Value::Type(t)) => Ok( v.typ() == t.clone() ),
+            (v, Value::Type(t)) => Ok( v.typ() == *t ),
 
             (v, Value::Pattern(p)) => Ok( v.matches_pat(p, globals) ),
             
@@ -1464,10 +1464,10 @@ pub mod value_ops {
     pub fn either(a: &StoredValue, b: &StoredValue, area: CodeArea, globals: &mut Globals) -> Result<Value, RuntimeError> {
         match (&a.value, &b.value) {
 
-            (Value::Type(t1), Value::Type(t2)) => Ok( Value::Pattern(Pattern::Either(Box::new(Pattern::Type(t1.clone())), Box::new(Pattern::Type(t2.clone())))) ),
+            (Value::Type(t1), Value::Type(t2)) => Ok( Value::Pattern(Pattern::Either(Box::new(Pattern::Type(*t1)), Box::new(Pattern::Type(*t2)))) ),
 
             (Value::Type(t), Value::Pattern(p)) |
-            (Value::Pattern(p), Value::Type(t)) => Ok( Value::Pattern(Pattern::Either(Box::new(Pattern::Type(t.clone())), Box::new(p.clone()))) ),
+            (Value::Pattern(p), Value::Type(t)) => Ok( Value::Pattern(Pattern::Either(Box::new(Pattern::Type(*t)), Box::new(p.clone()))) ),
 
             (Value::Pattern(p1), Value::Pattern(p2)) => Ok( Value::Pattern(Pattern::Either(Box::new(p1.clone()), Box::new(p2.clone()))) ),
 
@@ -1536,17 +1536,17 @@ pub mod value_ops {
 
             (Value::Type(t1), Value::Type(t2)) => {
                 Ok(Value::Boolean(
-                    Pattern::Type(t1.clone()).in_pat(&Pattern::Type(t2.clone()))
+                    Pattern::Type(*t1).in_pat(&Pattern::Type(*t2))
                 ))
             },
             (Value::Type(t), Value::Pattern(p)) => {
                 Ok(Value::Boolean(
-                    Pattern::Type(t.clone()).in_pat(p)
+                    Pattern::Type(*t).in_pat(p)
                 ))
             },
             (Value::Pattern(p), Value::Type(t)) => {
                 Ok(Value::Boolean(
-                    p.in_pat(&Pattern::Type(t.clone()))
+                    p.in_pat(&Pattern::Type(*t))
                 ))
             },
             (Value::Pattern(p1), Value::Pattern(p2)) => {
