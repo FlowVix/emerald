@@ -78,29 +78,6 @@ impl ImplData {
 
 
 
-#[derive(Debug)]
-pub struct Collector {
-    pub marked_values: HashSet<ValuePos>,
-    pub marked_scopes: HashSet<ScopePos>,
-}
-
-// impl Collector {
-//     pub fn new(globals: &Globals) -> Self {
-//         let mut marked_scopes = HashSet::new();
-//         let mut marked_values = HashSet::new();
-//         for (i, _) in &globals.values {
-//             marked_values.insert(i);
-//         }
-//         for (i, _) in &globals.scopes {
-//             marked_scopes.insert(i);
-//         }
-//         Self {
-//             marked_values,
-//             marked_scopes,
-//         }
-//     }
-// }
-
 
 #[derive(Debug, Clone)]
 pub struct Protector {
@@ -352,6 +329,21 @@ impl Globals {
             .push(pos);
     }
 
+    pub fn discard_value(&mut self, pos: ValuePos) {
+        self.protected
+            .last_mut()
+            .unwrap()
+            .values
+            .retain(|p| *p != pos)
+    }
+    pub fn discard_scope(&mut self, pos: ScopePos) {
+        self.protected
+            .last_mut()
+            .unwrap()
+            .scopes
+            .retain(|p| *p != pos)
+    }
+
 
     pub fn get_scope(&self, scope_id: ScopePos) -> &Scope {
         &self.scopes.get(scope_id).unwrap().0
@@ -493,13 +485,6 @@ impl Globals {
             *marked = false;
         }
 
-        // for i in collector.marked_scopes {
-        //     self.scopes.remove(i);
-        // }
-        // for i in collector.marked_values {
-        //     self.values.remove(i);
-        // }
-
         self.last_amount = self.values.len();
 
     }
@@ -617,7 +602,19 @@ macro_rules! interpreter_util {
                         id,
                         None,
                     );
-                    $globals.protect_value(id);
+                    // $globals.protect_value(id, 0);
+                    $globals.protect_value(out);
+                    out
+                }
+            };
+            ($node:expr => $scope_id:expr, Up $depth:expr) => {
+                {
+                    let id = execute($node, $scope_id, $globals, $source)?;
+                    let out = $globals.clone_value(
+                        id,
+                        None,
+                    );
+                    // $globals.protect_value(id, $depth);
                     $globals.protect_value(out);
                     out
                 }
@@ -626,6 +623,13 @@ macro_rules! interpreter_util {
         #[allow(unused_macros)]
         macro_rules! protecute_raw {
             ($node:expr => $scope_id:expr) => {
+                {
+                    let id = execute($node, $scope_id, $globals, $source)?;
+                    $globals.protect_value(id);
+                    id
+                }
+            };
+            ($node:expr => $scope_id:expr, Up $depth:expr) => {
                 {
                     let id = execute($node, $scope_id, $globals, $source)?;
                     $globals.protect_value(id);
@@ -1700,7 +1704,7 @@ pub fn execute(
             globals.redef_value(ret_id, area!(source, start_node.span));
             Ok( ret_id )
         }
-        NodeType::While { cond, code } => {
+        NodeType::While { cond, code, is_do: false } => {
             let mut ret_id = globals.insert_value(
                 Value::unit(),
                 area!(source, start_node.span)
@@ -1723,12 +1727,13 @@ pub fn execute(
                 None => {
                     let mut calculated = true;
                     loop {
-                        globals.push_protected();
+                        // globals.push_protected();
                         let cond_value = if calculated { cond_value } else { execute!(cond => scope_id) };
                         calculated = false;
                         if !(value_ops::to_bool(globals.get(cond_value), area!(source, cond.span), globals)?) {
                             break;
                         }
+                        globals.discard_value(ret_id);
                         ret_id = protecute!(code => scope_id);
                         match globals.exits.last() {
                             Some(
@@ -1736,12 +1741,12 @@ pub fn execute(
                             ) => {
                                 ret_id = *v;
                                 globals.exits.pop();
-                                ret!(Ok( ret_id ), Pop: 2);
+                                ret!(Ok( ret_id ), Pop: 1);
                             },
                             Some(
                                 Exit::Return(_, _)
                             ) => {
-                                ret!(Ok( ret_id ), Pop: 2);
+                                ret!(Ok( ret_id ), Pop: 1);
                             },
                             Some(
                                 Exit::Continue(_)
@@ -1750,7 +1755,67 @@ pub fn execute(
                             },
                             None => (),
                         }
-                        globals.pop_protected();
+                        // globals.pop_protected();
+                    }
+                }
+            }
+
+            globals.redef_value(ret_id, area!(source, start_node.span));
+            Ok( ret_id )
+        }
+        NodeType::While { cond, code, is_do: true } => {
+            let mut ret_id = globals.insert_value(
+                Value::unit(),
+                area!(source, start_node.span)
+            ); 
+            globals.protect_value(ret_id);
+
+            let cond_value = protecute!(cond => scope_id);
+            match globals.get_method(cond_value, "_do_while_") {
+                Some(f) => {
+                    let code_f = protecute!( &ASTNode {
+                        span: node.span,
+                        node: NodeType::Lambda { args: vec![], header_area: area!(source, node.span), code: code.clone(), ret_pattern: None },
+                    } => scope_id);
+                    let cond_f = protecute!( &ASTNode {
+                        span: node.span,
+                        node: NodeType::Lambda { args: vec![], header_area: area!(source, node.span), code: cond.clone(), ret_pattern: None },
+                    } => scope_id);
+                    ret_id = run_func!(vec![cond_value, code_f, cond_f], &f);
+                },
+                None => {
+                    ret_id = protecute!(code => scope_id);
+                    let mut calculated = true;
+                    loop {
+                        // globals.push_protected();
+                        let cond_value = if calculated { cond_value } else { execute!(cond => scope_id) };
+                        calculated = false;
+                        if !(value_ops::to_bool(globals.get(cond_value), area!(source, cond.span), globals)?) {
+                            break;
+                        }
+                        globals.discard_value(ret_id);
+                        ret_id = protecute!(code => scope_id);
+                        match globals.exits.last() {
+                            Some(
+                                Exit::Break(v, _)
+                            ) => {
+                                ret_id = *v;
+                                globals.exits.pop();
+                                ret!(Ok( ret_id ), Pop: 1);
+                            },
+                            Some(
+                                Exit::Return(_, _)
+                            ) => {
+                                ret!(Ok( ret_id ), Pop: 1);
+                            },
+                            Some(
+                                Exit::Continue(_)
+                            ) => {
+                                globals.exits.pop();
+                            },
+                            None => (),
+                        }
+                        // globals.pop_protected();
                     }
                 }
             }
@@ -1770,7 +1835,7 @@ pub fn execute(
 
             macro_rules! for_loop {
                 ($i:expr) => {
-                    globals.push_protected();
+                    // globals.push_protected();
                     let derived = globals.derive_scope(scope_id, globals.get_scope(scope_id).func_id);
                     {
                         let temp = globals.insert_value(
@@ -1788,6 +1853,7 @@ pub fn execute(
                         }
 
                     }
+                    globals.discard_value(ret_id);
                     ret_id = execute!(code => derived);
                     match globals.exits.last() {
                         Some(
@@ -1795,12 +1861,12 @@ pub fn execute(
                         ) => {
                             ret_id = *v;
                             globals.exits.pop();
-                            ret!(Ok( ret_id ), Pop: 2);
+                            ret!(Ok( ret_id ), Pop: 1);
                         },
                         Some(
                             Exit::Return(_, _)
                         ) => {
-                            ret!(Ok( ret_id ), Pop: 2);
+                            ret!(Ok( ret_id ), Pop: 1);
                         },
                         Some(
                             Exit::Continue(_)
@@ -1809,7 +1875,7 @@ pub fn execute(
                         },
                         None => (),
                     }
-                    globals.pop_protected();
+                    // globals.pop_protected();
                 }
             }
 
@@ -3521,7 +3587,6 @@ pub fn execute(
 
                 macro_rules! for_loop {
                     ($i:expr) => {
-                        globals.push_protected();
                         v_vec.push($i);
                         if is_last {
                             let derived = globals.derive_scope(base_scope, globals.get_scope(base_scope).func_id);
@@ -3553,7 +3618,6 @@ pub fn execute(
                                     id,
                                     None,
                                 );
-                                globals.protect_value(id);
                                 globals.protect_value(out);
                                 out
                             };
@@ -3566,7 +3630,6 @@ pub fn execute(
                                             id,
                                             None,
                                         );
-                                        globals.protect_value(id);
                                         globals.protect_value(out);
                                         out
                                     };
@@ -3591,7 +3654,6 @@ pub fn execute(
                             )?
                         }
                         v_vec.pop();
-                        globals.pop_protected();
                     }
                 }
 

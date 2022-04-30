@@ -66,6 +66,9 @@ const BASE_DIR: &str = r#"/Users/flow/Library/Application Support/minecraft/save
 
 pub fn generate_datapack(globals: &mut Globals) {
 
+    globals.load_func.insert(0, Command::Basic("scoreboard objectives add mrld_store dummy".to_string()));
+
+
     fs::create_dir_all(BASE_DIR.to_string() + "emeraldgen/data").unwrap();
 
     fs::remove_dir_all(BASE_DIR.to_string() + "emeraldgen/data").unwrap();

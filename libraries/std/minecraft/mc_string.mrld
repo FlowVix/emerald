@@ -18,13 +18,15 @@ impl MCString {
             MCInt -> {
                 let s = MCString::new();
                 let _v = v.abs();
-                MC::do_while_loop(() -> RuntimeCondition _v > 0, !{
+                
+                do {
                     let d = _v % 10;
                     d.to_const(0..10, i => {
                         command("data modify storage mrld str_" + string(s.id) + " prepend value \"" + string(i) + "\"");
                     });
                     _v /= 10;
-                });
+                } while _v > 0;
+
                 if v < 0 {
                     command("data modify storage mrld str_" + string(s.id) + " prepend value \"-\"");
                 }

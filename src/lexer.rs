@@ -150,6 +150,8 @@ pub enum Token {
 
     #[token("while")]
     While,
+    #[token("do")]
+    Do,
     #[token("loop")]
     Loop,
     #[token("for")]
@@ -304,6 +306,7 @@ impl Token {
             // Token::Mut => "mut",
             Token::Func => "func",
             Token::While => "while",
+            Token::Do => "do",
             Token::Loop => "loop",
             Token::For => "for",
             Token::Of => "of",

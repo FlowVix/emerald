@@ -58,7 +58,7 @@ pub enum NodeType {
     StatementList { statements: Vec<ASTNode> },
     Block { code: Box<ASTNode>, typ: BlockType },
     If {cond: Box<ASTNode>, code: Box<ASTNode>, else_branch: Option<Box<ASTNode>>},
-    While {cond: Box<ASTNode>, code: Box<ASTNode> },
+    While {cond: Box<ASTNode>, code: Box<ASTNode>, is_do: bool },
     For { left: Box<ASTNode>, iter: Box<ASTNode>, code: Box<ASTNode> },
     Loop { code: Box<ASTNode> },
     Call { base: Box<ASTNode>, args: Vec<ASTNode>, args_area: CodeArea },
@@ -1069,7 +1069,14 @@ unit_parse_helper!{
         pos += 1;
         parse!(parse_expr(false) => let cond);
         parse!(parse_expr(false) => let code);
-        ret!( NodeType::While { cond: Box::new(cond), code: Box::new(code) } => start.0, span!(-1).1 );
+        ret!( NodeType::While { cond: Box::new(cond), code: Box::new(code), is_do: false } => start.0, span!(-1).1 );
+    },
+    [Token::Do] => {
+        pos += 1;
+        parse!(parse_expr(false) => let code);
+        check_tok!(While else "while");
+        parse!(parse_expr(false) => let cond);
+        ret!( NodeType::While { cond: Box::new(cond), code: Box::new(code), is_do: true } => start.0, span!(-1).1 );
     },
     [Token::Loop] => {
         pos += 1;
@@ -2006,9 +2013,10 @@ impl Hash for NodeType {
                 code.hash(state);
                 else_branch.hash(state);
             },
-            NodeType::While { cond, code } => {
+            NodeType::While { cond, code, is_do } => {
                 cond.hash(state);
                 code.hash(state);
+                is_do.hash(state);
             },
             NodeType::For { left, iter, code } => {
                 left.hash(state);

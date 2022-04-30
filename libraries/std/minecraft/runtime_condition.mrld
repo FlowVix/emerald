@@ -133,6 +133,12 @@ impl RuntimeCondition {
             cond().then($);
         });
     },
+    _do_while_: (self, code, cond) => {
+        !{
+            code();
+            cond().then($);
+        }!;
+    },
 
 
 }
