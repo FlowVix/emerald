@@ -494,8 +494,8 @@ impl Globals {
         if !self.values.get(value_id).unwrap().1 {
             self.values.get_mut(value_id).unwrap().1 = true;
 
-            let mut value_ids: HashSet<ValuePos> = HashSet::new();
-            let mut scope_ids: HashSet<ScopePos> = HashSet::new();
+            let mut value_ids: Vec<ValuePos> = Vec::new();
+            let mut scope_ids: Vec<ScopePos> = Vec::new();
 
             self.get(value_id).value.get_references(self, &mut value_ids, &mut scope_ids);
             for i in scope_ids {

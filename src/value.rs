@@ -696,14 +696,14 @@ impl Value {
     }
 
 
-    pub fn get_references(&self, globals: &Globals, values: &mut HashSet<ValuePos>, scopes: &mut HashSet<ScopePos>) {
+    pub fn get_references(&self, globals: &Globals, values: &mut Vec<ValuePos>, scopes: &mut Vec<ScopePos>) {
         match self {
             Value::Function(Function {
                 args,
                 parent_scope,
                 ..
             }) => {
-                scopes.insert(*parent_scope);
+                scopes.push(*parent_scope);
                 for FuncArg {
                     default: d,
                     ..
@@ -713,36 +713,36 @@ impl Value {
                     //     globals.get(*id).value.get_references(globals, values, scopes);
                     // }
                     if let Some(id) = d {
-                        values.insert(*id);
+                        values.push(*id);
                         globals.get(*id).value.get_references(globals, values, scopes);
                     }
                 }
             },
             Value::Array(arr) => {
                 for i in arr {
-                    values.insert(*i);
+                    values.push(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
             },
             Value::Tuple(arr) => {
                 for i in arr {
-                    values.insert(*i);
+                    values.push(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
             },
             Value::Dictionary(map) => {
                 for i in map.values() {
-                    values.insert(*i);
+                    values.push(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
             },
             Value::Option(Some(i)) => {
-                values.insert(*i);
+                values.push(*i);
                 globals.get(*i).value.get_references(globals, values, scopes);
             },
             Value::StructInstance { fields, .. } => {
                 for i in fields.values() {
-                    values.insert(*i);
+                    values.push(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
             },
@@ -751,13 +751,13 @@ impl Value {
                     InstanceVariant::Unit => (),
                     InstanceVariant::Tuple(arr) => {
                         for i in arr {
-                            values.insert(*i);
+                            values.push(*i);
                             globals.get(*i).value.get_references(globals, values, scopes);
                         }
                     },
                     InstanceVariant::Struct { fields } => {
                         for i in fields.values() {
-                            values.insert(*i);
+                            values.push(*i);
                             globals.get(*i).value.get_references(globals, values, scopes);
                         }
                     },
@@ -765,7 +765,7 @@ impl Value {
             },
             Value::Selector( Selector {args, .. }) => {
                 for (_, i) in args{
-                    values.insert(*i);
+                    values.push(*i);
                     globals.get(*i).value.get_references(globals, values, scopes);
                 }
             },

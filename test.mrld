@@ -1,12 +1,11 @@
 
 
-extract import? "libraries/std/lib.mrld";
+let a = 0;
+while a < 100000 {
+    a += 1;
+}
+print(a);
 
 
 
-let a = MCInt::new(5);
-let b = MCInt::new(-3);
-let c = MCInt::new(0);
-
-MC::print([a, " ", b, " ", c]);
 
